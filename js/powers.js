@@ -215,8 +215,272 @@
         }
         if (!n) { snd('error'); return 0; }
         snd('plague'); return this.cost;
+      } },
+
+    // ---- Godhead: powers of the One True God ----
+    { id: 'voice', name: 'Divine Voice', icon: '🗣️', cat: 'godhead', cost: 5, radius: 0, cont: false,
+      color: 'rgba(255,240,200,0.95)',
+      desc: 'Speak into a mortal mind. They are changed by hearing you — and may spread the word.',
+      apply(G, wx, wy) {
+        if (G.faith < this.cost) { snd('error'); return 0; }
+        const u = nearestUnit(G, wx, wy, 2.5);
+        if (!u) { snd('error'); return 0; }
+        u.karma += 5;
+        const R = Sim.RACES[u.race];
+        if (PD.Society) {
+          PD.Society.hist(G.sim, `You spoke to ${u.name}. They fell to their knees.`, 'faith');
+          if (R.sentient && Math.random() < 0.3) {
+            PD.Society.hist(G.sim, `${u.name} now preaches of the Voice they heard.`, 'faith');
+            u.prof = 3; // priest
+          }
+        }
+        FX.shock(u.x, u.y, 2, '#fff2a0'); snd('bless'); return this.cost;
+      } },
+    { id: 'empower', name: 'Empower Hero', icon: '🦸', cat: 'godhead', cost: 60, radius: 0, cont: false,
+      color: 'rgba(255,220,80,0.95)',
+      desc: 'Fill a mortal with divine might. They become a Paragon — a hero of legend who hunts monsters.',
+      apply(G, wx, wy) {
+        if (G.faith < this.cost) { snd('error'); return 0; }
+        const u = nearestUnit(G, wx, wy, 2.5);
+        if (!u || !Sim.RACES[u.race].sentient) { snd('error'); return 0; }
+        PD.Society.empower(G.sim, u, 1);
+        snd('levelup'); return this.cost;
+      } },
+    { id: 'miracle', name: 'Miracle', icon: '🌟', cat: 'godhead', cost: 25, radius: 6, cont: false,
+      color: 'rgba(255,250,220,0.95)',
+      desc: 'A great working: the sick healed, the hungry fed, the fields made fertile, the dying saved.',
+      apply(G, wx, wy) {
+        if (G.faith < this.cost) { snd('error'); return 0; }
+        Sim.blessArea(G.sim, wx, wy, this.radius);
+        const world = G.world, R = this.radius;
+        for (let dy = -R; dy <= R; dy++) for (let dx = -R; dx <= R; dx++) {
+          if (dx * dx + dy * dy > R * R) continue;
+          const x = Math.floor(wx) + dx, y = Math.floor(wy) + dy;
+          if (!W.inBounds(world, x, y)) continue;
+          const i = W.idx(world, x, y);
+          if (W.isLand(world.biome[i])) world.fert[i] = PD.clamp(world.fert[i] + 0.2, 0, 1);
+          world.fire[i] = 0;
+        }
+        for (const v of G.sim.villages) {
+          if (W.wdist(world, v.x, v.y, wx, wy) < R + 3) v.food += 40;
+        }
+        if (PD.Society) { PD.Society.hist(G.sim, 'A miracle. The people will tell of this for generations.', 'faith'); PD.Society.reactToMiracle(G.sim, 'bless'); }
+        FX.shock(wx, wy, R, '#fff8d0'); FX.shock(wx, wy, R * 0.5, '#ffe680'); snd('levelup'); return this.cost;
+      } },
+    { id: 'stabilize', name: 'Calm the Core', icon: '🌍', cat: 'godhead', cost: 200, radius: 0, cont: false,
+      color: 'rgba(120,220,160,0.95)',
+      desc: 'Reach into a doomed planet and still its dying heart. Costly — but a whole world lives.',
+      apply(G, wx, wy) {
+        if (G.faith < this.cost) { snd('error'); return 0; }
+        const p = PD.Cosmos.active();
+        if (!p || p.meta.doom == null) { snd('error'); return 0; }
+        PD.Cosmos.stabilize(p);
+        FX.shock(wx, wy, 12, '#78dca0'); snd('levelup'); return this.cost;
+      } },
+    { id: 'evolve', name: 'Guide Evolution', icon: '🧬', cat: 'godhead', cost: 30, radius: 0, cont: false,
+      color: 'rgba(140,220,200,0.95)',
+      desc: 'On a primordial world: nudge the soup toward sapience. You created evolution, after all.',
+      apply(G, wx, wy) {
+        if (G.faith < this.cost) { snd('error'); return 0; }
+        const p = PD.Cosmos.active();
+        if (!p || p.meta.evo == null) { snd('error'); return 0; }
+        PD.Cosmos.advanceEvolution(p);
+        FX.shock(wx, wy, 8, '#8cdcc8'); snd('levelup'); return this.cost;
+      } },
+
+    // ---- Dominion: political meddling ----
+    { id: 'crown', name: 'Install Leader', icon: '👑', cat: 'politic', cost: 20, radius: 0, cont: false,
+      color: 'rgba(240,208,64,0.95)',
+      desc: 'Depose a nation\'s leader and raise a devout soul in their place.',
+      apply(G, wx, wy) {
+        if (G.faith < this.cost) { snd('error'); return 0; }
+        const n = nationAt(G, wx, wy);
+        if (!n) { snd('error'); return 0; }
+        const old = n.leaderName;
+        n.leaderName = Sim.personName(n.race, G.sim.rng);
+        n.leaderTrait = 'devout';
+        PD.Society.hist(G.sim, `By divine decree, ${old} falls. ${n.leaderName} the devout now leads ${n.name}.`, 'politics');
+        snd('levelup'); return this.cost;
+      } },
+    { id: 'peace', name: 'Force Peace', icon: '🕊️', cat: 'politic', cost: 30, radius: 0, cont: false,
+      color: 'rgba(200,230,255,0.95)',
+      desc: 'End every war a nation is waging. Swords into ploughshares — whether they like it or not.',
+      apply(G, wx, wy) {
+        if (G.faith < this.cost) { snd('error'); return 0; }
+        const n = nationAt(G, wx, wy);
+        if (!n) { snd('error'); return 0; }
+        const soc = PD.Society.ensure(G.sim);
+        for (const m of soc.nations) {
+          m.warWith = m.warWith.filter(id => id !== n.id);
+          if (n.relations[m.id] != null) n.relations[m.id] = Math.max(n.relations[m.id], 10);
+        }
+        n.warWith = [];
+        for (const vid of n.villages) { const v = Sim.villageById(G.sim, vid); if (v) v.rival = -1; }
+        PD.Society.hist(G.sim, `A stillness falls over ${n.name}'s armies. The war is simply… over.`, 'politics');
+        snd('bless'); return this.cost;
+      } },
+    { id: 'incite', name: 'Incite War', icon: '⚔️', cat: 'politic', cost: 25, radius: 0, cont: false,
+      color: 'rgba(224,80,58,0.95)',
+      desc: 'Whisper grievances into a nation\'s ear. They will find an enemy.',
+      apply(G, wx, wy) {
+        if (G.faith < this.cost) { snd('error'); return 0; }
+        const n = nationAt(G, wx, wy);
+        const soc = PD.Society.ensure(G.sim);
+        if (!n || soc.nations.length < 2) { snd('error'); return 0; }
+        let foe = null, fd = 1e9;
+        for (const m of soc.nations) {
+          if (m.id === n.id || n.warWith.indexOf(m.id) >= 0) continue;
+          const d = Math.abs(m.id - n.id);
+          if (d < fd) { fd = d; foe = m; }
+        }
+        if (!foe) { snd('error'); return 0; }
+        n.relations[foe.id] = -100; foe.relations[n.id] = -100;
+        n.warWith.push(foe.id); foe.warWith.push(n.id);
+        PD.Society.hist(G.sim, `WAR! Whipped to fury by whispers, ${n.name} marches on ${foe.name}.`, 'war');
+        snd('war'); return this.cost;
+      } },
+    { id: 'revolt', name: 'Revolution', icon: '🔥', cat: 'politic', cost: 25, radius: 0, cont: false,
+      color: 'rgba(255,140,60,0.95)',
+      desc: 'Overturn a nation\'s government. Monarchy, republic, theocracy — spin the wheel of history.',
+      apply(G, wx, wy) {
+        if (G.faith < this.cost) { snd('error'); return 0; }
+        const n = nationAt(G, wx, wy);
+        if (!n) { snd('error'); return 0; }
+        n.gov = (n.gov + 1 + (Math.random() * 2 | 0)) % PD.Society.GOVERNMENTS.length;
+        n.leaderName = Sim.personName(n.race, G.sim.rng);
+        PD.Society.hist(G.sim, `REVOLUTION in ${n.name}! It is now a ${PD.Society.GOVERNMENTS[n.gov]} under ${n.leaderName}.`, 'politics');
+        snd('war'); return this.cost;
+      } },
+
+    // ---- Testament: biblical workings ----
+    { id: 'flood', name: 'Great Flood', icon: '🌊', cat: 'bible', cost: 120, radius: 0, cont: false,
+      color: 'rgba(60,120,220,0.95)',
+      desc: 'Drown the world for its wickedness. The waters rise for a season — the righteous are spared.',
+      apply(G, wx, wy) {
+        if (G.faith < this.cost) { snd('error'); return 0; }
+        if (G.floodT > 0) { snd('error'); return 0; }
+        G.startFlood();
+        snd('quake'); return this.cost;
+      } },
+    { id: 'plagues', name: 'Ten Plagues', icon: '🐸', cat: 'bible', cost: 60, radius: 8, cont: false,
+      color: 'rgba(150,200,80,0.95)',
+      desc: 'Visit a full suite of plagues on a land: pestilence, blight, darkness, and worse.',
+      apply(G, wx, wy) {
+        if (G.faith < this.cost) { snd('error'); return 0; }
+        const R = this.radius, world = G.world;
+        Sim.infectArea(G.sim, wx, wy, R);
+        for (let dy = -R; dy <= R; dy++) for (let dx = -R; dx <= R; dx++) {
+          if (dx * dx + dy * dy > R * R) continue;
+          const x = Math.floor(wx) + dx, y = Math.floor(wy) + dy;
+          if (!W.inBounds(world, x, y)) continue;
+          const i = W.idx(world, x, y);
+          world.fert[i] = Math.max(0, world.fert[i] - 0.3); // locusts
+          W.markTile(world, i);
+        }
+        for (const v of G.sim.villages) {
+          if (W.wdist(world, v.x, v.y, wx, wy) < R + 3) { v.food = Math.max(0, v.food - 80); }
+        }
+        if (PD.Society) { PD.Society.hist(G.sim, 'Plagues upon plagues. The land groans under judgement.', 'war'); PD.Society.reactToMiracle(G.sim, 'plague'); }
+        FX.shock(wx, wy, R, '#96c850'); snd('plague'); return this.cost;
+      } },
+    { id: 'prophet', name: 'Anoint Prophet', icon: '📜', cat: 'bible', cost: 30, radius: 0, cont: false,
+      color: 'rgba(230,210,160,0.95)',
+      desc: 'Choose a mortal to carry your word. Faith spreads in their footsteps.',
+      apply(G, wx, wy) {
+        if (G.faith < this.cost) { snd('error'); return 0; }
+        const u = nearestUnit(G, wx, wy, 2.5);
+        if (!u || !Sim.RACES[u.race].sentient) { snd('error'); return 0; }
+        const soc = PD.Society.ensure(G.sim);
+        let f = soc.faiths[0];
+        if (!f) {
+          f = { id: 1, name: 'The Word of the One', race: u.race, followers: 0, fervor: 0.8, prophetName: u.name, commandments: 0 };
+          soc.faiths.push(f);
+        } else { f.prophetName = u.name; f.fervor = PD.clamp(f.fervor + 0.3, 0, 1); }
+        u.karma += 10; u.prof = 3;
+        const n = u.village >= 0 ? PD.Society.nationOf(G.sim, u.village) : null;
+        if (n) n.faithId = f.id;
+        PD.Society.hist(G.sim, `${u.name} is anointed Prophet of the ${f.name}. Their eyes burn with purpose.`, 'faith');
+        FX.shock(u.x, u.y, 3, '#e6d2a0'); snd('bless'); return this.cost;
+      } },
+    { id: 'commandments', name: 'Commandments', icon: '🪨', cat: 'bible', cost: 50, radius: 0, cont: false,
+      color: 'rgba(200,200,210,0.95)',
+      desc: 'Hand down the law on tablets of stone. Every faith remembers — and tithes.',
+      apply(G, wx, wy) {
+        if (G.faith < this.cost) { snd('error'); return 0; }
+        const soc = PD.Society.ensure(G.sim);
+        if (!soc.faiths.length) { snd('error'); return 0; }
+        for (const f of soc.faiths) { f.commandments++; f.fervor = PD.clamp(f.fervor + 0.15, 0, 1); }
+        PD.Society.hist(G.sim, 'Stone tablets descend from the sky. The law is written. Faith income rises.', 'faith');
+        FX.shock(wx, wy, 5, '#c8c8d2'); snd('levelup'); return this.cost;
+      } },
+    { id: 'babel', name: 'Confusion', icon: '🗼', cat: 'bible', cost: 40, radius: 0, cont: false,
+      color: 'rgba(210,170,120,0.95)',
+      desc: 'They grew proud. Scatter a nation into squabbling successor states, each speaking differently.',
+      apply(G, wx, wy) {
+        if (G.faith < this.cost) { snd('error'); return 0; }
+        const n = nationAt(G, wx, wy);
+        if (!n || n.villages.length < 2) { snd('error'); return 0; }
+        const soc = PD.Society.ensure(G.sim);
+        const kept = n.villages.slice(0, 1);
+        const scattered = n.villages.slice(1);
+        n.villages = kept;
+        for (const vid of scattered) {
+          const v = Sim.villageById(G.sim, vid);
+          if (!v) continue;
+          soc.nations.push({
+            id: soc.nextNationId++, name: Sim.villageName(v.race, G.sim.rng) + ' Splinter', race: v.race,
+            gov: 0, leaderName: Sim.personName(v.race, G.sim.rng), leaderTrait: 'proud',
+            villages: [vid], era: Math.max(0, n.era - 1), science: 0, relations: {}, warWith: [], revolCd: 300, faithId: -1
+          });
+        }
+        PD.Society.hist(G.sim, `${n.name} wakes speaking many tongues. The nation shatters into ${scattered.length + 1} peoples.`, 'politics');
+        snd('quake'); return this.cost;
+      } },
+
+    // ---- Tempest: weather mastery ----
+    { id: 'storm', name: 'Thunderstorm', icon: '⛈️', cat: 'wrath', cost: 15, radius: 8, cont: false,
+      color: 'rgba(140,160,220,0.95)',
+      desc: 'Roll a storm over the land: rain, wind, and wandering bolts of lightning.',
+      apply(G, wx, wy) {
+        if (G.faith < this.cost) { snd('error'); return 0; }
+        G.setWeather('rain', 400);
+        G.storm = { x: wx, y: wy, r: this.radius, t: 200 };
+        snd('lightning'); return this.cost;
+      } },
+    { id: 'tornado', name: 'Tornado', icon: '🌪️', cat: 'wrath', cost: 35, radius: 2, cont: false,
+      color: 'rgba(180,190,200,0.95)',
+      desc: 'Spin up a wandering vortex that chews through everything in its path.',
+      apply(G, wx, wy) {
+        if (G.faith < this.cost) { snd('error'); return 0; }
+        G.tornado = { x: wx, y: wy, vx: (Math.random() - 0.5) * 0.3, vy: (Math.random() - 0.5) * 0.2, t: 350 };
+        snd('quake'); return this.cost;
       } }
   ];
+
+  // helpers for targeted powers
+  function nearestUnit(G, wx, wy, r) {
+    let best = null, bd = r;
+    for (const u of G.sim.units) {
+      if (u.dead) continue;
+      const d = W.wdist(G.world, u.x + 0.5, u.y + 0.5, wx, wy);
+      if (d < bd) { bd = d; best = u; }
+    }
+    return best;
+  }
+  function nationAt(G, wx, wy) {
+    if (!PD.Society) return null;
+    const ix = Math.floor(wx), iy = Math.floor(wy);
+    if (!W.inBounds(G.world, ix, iy)) return null;
+    const o = G.world.owner[W.idx(G.world, ix, iy)];
+    if (o >= 0) { const n = PD.Society.nationOf(G.sim, o); if (n) return n; }
+    // fall back to nearest village's nation
+    let bv = null, bd = 10;
+    for (const v of G.sim.villages) {
+      const d = W.wdist(G.world, v.x, v.y, wx, wy);
+      if (d < bd) { bd = d; bv = v; }
+    }
+    return bv ? PD.Society.nationOf(G.sim, bv.id) : null;
+  }
 
   function spawnRace(G, race, wx, wy, cost) {
     if (G.faith < cost) { snd('error'); return 0; }
@@ -238,7 +502,10 @@
     { id: 'life', name: 'Life' },
     { id: 'terra', name: 'Terraform' },
     { id: 'bless', name: 'Blessings' },
-    { id: 'wrath', name: 'Wrath' }
+    { id: 'wrath', name: 'Wrath' },
+    { id: 'godhead', name: 'Godhead' },
+    { id: 'politic', name: 'Dominion' },
+    { id: 'bible', name: 'Testament' }
   ];
 
   global.PD.Powers = { POWERS, BY_ID, CATEGORIES };

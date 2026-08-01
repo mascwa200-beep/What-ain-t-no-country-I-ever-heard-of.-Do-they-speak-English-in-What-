@@ -7,10 +7,11 @@
   'use strict';
   const PD = global.PD;
 
-  // Biome ids
+  // Biome ids (12+ are otherworldly: hell planes, heaven planes, primordial)
   const B = {
     DEEP: 0, WATER: 1, SAND: 2, GRASS: 3, FOREST: 4,
-    DIRT: 5, ROCK: 6, SNOW: 7, DESERT: 8, JUNGLE: 9, SWAMP: 10, ASH: 11
+    DIRT: 5, ROCK: 6, SNOW: 7, DESERT: 8, JUNGLE: 9, SWAMP: 10, ASH: 11,
+    HELLROCK: 12, LAVA: 13, CLOUD: 14, GOLDMEAD: 15, OOZE: 16, VOIDSTONE: 17
   };
 
   // Base biome palette (8-bit-ish, cohesive)
@@ -26,20 +27,40 @@
     8:  '#dcb45c', // desert
     9:  '#237d3b', // jungle
     10: '#4c6a3a', // swamp
-    11: '#3a3436'  // ash / scorched
+    11: '#3a3436', // ash / scorched
+    12: '#4a2530', // hellrock
+    13: '#e04a10', // lava
+    14: '#e8ecf8', // cloudfield (heaven)
+    15: '#e6cf6e', // golden meadow (heaven)
+    16: '#3a5a4a', // primordial ooze
+    17: '#241c34'  // voidstone (frozen hell)
   };
   // Secondary shade for dithered texture
   const BIOME_COLORS2 = {
     0:  '#0d1a3c', 1: '#1d4f7c', 2: '#d4bd6f', 3: '#4b8c31', 4: '#276128',
     5: '#79593c', 6: '#6c6e77', 7: '#dbe6f2', 8: '#cfa54c', 9: '#1c6b31',
-    10: '#3f5a30', 11: '#2c2729'
+    10: '#3f5a30', 11: '#2c2729', 12: '#3a1a24', 13: '#c03a08', 14: '#d8dff0',
+    15: '#d4ba55', 16: '#2e4a3c', 17: '#1a1428'
   };
 
   // Struct ids
   const S = { NONE: 0, HOUSE: 1, TOWN: 2, FARM: 3, ROAD: 4, RUIN: 5, TOWER: 6, TEMPLE: 7 };
 
-  function inBounds(w, x, y) { return x >= 0 && y >= 0 && x < w.W && y < w.H; }
-  function idx(w, x, y) { return y * w.W + x; }
+  // Worlds are ROUND: x wraps east-west (cylindrical planet). Only the poles
+  // (y) are hard bounds. Every tile access goes through idx(), which wraps.
+  function wrapX(w, x) { const W2 = w.W; return ((x % W2) + W2) % W2; }
+  function inBounds(w, x, y) { return y >= 0 && y < w.H; }
+  function idx(w, x, y) { return y * w.W + wrapX(w, Math.floor(x)); }
+  // shortest signed x-delta from a to b on the cylinder
+  function wrapDX(w, a, b) {
+    let d = b - a; const W2 = w.W;
+    if (d > W2 / 2) d -= W2; else if (d < -W2 / 2) d += W2;
+    return d;
+  }
+  function wdist(w, ax, ay, bx, by) {
+    const dx = wrapDX(w, ax, bx), dy = by - ay;
+    return Math.sqrt(dx * dx + dy * dy);
+  }
 
   // Per-tile invalidation: mutators push changed tile indices so the renderer
   // repaints only those tiles. Falls back to a full repaint (w.dirty) when the
@@ -51,14 +72,17 @@
     w.dirtyTiles.push(i);
   }
 
-  function isWater(b) { return b === B.DEEP || b === B.WATER || b === B.SWAMP; }
-  function isLand(b) { return !(b === B.DEEP || b === B.WATER); }
+  function isWater(b) { return b === B.DEEP || b === B.WATER || b === B.LAVA || b === B.CLOUD; }
+  function isLand(b) { return !isWater(b); }
 
-  function createWorld(W, H, seedStr) {
+  function createWorld(W, H, seedStr, opts) {
+    opts = opts || {};
     const seed = PD.hashSeed(seedStr);
     const n = W * H;
     const w = {
       W, H, n, seedStr, seed,
+      mode: opts.mode || 'normal',
+      seaShift: opts.seaShift || 0, tempShift: opts.tempShift || 0, moistShift: opts.moistShift || 0,
       biome: new Uint8Array(n),
       elev: new Float32Array(n),
       moist: new Float32Array(n),
@@ -83,41 +107,73 @@
     const nTemp = PD.makeNoise(w.seed ^ 0x3333);
     const nWarp = PD.makeNoise(w.seed ^ 0x4444);
     const W = w.W, H = w.H;
-    const cx = W / 2, cy = H / 2;
-    const maxR = Math.sqrt(cx * cx + cy * cy);
+    const cy = H / 2;
     const es = 0.045, ms = 0.03, ts = 0.02;
+    // seamless longitude: crossfade each noise field with its copy shifted
+    // by one full wrap, so tile 0 and tile W-1 join invisibly
+    function seam(nz, x, y, sx, sy, oct) {
+      const t = x / W;
+      return PD.lerp(nz.fbm(x * sx, y * sy, oct), nz.fbm((x - W) * sx, y * sy, oct), t);
+    }
 
     for (let y = 0; y < H; y++) {
       for (let x = 0; x < W; x++) {
-        const i = idx(w, x, y);
+        const i = y * W + x;
         // domain warp for more organic coasts
-        const wx = x + (nWarp.fbm(x * 0.05, y * 0.05, 3) - 0.5) * 18;
-        const wy = y + (nWarp.fbm(x * 0.05 + 40, y * 0.05 + 40, 3) - 0.5) * 18;
-        let e = nElev.fbm(wx * es, wy * es, 6, 2.0, 0.52);
-        // radial falloff -> island-ish continents, oceans at edges
-        const r = PD.dist(x, y, cx, cy) / maxR;
-        const fall = PD.clamp(1.15 - Math.pow(r, 1.9) * 1.35, 0, 1);
-        e = e * 0.72 + fall * 0.42 - 0.14;
-        e = PD.clamp(e, 0, 1);
-        w.elev[i] = e;
+        const wxo = (seam(nWarp, x, y, 0.05, 0.05, 3) - 0.5) * 18;
+        const wyo = (seam(nWarp, x + 511, y + 40, 0.05, 0.05, 3) - 0.5) * 18;
+        let e = PD.lerp(
+          nElev.fbm((x + wxo) * es, (y + wyo) * es, 6, 2.0, 0.52),
+          nElev.fbm((x + wxo - W) * es, (y + wyo) * es, 6, 2.0, 0.52),
+          x / W);
+        // polar falloff only — continents ring the round planet, oceans cap
+        // the poles; no artificial east/west edges
+        const pole = Math.abs(y - cy) / cy; // 0 equator .. 1 pole
+        const fall = PD.clamp(1.15 - Math.pow(pole, 2.4) * 1.5, 0, 1);
+        e = e * 0.78 + fall * 0.34 - 0.12 - w.seaShift;
+        w.elev[i] = PD.clamp(e, 0, 1);
 
-        let m = nMoist.fbm(x * ms, y * ms, 5);
-        w.moist[i] = m;
-        // temperature: latitude gradient + noise, colder at poles & high elevation
+        w.moist[i] = PD.clamp(seam(nMoist, x, y, ms, ms, 5) + w.moistShift, 0, 1);
+        // temperature: latitude gradient + noise, colder at poles & high up
         const lat = 1 - Math.abs((y / H) - 0.5) * 2; // 1 equator .. 0 poles
-        let t = lat * 0.8 + nTemp.fbm(x * ts, y * ts, 4) * 0.3 - e * 0.35;
+        let t = lat * 0.8 + seam(nTemp, x, y, ts, ts, 4) * 0.3 - w.elev[i] * 0.35 + w.tempShift;
         w.temp[i] = PD.clamp(t, 0, 1);
       }
     }
     classify(w);
   }
 
+  // Re-skin a tile's biome for otherworldly planes (hell, heaven, primordial)
+  function modeOverride(w, i) {
+    const b = w.biome[i], m = w.mode;
+    if (m === 'normal' || !m) return;
+    if (m === 'hell') {
+      if (b === B.DEEP || b === B.WATER) { w.biome[i] = B.LAVA; w.fert[i] = 0; w.tree[i] = 0; }
+      else if (b === B.SNOW) { w.biome[i] = B.VOIDSTONE; w.fert[i] = 0.05; w.tree[i] = 0; }
+      else if (b === B.ROCK) { w.biome[i] = B.HELLROCK; w.fert[i] = 0.05; }
+      else { w.biome[i] = ((i * 7) % 5 === 0) ? B.ASH : B.HELLROCK; w.fert[i] = 0.12; w.tree[i] = 0; }
+    } else if (m === 'heaven') {
+      if (b === B.DEEP || b === B.WATER) { w.biome[i] = B.CLOUD; w.fert[i] = 0; w.tree[i] = 0; }
+      else if (b === B.FOREST || b === B.JUNGLE) { w.biome[i] = B.GOLDMEAD; w.fert[i] = 0.9; w.tree[i] = 2; }
+      else { w.biome[i] = B.GOLDMEAD; w.fert[i] = 0.8; }
+    } else if (m === 'primordial') {
+      if (b !== B.DEEP && b !== B.WATER) {
+        w.biome[i] = ((i * 13) % 4 === 0) ? B.SAND : B.OOZE;
+        w.fert[i] = 0.55; w.tree[i] = 0;
+      }
+    } else if (m === 'void') {
+      if (b === B.DEEP || b === B.WATER) { w.biome[i] = B.DEEP; }
+      else { w.biome[i] = ((i * 11) % 6 === 0) ? B.SNOW : B.VOIDSTONE; w.fert[i] = 0.04; w.tree[i] = 0; }
+    }
+  }
+
   function classify(w) {
     const W = w.W, H = w.H;
     for (let y = 0; y < H; y++) {
       for (let x = 0; x < W; x++) {
-        const i = idx(w, x, y);
+        const i = y * W + x;
         assignBiome(w, i, x, y);
+        modeOverride(w, i);
       }
     }
     w.dirty = true;
@@ -152,6 +208,7 @@
     const i = idx(w, x, y);
     // preserve structures on land; clear if turned to water
     assignBiome(w, i, x, y);
+    modeOverride(w, i);
     if (isWater(w.biome[i])) { w.struct[i] = 0; w.owner[i] = -1; w.tree[i] = 0; }
     markTile(w, i);
   }
@@ -291,6 +348,7 @@
     B, S, BIOME_COLORS, BIOME_COLORS2,
     createWorld, generate, classify, reclassTile,
     raise, paintBiome, stepFire, ignite, extinguish,
-    inBounds, idx, isWater, isLand, countLand, nearestLand, markTile
+    inBounds, idx, isWater, isLand, countLand, nearestLand, markTile,
+    wrapX, wrapDX, wdist
   };
 })(window);

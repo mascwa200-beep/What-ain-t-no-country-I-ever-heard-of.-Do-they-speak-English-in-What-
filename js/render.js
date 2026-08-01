@@ -221,15 +221,24 @@
     }
   }
 
-  // world -> screen transform
+  // world -> screen transform (wrap-aware: entities near the seam appear on
+  // the side nearest the camera — the world is round)
   function worldToScreen(r, wx, wy) {
     const cz = r.cam.zoom;
     return {
-      x: (wx - r.cam.x) * cz + r.w / 2,
+      x: W.wrapDX(r.world, r.cam.x, wx) * cz + r.w / 2,
       y: (wy - r.cam.y) * cz + r.h / 2
     };
   }
   function screenToWorld(r, sx, sy) {
+    const cz = r.cam.zoom;
+    return {
+      x: W.wrapX(r.world, (sx - r.w / 2) / cz + r.cam.x),
+      y: (sy - r.h / 2) / cz + r.cam.y
+    };
+  }
+  // unwrapped variant for viewport range loops (x may exceed [0,W))
+  function screenToWorldRaw(r, sx, sy) {
     const cz = r.cam.zoom;
     return {
       x: (sx - r.w / 2) / cz + r.cam.x,
@@ -244,9 +253,11 @@
     const cz = r.cam.zoom;
     if (s.x < -20 || s.y < -20 || s.x > r.w + 20 || s.y > r.h + 20) return;
     const px = cz / TILE; // pixel unit size (scale)
-    const P = Math.max(1, cz * 0.14); // sprite pixel size
-    const bob = Math.sin(u.bob) * P * 0.35 * (u.state === 'wander' || u.state === 'fight' ? 1 : 0.3);
-    const bx = s.x, by = s.y - P * 2 + bob;
+    let P = Math.max(1, cz * 0.14); // sprite pixel size
+    if (R.big) P *= R.big;          // giants, trolls, dragons loom
+    const flying = R.flies;
+    const bob = Math.sin(u.bob) * P * (flying ? 0.7 : 0.35);
+    const bx = s.x, by = s.y - P * 2 + bob - (flying ? P * 1.2 : 0);
     const fl = u.flip;
     function rect(ox, oy, w2, h2, col) {
       ctx.fillStyle = col;
@@ -257,24 +268,48 @@
     ctx.fillRect(Math.round(bx - P * 1.2), Math.round(s.y + P * 0.6), Math.max(2, P * 2.4), Math.max(1, P));
 
     const body = R.col, dark = R.col2;
+    if (R.ghost) ctx.globalAlpha = 0.55; // spirits shimmer, half-here
     if (u.race === 'critter') {
       rect(-1, 0, 2, 1.5, body); rect(-1.5, -0.5, 1, 1, body); // head bump
       rect(1, -0.2, 0.6, 0.6, body); // ear
       rect(-1.6, 0.2, 0.4, 0.4, '#222');
-    } else if (u.race === 'wolf') {
+    } else if (u.race === 'wolf' || u.race === 'werewolf') {
       rect(-1.5, 0, 3, 1.2, body); rect(1, -0.4, 1, 1, body); rect(-2, 0.4, 0.6, 0.8, dark);
       rect(1.4, -0.2, 0.4, 0.4, '#e33');
+    } else if (u.race === 'dragon') {
+      // long body, wings, snout, tail
+      rect(-2, 0, 4, 1.4, body); rect(1.6, -0.6, 1.4, 1.2, body); rect(2.8, -0.3, 0.6, 0.5, dark); // head/snout
+      rect(-2.8, 0.2, 1, 0.7, dark); // tail
+      const wingBeat = Math.sin(u.bob * 2) * 0.8;
+      rect(-1, -1.4 - wingBeat, 2.2, 1, dark); // wing
+      rect(2.2, -0.5, 0.3, 0.3, '#ffe066'); // eye
     } else {
+      // wings behind the body (fairies, angels, demons)
+      if (R.flies && !R.ghost) {
+        const wingBeat = Math.sin(u.bob * 3) * 0.5;
+        const wcol = u.race === 'demon' ? '#5a1a1a' : 'rgba(255,255,255,0.8)';
+        rect(-1.8, -1.2 - wingBeat, 0.9, 1.6, wcol);
+        rect(0.9, -1.2 + wingBeat, 0.9, 1.6, wcol);
+      }
       // bipedal: legs, body, head
       rect(-0.7, 1, 0.6, 1, dark); rect(0.2, 1, 0.6, 1, dark); // legs
       rect(-0.9, -0.4, 1.8, 1.6, body); // torso
-      rect(-0.6, -1.6, 1.2, 1.2, u.race === 'undead' ? '#cdd6d8' : '#f0c8a0'); // head
+      const headCol = u.race === 'undead' ? '#cdd6d8' : R.ghost ? '#e8f0f4' : (R.custom ? body : '#f0c8a0');
+      rect(-0.6, -1.6, 1.2, 1.2, headCol); // head
       if (u.race === 'undead') { rect(-0.4, -1.3, 0.3, 0.3, '#711'); rect(0.2, -1.3, 0.3, 0.3, '#711'); }
+      if (R.horns) { rect(-0.7, -2.1, 0.3, 0.6, dark); rect(0.4, -2.1, 0.3, 0.6, dark); }
+      if (R.tail) rect(-1.4, 0.4, 0.6, 0.4, dark);
+      // paragon cape + glow
+      if (u.paragon > 0) {
+        rect(-1.1, -0.4, 0.4, 2, '#d43a3a');
+        if (sim.tick & 8) { ctx.fillStyle = 'rgba(255,224,102,0.35)'; ctx.fillRect(Math.round(bx - P * 1.4), Math.round(by - P * 2), Math.max(2, P * 2.8), Math.max(2, P * 4)); }
+      }
       // weapon when fighting
       if (u.state === 'fight') rect(0.9, -0.8, 0.35, 1.8, '#cfd6df');
       // village banner color accent
       rect(-0.9, -0.4, 1.8, 0.4, dark);
     }
+    if (R.ghost) ctx.globalAlpha = 1;
     // sickness tint
     if (u.sick > 0) { ctx.fillStyle = 'rgba(120,220,80,0.35)'; ctx.fillRect(Math.round(bx - P * 1.2), Math.round(by - P * 1.8), Math.max(2, P * 2.4), Math.max(2, P * 3.4)); }
     // low hp flash
@@ -291,14 +326,19 @@
     ctx.fillStyle = '#05070f';
     ctx.fillRect(0, 0, r.w, r.h);
 
-    // draw terrain (scaled)
+    // draw terrain (scaled) — three copies so the round world wraps
+    // seamlessly past the antimeridian
     const cz = cam.zoom;
     const scale = cz / TILE;
     const sw = world.W * TILE * scale, sh = world.H * TILE * scale;
     const ox = r.w / 2 - cam.x * cz;
     const oy = r.h / 2 - cam.y * cz;
     ctx.imageSmoothingEnabled = false;
-    ctx.drawImage(r.terra, 0, 0, r.terra.width, r.terra.height, ox, oy, sw, sh);
+    for (let k = -1; k <= 1; k++) {
+      const kx = ox + k * sw;
+      if (kx > r.w || kx + sw < 0) continue;
+      ctx.drawImage(r.terra, 0, 0, r.terra.width, r.terra.height, kx, oy, sw, sh);
+    }
 
     // territory borders (thin owner outlines) — only when zoomed enough
     if (cz > 3) drawBorders(r, sim);
@@ -331,9 +371,9 @@
 
   function drawBorders(r, sim) {
     const ctx = r.ctx, world = r.world, cz = r.cam.zoom;
-    const topLeft = screenToWorld(r, 0, 0), botRight = screenToWorld(r, r.w, r.h);
-    const x0 = Math.max(0, Math.floor(topLeft.x)), y0 = Math.max(0, Math.floor(topLeft.y));
-    const x1 = Math.min(world.W - 1, Math.ceil(botRight.x)), y1 = Math.min(world.H - 1, Math.ceil(botRight.y));
+    const topLeft = screenToWorldRaw(r, 0, 0), botRight = screenToWorldRaw(r, r.w, r.h);
+    const x0 = Math.floor(topLeft.x), y0 = Math.max(0, Math.floor(topLeft.y));
+    const x1 = Math.ceil(botRight.x), y1 = Math.min(world.H - 1, Math.ceil(botRight.y));
     // precompute owner-id -> rgba string once per frame instead of per edge
     const cols = new Map();
     for (const v of sim.villages) cols.set(v.id, hexA(v.col, 0.5));
@@ -343,8 +383,8 @@
         const i = W.idx(world, x, y);
         const o = world.owner[i];
         if (o < 0) continue;
-        // draw edge where neighbor differs
-        const right = x < world.W - 1 ? world.owner[i + 1] : -2;
+        // draw edge where neighbor differs (x neighbor wraps the seam)
+        const right = world.owner[W.idx(world, x + 1, y)];
         const down = y < world.H - 1 ? world.owner[i + world.W] : -2;
         if (right !== o || down !== o) {
           ctx.fillStyle = cols.get(o) || fallback;
@@ -358,9 +398,9 @@
 
   function drawFire(r) {
     const ctx = r.ctx, world = r.world, cz = r.cam.zoom;
-    const topLeft = screenToWorld(r, 0, 0), botRight = screenToWorld(r, r.w, r.h);
-    const x0 = Math.max(0, Math.floor(topLeft.x)), y0 = Math.max(0, Math.floor(topLeft.y));
-    const x1 = Math.min(world.W - 1, Math.ceil(botRight.x)), y1 = Math.min(world.H - 1, Math.ceil(botRight.y));
+    const topLeft = screenToWorldRaw(r, 0, 0), botRight = screenToWorldRaw(r, r.w, r.h);
+    const x0 = Math.floor(topLeft.x), y0 = Math.max(0, Math.floor(topLeft.y));
+    const x1 = Math.ceil(botRight.x), y1 = Math.min(world.H - 1, Math.ceil(botRight.y));
     for (let y = y0; y <= y1; y++) {
       for (let x = x0; x <= x1; x++) {
         const f = world.fire[W.idx(world, x, y)];
@@ -462,18 +502,31 @@
   }
 
   function drawDayNight(r, sim, ui) {
-    // day-night cycle tied to tick; also seasonal tint
-    const cyc = (sim.tick % 480) / 480; // 0..1
-    const night = Math.max(0, Math.cos(cyc * 6.283) * 0.5 + 0.15); // darkness
     const ctx = r.ctx;
-    if (night > 0.02) {
-      ctx.fillStyle = `rgba(10,14,40,${night * 0.6})`;
+    const mode = r.world.mode;
+    if (mode === 'hell') {
+      // hell pulses with furnace light and knows no day
+      const pulse = 0.06 + Math.sin(sim.tick * 0.05) * 0.03;
+      ctx.fillStyle = `rgba(255,60,10,${pulse})`;
+      ctx.fillRect(0, 0, r.w, r.h);
+    } else if (mode === 'heaven') {
+      ctx.fillStyle = 'rgba(255,240,180,0.07)'; // eternal golden hour
+      ctx.fillRect(0, 0, r.w, r.h);
+    } else if (mode === 'void') {
+      ctx.fillStyle = 'rgba(30,20,60,0.18)'; // the cold dark between
+      ctx.fillRect(0, 0, r.w, r.h);
+    } else {
+      // day-night cycle tied to tick; also seasonal tint
+      const cyc = (sim.tick % 480) / 480; // 0..1
+      const night = Math.max(0, Math.cos(cyc * 6.283) * 0.5 + 0.15); // darkness
+      if (night > 0.02) {
+        ctx.fillStyle = `rgba(10,14,40,${night * 0.6})`;
+        ctx.fillRect(0, 0, r.w, r.h);
+      }
+      const seasonTints = ['rgba(120,220,120,0.04)', 'rgba(255,220,120,0.05)', 'rgba(220,150,80,0.06)', 'rgba(180,210,255,0.08)'];
+      ctx.fillStyle = seasonTints[sim.season];
       ctx.fillRect(0, 0, r.w, r.h);
     }
-    // seasonal tint
-    const seasonTints = ['rgba(120,220,120,0.04)', 'rgba(255,220,120,0.05)', 'rgba(220,150,80,0.06)', 'rgba(180,210,255,0.08)'];
-    ctx.fillStyle = seasonTints[sim.season];
-    ctx.fillRect(0, 0, r.w, r.h);
     // vignette
     const g = ctx.createRadialGradient(r.w / 2, r.h / 2, Math.min(r.w, r.h) * 0.35, r.w / 2, r.h / 2, Math.max(r.w, r.h) * 0.75);
     g.addColorStop(0, 'rgba(0,0,0,0)');
@@ -487,10 +540,11 @@
   function drawMinimap(r, sim) {
     const world = r.world;
     const MW = 120, scale = MW / world.W, MH = Math.round(world.H * scale);
-    if (!miniCanvas) {
+    if (!miniCanvas || miniCanvas.width !== world.W || miniCanvas.height !== world.H) {
       miniCanvas = document.createElement('canvas');
       miniCanvas.width = world.W; miniCanvas.height = world.H;
       miniCtx = miniCanvas.getContext('2d');
+      miniDirtyTick = -1;
     }
     if (!biomeLUT) {
       biomeLUT = [];
@@ -545,7 +599,20 @@
     const c = hexToRgb(h); return `rgba(${c[0]},${c[1]},${c[2]},${a})`;
   }
 
+  // point the renderer at a different world (planet switch / plane visit)
+  function setWorld(r, world) {
+    r.world = world;
+    if (r.terra.width !== world.W * TILE || r.terra.height !== world.H * TILE) {
+      r.terra.width = world.W * TILE; r.terra.height = world.H * TILE;
+      r.tctx.imageSmoothingEnabled = false;
+    }
+    renderTerrain(r);
+    world.dirtyMini = true;
+    r.cam.x = world.W / 2; r.cam.y = world.H / 2;
+  }
+
   global.PD.Render = {
-    createRenderer, draw, renderTerrain, worldToScreen, screenToWorld, TILE, FX, hexToRgb
+    createRenderer, draw, renderTerrain, worldToScreen, screenToWorld,
+    screenToWorldRaw, setWorld, TILE, FX, hexToRgb
   };
 })(window);

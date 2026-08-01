@@ -12,37 +12,66 @@ at runtime. It works from a plain `file://` double-click, fully offline.
 
 *(Optional)* serve it if you prefer: `python3 -m http.server` → `http://localhost:8000`.
 
-## 🌍 What it is
+## 🌍 What it is — the GENESIS edition
 
-You hover over a procedurally generated pixel world — continents, oceans,
-mountains, deserts, jungles, tundra — and shape it with divine powers while
-civilizations live their own lives underneath you:
+You are the One True God of a **round pixel multiverse**:
 
-- **Four sentient peoples** — Humans, Elves, Orcs, Dwarves — spawn, found
-  villages, farm, build houses, temples and towers, level hamlets into
-  metropolises, colonize new lands, wage war, and fall to ruin. All emergent.
-- **A living ecology** — critters breed, wolves hunt, forests burn, fire
-  spreads, rain douses, seasons turn (winter is lean), day fades to night.
-- **The Undead** — raise them yourself or watch plague victims claw back out
-  of the ground and snowball into an apocalypse.
-- **Faith economy** — worshippers and temples generate ✦ Faith, the currency
-  of every divine act. More believers → more power. Classic idle loop.
-- **True offline progression** — the world is autosaved every 20 seconds and
-  keeps turning while you're gone. Come back to a "While you were away…"
-  report: faith gathered, populations shifted, settlements risen or fallen.
-- **Infinite playtime** — nothing ends. Civilizations rise and fall in
-  equilibrium, worlds are seedable and endless, and you can always burn it
-  all down and start again.
+- **Round worlds** — planets wrap east-west (walk far enough and come home);
+  the Cosmos screen shows them as **spinning pixel globes** orbiting your sun.
+- **16 peoples + your own** — Humans, Elves, Orcs, Dwarves, Gnomes, Halflings,
+  Goblins, Tieflings, Dragonborn, Lizardfolk, Merfolk, Fairies, Giants… plus
+  vampires, werewolves, trolls, dragons, angels, demons — or design a custom
+  race in the **Genesis Lab** (body, temper, wings, gills, lifespan).
+- **Named individuals** — every creature has a name, a personality, a
+  profession, a family village, and **karma** that decides their afterlife.
+  Inspect anyone; bless, speak to, empower, or smite them personally.
+- **Nations & politics** — villages federate into nations with governments
+  (tribal → monarchy → theocracy → republic → technocracy), leaders with
+  traits, diplomacy, wars with actual raiding parties, revolutions — and
+  Dominion powers to install leaders, force peace, incite wars, or Babel a
+  proud empire into splinters.
+- **Technology eras** — Stone Age to Space Age. When a nation hits the
+  Modern era it invents the internet, and the **PixelNet tab** fills with
+  citizens posting about your miracles ("meteor??? in THIS economy").
+- **Religion & prayers** — faiths arise around temples with named prophets;
+  the **Prayers tab** queues real pleas from the sick, starving, and
+  besieged. Answer, ignore, or refuse. Hand down Commandments. Anoint
+  prophets. Flood the world (the most righteous village is spared).
+- **Heavens & hells** — souls route by karma to five planes: Elysium, the
+  Meadows, the Grayfields, the Ashen Hell, the Frozen Deep. Visit them,
+  meet the dead, promote souls to angels, condemn the wicked, or
+  **resurrect** anyone back into the living world.
+- **The multiverse** — create up to 8 planets (verdant, desert, frozen,
+  oceanic, hellscape, primordial, **doomed**), rename them, or unmake them.
+  Doomed worlds count down to core collapse — save them, or watch a family
+  seal their child into an escape rocket bound for another of your planets,
+  where the orphan grows into a superpowered **Paragon**.
+- **Primordial evolution** — seed an ooze world and guide it from microbes
+  to sapience. You created evolution, after all.
+- **Time travel** — the chronicle snapshots your world; rewind it, or
+  **branch a parallel universe** from any recorded moment.
+- **A story, if you want it** — the **Testament tab** unfolds 12 chapters
+  (Genesis → the Wired Age → Eternity) with hints hidden behind a button.
+- **Idle to the bone** — faith from worshippers, temples, faiths, and
+  answered prayers; autosave every 20s; true offline progression with an
+  away report; nothing ever ends.
 
 ## ⚡ Divine powers
 
 | Category | Powers |
 |---|---|
-| **Divine** | Inspect creatures/towns/tiles · Move map |
-| **Life** | Spawn Humans / Elves / Orcs / Dwarves / Critters / Wolves · Found instant Settlement |
-| **Terraform** | Raise Land · Lower Land · Grow Forest · Grow Grass · Desertify · Raise Peaks |
-| **Blessings** | Bless (heal + feed) · Rain |
-| **Wrath** | Lightning · Ignite · Meteor · Plague · Earthquake · Freeze · Raise Dead |
+| **Divine** | Inspect (deep dossier on any soul) · Move map |
+| **Life** | Spawn any people or beast · Found instant Settlement · your custom races |
+| **Terraform** | Raise/Lower Land · Grow Forest/Grass · Desertify · Raise Peaks |
+| **Blessings** | Bless · Rain |
+| **Wrath** | Lightning · Ignite · Meteor · Plague · Earthquake · Freeze · Raise Dead · Thunderstorm · Tornado |
+| **Godhead** | Divine Voice · Empower Hero (Paragons) · Miracle · Calm the Core · Guide Evolution |
+| **Dominion** | Install Leader · Force Peace · Incite War · Revolution |
+| **Testament** | Great Flood · Ten Plagues · Anoint Prophet · Commandments · Confusion of Tongues |
+
+Plus panel-driven powers: create/destroy/rename planets (Cosmos), answer or
+refuse prayers, resurrect/ascend/condemn souls (the Beyond), rewind or branch
+time, and the Genesis Lab race designer.
 
 ## 🎮 Controls
 
@@ -55,8 +84,9 @@ civilizations live their own lives underneath you:
 | `Space`, `1` `2` `3`, `0` | Pause · speed ×1 ×2 ×4 · pause |
 | `[` `]` | Brush size |
 | `L` | Toggle town labels |
-| `Esc` | Deselect / back to Move tool |
-| `M` | Menu (save, new world, custom seed) |
+| `Esc` | Close panel / deselect |
+| `C` `P` `H` | Cosmos · Prayers · History panels |
+| `M` | Menu (save, new multiverse, custom seed) |
 | Minimap click | Jump camera |
 
 ## 🏗 Architecture
@@ -65,14 +95,18 @@ Plain ES5-compatible scripts sharing a `window.PD` namespace — deliberately
 buildless so the "built version" *is* the source:
 
 ```
-index.html      shell + HUD/toolbar/modals
-styles.css      retro UI theme
-js/util.js      seeded RNG, fractal value noise, 8-bit WebAudio synth (SFX + generative chiptune)
-js/world.js     procgen (elevation/moisture/temperature → 12 biomes), terraforming, fire sim
-js/sim.js       units, villages, economy, war, plague, ecology — the living world
-js/render.js    cached terrain layer, pixel sprites, particles, weather, day/night, minimap
-js/powers.js    the god's toolbox (24 powers)
-js/game.js      loop, faith economy, input, camera, save/load + offline progress
+index.html       shell + HUD/toolbar/tab-rail/panels
+styles.css       retro UI theme
+js/util.js       seeded RNG, fractal value noise, 8-bit WebAudio synth
+js/codec.js      RLE + quantized typed-array save codec (a planet ≈ tens of KB)
+js/world.js      procgen → 18 biomes, ROUND wrap worlds, terraforming, fire sim
+js/sim.js        21 races, units w/ identity+karma, villages, ecology, combat
+js/society.js    nations, politics, religion, prayers, tech eras, PixelNet, history
+js/afterlife.js  souls, the five planes of the Beyond, angels/demons, resurrection
+js/cosmos.js     the multiverse: planets, spinning globes, doomed cores, evolution, Genesis Lab
+js/render.js     cached terrain, seam-wrapped camera, sprites, particles, minimap
+js/powers.js     the god's toolbox (40 powers)
+js/game.js       loop, faith economy, floods/storms/time travel, panels, save/load
 ```
 
 Design notes:

@@ -11,31 +11,51 @@
 
   // ---- Race definitions ------------------------------------------------
   // aggr: base aggression, breed: breeding tempo, dmg, hp, spd (tiles/step)
+  // flags: sentient (builds civilizations), raider (attacks other civs on
+  // sight), monster (attacks all living), holy (attacks monsters), animal,
+  // predator/prey (food chain), flies (ignores terrain), aquatic (swims),
+  // nocturnal (empowered at night), big (sprite scale), fiery (burns land)
   const RACES = {
-    human:   { name: 'Humans',   one: 'Human',   col: '#f2c39a', col2: '#3a5fb0', emoji: '🧑', aggr: 0.35, breed: 1.2,  dmg: 6,  hp: 30, spd: 0.10, lifespan: 2600, likes: [B.GRASS, B.FOREST, B.DIRT], sentient: true },
-    elf:     { name: 'Elves',    one: 'Elf',     col: '#bfe9a0', col2: '#2f8a4a', emoji: '🧝', aggr: 0.20, breed: 0.95, dmg: 8,  hp: 26, spd: 0.12, lifespan: 4200, likes: [B.FOREST, B.JUNGLE],        sentient: true },
-    orc:     { name: 'Orcs',     one: 'Orc',     col: '#8fbf6a', col2: '#4a5a24', emoji: '👹', aggr: 0.85, breed: 1.5,  dmg: 9,  hp: 38, spd: 0.11, lifespan: 1900, likes: [B.DIRT, B.DESERT, B.ROCK],  sentient: true },
-    dwarf:   { name: 'Dwarves',  one: 'Dwarf',   col: '#e0a86a', col2: '#8a5a2a', emoji: '🧔', aggr: 0.45, breed: 1.05, dmg: 7,  hp: 46, spd: 0.08, lifespan: 3600, likes: [B.ROCK, B.SNOW, B.DIRT],    sentient: true },
-    undead:  { name: 'Undead',   one: 'Undead',  col: '#b7c7c9', col2: '#4a2a4a', emoji: '💀', aggr: 1.0,  breed: 0.0,  dmg: 7,  hp: 34, spd: 0.09, lifespan: 5000, likes: [B.ASH, B.DIRT, B.ROCK],     sentient: false, monster: true },
-    critter: { name: 'Critters', one: 'Critter', col: '#e6d8b0', col2: '#b09060', emoji: '🐇', aggr: 0.0,  breed: 1.6,  dmg: 1,  hp: 8,  spd: 0.09, lifespan: 900,  likes: [B.GRASS, B.FOREST],         sentient: false, animal: true, prey: true },
-    wolf:    { name: 'Wolves',   one: 'Wolf',    col: '#9aa0a8', col2: '#40444a', emoji: '🐺', aggr: 0.7,  breed: 0.7,  dmg: 5,  hp: 18, spd: 0.13, lifespan: 1300, likes: [B.FOREST, B.SNOW, B.GRASS], sentient: false, animal: true, predator: true }
+    human:      { name: 'Humans',      one: 'Human',      col: '#f2c39a', col2: '#3a5fb0', emoji: '🧑', aggr: 0.35, breed: 1.2,  dmg: 6,  hp: 30, spd: 0.10, lifespan: 2600, likes: [B.GRASS, B.FOREST, B.DIRT], sentient: true },
+    elf:        { name: 'Elves',       one: 'Elf',        col: '#bfe9a0', col2: '#2f8a4a', emoji: '🧝', aggr: 0.20, breed: 0.95, dmg: 8,  hp: 26, spd: 0.12, lifespan: 4200, likes: [B.FOREST, B.JUNGLE],        sentient: true },
+    orc:        { name: 'Orcs',        one: 'Orc',        col: '#8fbf6a', col2: '#4a5a24', emoji: '👹', aggr: 0.85, breed: 1.5,  dmg: 9,  hp: 38, spd: 0.11, lifespan: 1900, likes: [B.DIRT, B.DESERT, B.ROCK],  sentient: true, raider: true },
+    dwarf:      { name: 'Dwarves',     one: 'Dwarf',      col: '#e0a86a', col2: '#8a5a2a', emoji: '🧔', aggr: 0.45, breed: 1.05, dmg: 7,  hp: 46, spd: 0.08, lifespan: 3600, likes: [B.ROCK, B.SNOW, B.DIRT],    sentient: true },
+    gnome:      { name: 'Gnomes',      one: 'Gnome',      col: '#e8c8e0', col2: '#8a4a8a', emoji: '🍄', aggr: 0.15, breed: 1.0,  dmg: 4,  hp: 20, spd: 0.11, lifespan: 3000, likes: [B.FOREST, B.GRASS],         sentient: true, tinker: true },
+    halfling:   { name: 'Halflings',   one: 'Halfling',   col: '#f0d8a8', col2: '#7a8a3a', emoji: '🥧', aggr: 0.10, breed: 1.35, dmg: 4,  hp: 22, spd: 0.10, lifespan: 2400, likes: [B.GRASS, B.DIRT],           sentient: true },
+    goblin:     { name: 'Goblins',     one: 'Goblin',     col: '#a8c860', col2: '#3a5a1a', emoji: '👺', aggr: 0.8,  breed: 1.7,  dmg: 5,  hp: 18, spd: 0.13, lifespan: 1400, likes: [B.SWAMP, B.DIRT, B.ASH],    sentient: true, raider: true },
+    tiefling:   { name: 'Tieflings',   one: 'Tiefling',   col: '#d88a7a', col2: '#7a2040', emoji: '😈', aggr: 0.5,  breed: 1.0,  dmg: 8,  hp: 30, spd: 0.11, lifespan: 2800, likes: [B.ASH, B.HELLROCK, B.DIRT], sentient: true, horns: true },
+    dragonborn: { name: 'Dragonborn',  one: 'Dragonborn', col: '#c8a040', col2: '#8a3a10', emoji: '🐲', aggr: 0.6,  breed: 0.85, dmg: 11, hp: 44, spd: 0.10, lifespan: 3200, likes: [B.DESERT, B.ROCK],          sentient: true, tail: true },
+    lizardfolk: { name: 'Lizardfolk',  one: 'Lizardfolk', col: '#7ab060', col2: '#2a5a3a', emoji: '🦎', aggr: 0.55, breed: 1.2,  dmg: 7,  hp: 32, spd: 0.11, lifespan: 2200, likes: [B.SWAMP, B.JUNGLE],         sentient: true, tail: true },
+    merfolk:    { name: 'Merfolk',     one: 'Merfolk',    col: '#7ac8d8', col2: '#1a5a8a', emoji: '🧜', aggr: 0.25, breed: 1.0,  dmg: 6,  hp: 28, spd: 0.12, lifespan: 3400, likes: [B.SAND, B.WATER],           sentient: true, aquatic: true },
+    fairy:      { name: 'Fairies',     one: 'Fairy',      col: '#f0c8f8', col2: '#a040c0', emoji: '🧚', aggr: 0.05, breed: 1.1,  dmg: 3,  hp: 12, spd: 0.16, lifespan: 5000, likes: [B.FOREST, B.JUNGLE],        sentient: true, flies: true, healer: true },
+    giant:      { name: 'Giants',      one: 'Giant',      col: '#d8b090', col2: '#6a4a8a', emoji: '🗿', aggr: 0.5,  breed: 0.4,  dmg: 20, hp: 120, spd: 0.06, lifespan: 4800, likes: [B.ROCK, B.SNOW],           sentient: true, big: 1.8 },
+    vampire:    { name: 'Vampires',    one: 'Vampire',    col: '#d8d0e0', col2: '#5a1030', emoji: '🧛', aggr: 0.9,  breed: 0.0,  dmg: 10, hp: 40, spd: 0.12, lifespan: 9000, likes: [B.ASH, B.DIRT],             sentient: false, monster: true, nocturnal: true, turns: 'vampire' },
+    werewolf:   { name: 'Werewolves',  one: 'Werewolf',   col: '#8a7a5a', col2: '#3a2a1a', emoji: '🐾', aggr: 0.75, breed: 0.5,  dmg: 9,  hp: 36, spd: 0.14, lifespan: 2000, likes: [B.FOREST, B.SNOW],          sentient: false, animal: true, predator: true, nocturnal: true },
+    troll:      { name: 'Trolls',      one: 'Troll',      col: '#90a878', col2: '#3a4a2a', emoji: '🧌', aggr: 0.85, breed: 0.45, dmg: 14, hp: 90, spd: 0.07, lifespan: 3000, likes: [B.SWAMP, B.ROCK],           sentient: false, predator: true, big: 1.5, regen: true },
+    dragon:     { name: 'Dragons',     one: 'Dragon',     col: '#d84a30', col2: '#6a1010', emoji: '🐉', aggr: 1.0,  breed: 0.1,  dmg: 26, hp: 260, spd: 0.15, lifespan: 9000, likes: [B.ROCK, B.DESERT],         sentient: false, monster: true, flies: true, big: 2.2, fiery: true },
+    angel:      { name: 'Angels',      one: 'Angel',      col: '#f8f0d0', col2: '#c8a020', emoji: '👼', aggr: 0.3,  breed: 0.0,  dmg: 14, hp: 80, spd: 0.14, lifespan: 99999, likes: [B.CLOUD, B.GOLDMEAD],      sentient: false, holy: true, flies: true, healer: true },
+    demon:      { name: 'Demons',      one: 'Demon',      col: '#c05030', col2: '#4a0a0a', emoji: '👿', aggr: 1.0,  breed: 0.2,  dmg: 15, hp: 70, spd: 0.12, lifespan: 99999, likes: [B.HELLROCK, B.ASH],        sentient: false, monster: true, horns: true, fiery: true },
+    undead:     { name: 'Undead',      one: 'Undead',     col: '#b7c7c9', col2: '#4a2a4a', emoji: '💀', aggr: 1.0,  breed: 0.0,  dmg: 7,  hp: 34, spd: 0.09, lifespan: 5000, likes: [B.ASH, B.DIRT, B.ROCK],     sentient: false, monster: true },
+    spirit:     { name: 'Spirits',     one: 'Spirit',     col: '#cfe0e8', col2: '#7a90a8', emoji: '👻', aggr: 0.0,  breed: 0.0,  dmg: 1,  hp: 20, spd: 0.07, lifespan: 99999, likes: [B.CLOUD, B.VOIDSTONE],      sentient: false, ghost: true, flies: true },
+    critter:    { name: 'Critters',    one: 'Critter',    col: '#e6d8b0', col2: '#b09060', emoji: '🐇', aggr: 0.0,  breed: 1.6,  dmg: 1,  hp: 8,  spd: 0.09, lifespan: 900,  likes: [B.GRASS, B.FOREST],         sentient: false, animal: true, prey: true },
+    wolf:       { name: 'Wolves',      one: 'Wolf',       col: '#9aa0a8', col2: '#40444a', emoji: '🐺', aggr: 0.7,  breed: 0.7,  dmg: 5,  hp: 18, spd: 0.13, lifespan: 1300, likes: [B.FOREST, B.SNOW, B.GRASS], sentient: false, animal: true, predator: true }
   };
-  const SENTIENT = ['human', 'elf', 'orc', 'dwarf'];
+  const SENTIENT = Object.keys(RACES).filter(k => RACES[k].sentient);
 
-  // hostility: does A attack B on sight?
+  // hostility: does A attack B on sight? (flag-driven)
   function hostile(a, b) {
     if (a === b) return false;
     const ra = RACES[a], rb = RACES[b];
-    if (ra.monster && !rb.monster) return true;      // undead attack all living
-    if (rb.monster && !ra.monster) return true;
-    if (a === 'wolf' && (b === 'critter' || RACES[b].sentient)) return true;
-    if (b === 'wolf' && (a === 'critter' || RACES[a].sentient)) return true;
-    if (a === 'orc' && RACES[b].sentient) return true;   // orcs raid everyone
-    if (b === 'orc' && RACES[a].sentient) return true;
-    if (ra.sentient && rb.sentient) {
-      // civilized races: mostly wary; hostility emerges via village rivalry
-      return false;
+    if (!ra || !rb) return false;
+    if (ra.monster !== rb.monster) {
+      // monsters vs the living; angels (holy) hunt monsters extra-eagerly
+      return true;
     }
+    if (ra.monster && rb.monster) return false;     // dark powers tolerate each other
+    if (ra.holy && rb.monster) return true;
+    if (rb.holy && ra.monster) return true;
+    if ((ra.raider && rb.sentient) || (rb.raider && ra.sentient)) return true;
+    if ((ra.predator && (rb.prey || rb.sentient)) || (rb.predator && (ra.prey || ra.sentient))) return true;
     return false;
   }
 
@@ -44,18 +64,46 @@
     human: ['Ald','Bre','Cor','Dun','El','Fair','Green','Haven','Iron','Kings','Lake','Mill','North','Oak','Port','River','Stone','West'],
     elf:   ['Ael','Cael','Elar','Fael','Glin','Ithil','Lor','Myr','Nael','Sylv','Thae','Ylth'],
     orc:   ['Gor','Grum','Kaz','Mor','Nar','Rok','Skul','Ugg','Zag','Grish','Drak'],
-    dwarf: ['Kaz','Bar','Dur','Khaz','Thar','Grim','Bal','Nog','Zin','Karak']
+    dwarf: ['Kaz','Bar','Dur','Khaz','Thar','Grim','Bal','Nog','Zin','Karak'],
+    gnome: ['Fizz','Tink','Wob','Nim','Glim','Pip','Snor','Bim'],
+    halfling: ['Apple','Berry','Bramble','Green','Honey','Mead','Puddle','Tea'],
+    goblin: ['Snik','Grub','Mux','Zik','Rat','Skab','Nix','Yag'],
+    tiefling: ['Ash','Cinder','Dusk','Ember','Mal','Nox','Vex','Zar'],
+    dragonborn: ['Bala','Dor','Karn','Rha','Sarr','Torr','Vyx','Zol'],
+    lizardfolk: ['Ssha','Xul','Zess','Ka','Issk','Tza','Ssol'],
+    merfolk: ['Coral','Pearl','Tide','Brine','Wave','Nerei','Mar'],
+    fairy: ['Dew','Glimmer','Moth','Petal','Thistle','Wisp','Bloom'],
+    giant: ['Bould','Crag','Fjell','Grond','Skarn','Thund'],
+    tiefl: ['Mal']
   };
   const NAME_SUFFIX = {
     human: ['ton','ford','burg','vale','field','haven','mere','wick','gate','holm'],
     elf:   ['ael','wyn','dor','lith','ariel','endil','thil','oria'],
     orc:   ['gash','nak','dush','grod','maw','fang','skar','bash'],
-    dwarf: ['heim','dun','delve','forge','hold','mir','rock','barim']
+    dwarf: ['heim','dun','delve','forge','hold','mir','rock','barim'],
+    gnome: ['whistle','gear','burrow','spark','cap','warren'],
+    halfling: ['bottom','foot','hollow','pie','shire','dale'],
+    goblin: ['pit','den','warren','heap','hole','nest'],
+    tiefling: ['spire','reach','fall','march','hollow'],
+    dragonborn: ['roost','scale','peak','maw','throne'],
+    lizardfolk: ['marsh','fen','pool','nest','mire'],
+    merfolk: ['reef','shoal','deep','cove','lagoon'],
+    fairy: ['glade','ring','hollow','glen','dell'],
+    giant: ['step','fell','cairn','watch','throne']
   };
   function villageName(race, rng) {
     const a = NAME_PARTS[race] || NAME_PARTS.human;
     const b = NAME_SUFFIX[race] || NAME_SUFFIX.human;
     return a[(rng() * a.length) | 0] + b[(rng() * b.length) | 0];
+  }
+
+  // Personal names, personality traits, professions — every soul is someone
+  const GIVEN = ['Al','Bel','Cass','Dov','Ela','Fen','Gal','Hild','Ilo','Jun','Kel','Lor','Mira','Ned','Ola','Pip','Quin','Ren','Sera','Tam','Ulf','Vera','Wynn','Xan','Yara','Zeph'];
+  const GIVEN2 = ['a','ah','an','ar','ella','en','ette','ia','ic','in','is','on','or','ric','ula','us','wen','wyn'];
+  const TRAITS = ['brave','kind','greedy','curious','devout','cruel','wise','lazy','zealous','gentle','proud','sly','stoic','merry','grim','dreamy'];
+  const PROFESSIONS = ['farmer','builder','hunter','priest','soldier','healer','scholar','artisan','merchant','bard'];
+  function personName(race, rng) {
+    return GIVEN[(rng() * GIVEN.length) | 0] + GIVEN2[(rng() * GIVEN2.length) | 0];
   }
 
   // ---- Simulation container -------------------------------------------
@@ -67,9 +115,10 @@
       nextUnitId: 1,
       nextVillageId: 1,
       tick: 0,
-      // aggregate stats
-      counts: { human: 0, elf: 0, orc: 0, dwarf: 0, undead: 0, critter: 0, wolf: 0 },
+      // aggregate stats (covers every race incl. runtime-created ones)
+      counts: {},
       season: 0, // 0 spring 1 summer 2 autumn 3 winter
+      isNight: false,
       log: [],
       grid: null,
       UNIT_CAP: 1100
@@ -95,18 +144,21 @@
   }
   function forNeighbors(sim, x, y, r, cb) {
     const g = sim.grid; if (!g) return;
+    const world = sim.world;
+    const gw = Math.ceil(world.W / CELL); // cells wrap around the planet
     const cx = (x / CELL) | 0, cy = (y / CELL) | 0;
     const rc = Math.ceil(r / CELL);
     const r2 = r * r;
     for (let dy = -rc; dy <= rc; dy++) {
       for (let dx = -rc; dx <= rc; dx++) {
-        const arr = g.get((cx + dx) + ',' + (cy + dy));
+        const kx = (((cx + dx) % gw) + gw) % gw;
+        const arr = g.get(kx + ',' + (cy + dy));
         if (!arr) continue;
         for (const u of arr) {
           if (u.dead) continue;
           // narrow phase: the coarse cell walk over-scans up to a whole
-          // cell-block, so enforce the true radius here for every caller
-          const ddx = u.x - x, ddy = u.y - y;
+          // cell-block, so enforce the true (wrap-aware) radius here
+          const ddx = W.wrapDX(world, x, u.x), ddy = u.y - y;
           if (ddx * ddx + ddy * ddy <= r2) cb(u);
         }
       }
@@ -129,9 +181,16 @@
       food: 0.8, village: (opts && opts.village != null) ? opts.village : -1,
       cd: 0, sick: 0, breedCd: 40, raidT: 0, raidX: 0, raidY: 0,
       flip: sim.rng() < 0.5 ? 1 : -1,
-      bob: sim.rng() * 6.28
+      bob: sim.rng() * 6.28,
+      // identity: every creature is somebody
+      name: personName(race, sim.rng),
+      trait: (sim.rng() * TRAITS.length) | 0,
+      prof: (sim.rng() * PROFESSIONS.length) | 0,
+      karma: 0,
+      paragon: 0 // >0: an empowered hero (grants stats & powers)
     };
     sim.units.push(u);
+    if (PD.Society) PD.Society.initUnit(sim, u, opts);
     return u;
   }
 
@@ -189,15 +248,24 @@
   }
 
   // ---- Movement helpers ------------------------------------------------
+  // Can this race stand on this tile? Fliers go anywhere, merfolk swim.
+  function walkable(world, R, x, y) {
+    if (!W.inBounds(world, x, y)) return false;
+    if (R.flies) return true;
+    const b = world.biome[W.idx(world, x, y)];
+    if (R.aquatic) return b !== W.B.LAVA; // merfolk cross land & sea alike
+    return W.isLand(b);
+  }
+
   function pickWander(sim, u) {
     const world = sim.world;
+    const R = RACES[u.race];
     for (let tries = 0; tries < 6; tries++) {
       const ang = sim.rng() * 6.283;
       const dr = 3 + sim.rng() * 6;
       const nx = u.x + Math.cos(ang) * dr;
       const ny = u.y + Math.sin(ang) * dr;
-      const ix = Math.round(nx), iy = Math.round(ny);
-      if (W.inBounds(world, ix, iy) && W.isLand(world.biome[W.idx(world, ix, iy)])) {
+      if (walkable(world, R, Math.floor(nx), Math.floor(ny))) {
         u.tx = nx; u.ty = ny; return;
       }
     }
@@ -206,22 +274,21 @@
 
   function moveToward(sim, u, spd) {
     const world = sim.world;
-    let dx = u.tx - u.x, dy = u.ty - u.y;
+    const R = RACES[u.race];
+    // wrap-aware direction: the world is round, take the short way
+    let dx = W.wrapDX(world, u.x, u.tx), dy = u.ty - u.y;
     const d = Math.hypot(dx, dy);
     if (d < 0.05) return true;
     dx /= d; dy /= d;
     let nx = u.x + dx * spd, ny = u.y + dy * spd;
-    const ix = Math.round(nx), iy = Math.round(ny);
-    if (W.inBounds(world, ix, iy) && W.isLand(world.biome[W.idx(world, ix, iy)])) {
+    if (walkable(world, R, Math.floor(nx), Math.floor(ny))) {
       if (dx > 0.1) u.flip = 1; else if (dx < -0.1) u.flip = -1;
-      u.x = nx; u.y = ny;
+      u.x = W.wrapX(world, nx); u.y = ny;
     } else {
-      // blocked by water/edge: try sliding along axes
-      if (W.inBounds(world, Math.round(u.x + dx * spd), Math.round(u.y)) &&
-          W.isLand(world.biome[W.idx(world, Math.round(u.x + dx * spd), Math.round(u.y))])) {
-        u.x += dx * spd;
-      } else if (W.inBounds(world, Math.round(u.x), Math.round(u.y + dy * spd)) &&
-          W.isLand(world.biome[W.idx(world, Math.round(u.x), Math.round(u.y + dy * spd))])) {
+      // blocked: try sliding along axes
+      if (walkable(world, R, Math.floor(u.x + dx * spd), Math.floor(u.y))) {
+        u.x = W.wrapX(world, u.x + dx * spd);
+      } else if (walkable(world, R, Math.floor(u.x), Math.floor(u.y + dy * spd))) {
         u.y += dy * spd;
       } else {
         u.tx = u.x; u.ty = u.y; // give up, repick next tick
@@ -242,6 +309,18 @@
     // aging death
     if (u.age > u.lifespan) { killUnit(sim, u, null); return; }
 
+    // drowning / burning: floods and terraforming can strand the land-bound
+    if (!R.flies && !R.aquatic && !R.ghost) {
+      const tb = world.biome[W.idx(world, u.x, u.y)];
+      if (W.isWater(tb)) {
+        u.hp -= tb === B.LAVA ? 4 : 0.8;
+        if (u.hp <= 0) { killUnit(sim, u, tb === B.LAVA ? 'lava' : 'drown'); return; }
+        // scramble for shore
+        const s = W.nearestLand(world, u.x, u.y, 6);
+        if (s) { u.tx = s.x; u.ty = s.y; moveToward(sim, u, R.spd * 0.7); }
+      }
+    }
+
     // sickness
     if (u.sick > 0) {
       u.sick++;
@@ -256,9 +335,9 @@
       if (u.sick > 200 && sim.rng() < 0.02) u.sick = 0; // recover
     }
 
-    // hunger (the undead do not eat — only age and steel can end them)
+    // hunger (the undead do not eat, and ghosts are past such things)
     const v = u.village >= 0 ? villageById(sim, u.village) : null;
-    if (!R.monster) {
+    if (!R.monster && !R.ghost) {
       if (v && v.food > 0) {
         u.food = PD.clamp(u.food + 0.02, 0, 1);
         v.food -= 0.018;
@@ -290,7 +369,7 @@
         if (ov && ov.rival === u.village) isFoe = true; // they declared on us
       }
       if (isFoe) {
-        const d = PD.dist(u.x, u.y, o.x, o.y);
+        const d = W.wdist(world, u.x, u.y, o.x, o.y);
         if (d < enemyD) { enemyD = d; enemy = o; }
       }
     });
@@ -307,13 +386,21 @@
       u.tx = enemy.x; u.ty = enemy.y;
       if (enemyD < 1.2) {
         if (u.cd === 0) {
-          enemy.hp -= R.dmg * (0.6 + sim.rng() * 0.8);
+          // night empowers the nocturnal; paragons hit like gods' chosen
+          let mult = 0.6 + sim.rng() * 0.8;
+          if (R.nocturnal) mult *= sim.isNight ? 1.6 : 0.7;
+          if (u.paragon) mult *= 1 + u.paragon;
+          enemy.hp -= R.dmg * mult;
           u.cd = 18;
           if (PD.FX) PD.FX.hit(enemy.x, enemy.y);
           if (enemy.hp <= 0) {
-            killUnit(sim, enemy, u.race);
+            killUnit(sim, enemy, u.race, u);
             // hunters and monsters feed on the kill
             if (R.predator || R.monster) u.food = PD.clamp(u.food + 0.6, 0, 1);
+            // slaying the innocent stains the soul; slaying monsters shines it
+            const RE = RACES[enemy.race];
+            if (RE.sentient && !R.monster) u.karma -= 2;
+            else if (RE.monster) u.karma += 2;
             if (sim.rng() < 0.15 && PD.Audio8) PD.Audio8.sfx('war');
           }
         }
@@ -323,13 +410,27 @@
       return;
     }
 
+    // ---- racial gifts ----
+    if (R.regen && u.hp < u.maxHp) u.hp = PD.clamp(u.hp + 0.4, 0, u.maxHp); // trolls knit flesh
+    if (R.fiery && u.race === 'dragon' && sim.rng() < 0.01) {
+      // dragons scorch the land beneath them
+      W.ignite(world, Math.floor(u.x), Math.floor(u.y), 1);
+      if (PD.FX) PD.FX.fireBurst(u.x, u.y);
+    }
+    if (R.healer && sim.tick % 8 === 0) {
+      forNeighbors(sim, u.x, u.y, 3, (o) => {
+        if (o !== u && !RACES[o.race].monster && o.hp < o.maxHp) { o.hp = PD.clamp(o.hp + 2, 0, o.maxHp); if (o.sick) o.sick = 0; }
+      });
+      u.karma += 0.002;
+    }
+
     // ---- raiding: march on the rival village ----
     if (u.raidT > 0) {
       u.raidT--;
       u.state = 'raid';
       u.tx = u.raidX; u.ty = u.raidY;
       moveToward(sim, u, R.spd * 1.05);
-      if (PD.dist(u.x, u.y, u.raidX, u.raidY) < 2) u.raidT = 0; // arrived; fight or go home
+      if (W.wdist(world, u.x, u.y, u.raidX, u.raidY) < 2) u.raidT = 0; // arrived; fight or go home
       return;
     }
 
@@ -339,7 +440,7 @@
       let prey = null, pd = 99;
       forNeighbors(sim, u.x, u.y, 8, (o) => {
         if (o.race === 'critter' || (RACES[o.race].sentient && sim.rng() < 0.02)) {
-          const d = PD.dist(u.x, u.y, o.x, o.y);
+          const d = W.wdist(world, u.x, u.y, o.x, o.y);
           if (d < pd) { pd = d; prey = o; }
         }
       });
@@ -364,29 +465,33 @@
 
     // homing toward village if far (settlers/citizens stay near home)
     if (v) {
-      const dh = PD.dist(u.x, u.y, v.x, v.y);
+      const dh = W.wdist(world, u.x, u.y, v.x, v.y);
       if (dh > v.radius + 5) { u.state = 'goHome'; u.tx = v.x; u.ty = v.y; moveToward(sim, u, R.spd); return; }
     }
 
     // wander
-    if (PD.dist(u.x, u.y, u.tx, u.ty) < 0.4 || sim.rng() < 0.02) pickWander(sim, u);
+    if (W.wdist(world, u.x, u.y, u.tx, u.ty) < 0.4 || sim.rng() < 0.02) pickWander(sim, u);
     u.state = 'wander';
     moveToward(sim, u, R.spd * (0.6 + 0.4 * (u.food)));
   }
 
-  function killUnit(sim, u, byRace) {
+  function killUnit(sim, u, byRace, killer) {
     if (u.dead) return;
     u.dead = true;
     if (PD.FX) PD.FX.blood(u.x, u.y);
-    // undead raising: living killed by undead/plague may rise
     const R = RACES[u.race];
-    if (!R.monster && (byRace === 'undead' || byRace === 'plague')) {
-      if (sim.rng() < 0.28 && sim.units.length < sim.UNIT_CAP) {
-        // convert into an undead in place (defer so we don't mutate mid-iterate weirdly)
+    // dark conversions: the plague-dead rise, vampire victims turn
+    if (!R.monster) {
+      if ((byRace === 'undead' || byRace === 'plague') && sim.rng() < 0.28 && sim.units.length < sim.UNIT_CAP) {
         sim._raise = sim._raise || [];
-        sim._raise.push({ x: u.x, y: u.y });
+        sim._raise.push({ x: u.x, y: u.y, as: 'undead' });
+      } else if (byRace === 'vampire' && R.sentient && sim.rng() < 0.35 && sim.units.length < sim.UNIT_CAP) {
+        sim._raise = sim._raise || [];
+        sim._raise.push({ x: u.x, y: u.y, as: 'vampire' });
       }
     }
+    // the soul departs — Society records it and routes it to an afterlife
+    if (PD.Society) PD.Society.onDeath(sim, u, byRace, killer);
   }
 
   function villageById(sim, id) {
@@ -513,7 +618,7 @@
       let rival = null, rd = 99;
       for (const o of sim.villages) {
         if (o.id === v.id || o.race === v.race) continue;
-        const d = PD.dist(v.x, v.y, o.x, o.y);
+        const d = W.wdist(sim.world, v.x, v.y, o.x, o.y);
         if (d < v.radius + o.radius + 6 && d < rd) { rd = d; rival = o; }
       }
       if (rival && (v.race === 'orc' || rival.race === 'orc' || v.prosperity < 0.35 || sim.rng() < 0.2)) {
@@ -540,12 +645,13 @@
 
   // ---- Global recount & cleanup ---------------------------------------
   function recount(sim) {
+    for (const k in RACES) sim.counts[k] = 0;
     for (const k in sim.counts) sim.counts[k] = 0;
     sim.vmap = new Map();
     for (const v of sim.villages) { v.pop = 0; sim.vmap.set(v.id, v); }
     for (const u of sim.units) {
       if (u.dead) continue;
-      sim.counts[u.race]++;
+      sim.counts[u.race] = (sim.counts[u.race] || 0) + 1;
       if (u.village >= 0) { const v = villageById(sim, u.village); if (v) v.pop++; else u.village = -1; }
     }
   }
@@ -554,6 +660,8 @@
   function step(sim, dt) {
     sim.tick++;
     sim.season = Math.floor((sim.tick % 480) / 120); // 4 seasons per ~year
+    // night falls when the day-cycle cosine dips (matches the renderer)
+    sim.isNight = Math.cos(((sim.tick % 480) / 480) * 6.283) * 0.5 + 0.15 > 0.3;
     buildGrid(sim);
 
     // units
@@ -563,11 +671,11 @@
       updateUnit(sim, u, dt);
     }
 
-    // process raises (undead rising)
+    // process raises (undead rising, vampire spawn)
     if (sim._raise && sim._raise.length) {
       for (const r of sim._raise) {
-        const u = spawnUnit(sim, 'undead', r.x, r.y);
-        if (u && PD.FX) PD.FX.puff(r.x, r.y, '#6a2a6a');
+        const u = spawnUnit(sim, r.as || 'undead', r.x, r.y);
+        if (u && PD.FX) PD.FX.puff(r.x, r.y, r.as === 'vampire' ? '#5a1030' : '#6a2a6a');
       }
       sim._raise.length = 0;
     }
@@ -602,6 +710,9 @@
 
     // emergent civilization: clusters of wild folk settle down
     if (sim.tick % 90 === 0) emergentFounding(sim);
+
+    // society layer: nations, religion, tech, prayers, history, heroes
+    if (PD.Society) PD.Society.step(sim);
   }
 
   // Wild sentient units that gather on good, unclaimed land found a village.
@@ -620,7 +731,7 @@
       if (W.isWater(world.biome[i]) || world.owner[i] !== -1 || world.fert[i] < 0.25) continue;
       // no existing village too close
       let near = false;
-      for (const vv of sim.villages) { if (PD.dist(vv.x, vv.y, u.x, u.y) < 12) { near = true; break; } }
+      for (const vv of sim.villages) { if (W.wdist(world, vv.x, vv.y, u.x, u.y) < 12) { near = true; break; } }
       if (near) continue;
       // count wild same-race adults nearby
       const kin = [];
@@ -670,12 +781,26 @@
       const spot = W.nearestLand(world, x, y, 10);
       if (spot) spawnUnit(sim, 'wolf', spot.x, spot.y);
     }
+    // rare monsters keep the world dangerous (heroes need something to slay)
+    if (world.mode === 'normal' || !world.mode) {
+      const roll = sim.rng();
+      if ((sim.counts.troll || 0) < 3 && roll < 0.12) {
+        const s = W.nearestLand(world, (sim.rng() * world.W) | 0, (sim.rng() * world.H) | 0, 10);
+        if (s) { spawnUnit(sim, 'troll', s.x, s.y); }
+      } else if ((sim.counts.werewolf || 0) < 4 && roll < 0.2) {
+        const s = W.nearestLand(world, (sim.rng() * world.W) | 0, (sim.rng() * world.H) | 0, 10);
+        if (s) spawnUnit(sim, 'werewolf', s.x, s.y);
+      } else if ((sim.counts.dragon || 0) < 1 && roll < 0.03 && sim.tick > 2000) {
+        const s = W.nearestLand(world, (sim.rng() * world.W) | 0, (sim.rng() * world.H) | 0, 10);
+        if (s) { spawnUnit(sim, 'dragon', s.x, s.y); logEvent(sim, 'A DRAGON has awoken! The skies burn.', 'war'); }
+      }
+    }
   }
 
   // ---- Area effects invoked by divine powers --------------------------
   function damageArea(sim, cx, cy, radius, dmg, byRace) {
     forNeighbors(sim, cx, cy, radius + 1, (u) => {
-      if (PD.dist(u.x, u.y, cx, cy) <= radius) {
+      if (W.wdist(sim.world, u.x, u.y, cx, cy) <= radius) {
         u.hp -= dmg;
         if (u.hp <= 0) killUnit(sim, u, byRace);
       }
@@ -683,21 +808,21 @@
   }
   function blessArea(sim, cx, cy, radius) {
     forNeighbors(sim, cx, cy, radius + 1, (u) => {
-      if (PD.dist(u.x, u.y, cx, cy) <= radius) {
+      if (W.wdist(sim.world, u.x, u.y, cx, cy) <= radius) {
         u.hp = u.maxHp; u.food = 1; u.sick = 0;
       }
     });
   }
   function infectArea(sim, cx, cy, radius) {
     forNeighbors(sim, cx, cy, radius + 1, (u) => {
-      if (!RACES[u.race].monster && PD.dist(u.x, u.y, cx, cy) <= radius) u.sick = 1;
+      if (!RACES[u.race].monster && W.wdist(sim.world, u.x, u.y, cx, cy) <= radius) u.sick = 1;
     });
   }
 
   global.PD.Sim = {
     RACES, SENTIENT, hostile, createSim, spawnUnit, foundVillage,
-    step, recount, villageById, logEvent,
+    step, recount, villageById, logEvent, killUnit,
     damageArea, blessArea, infectArea, buildGrid, forNeighbors,
-    villageName
+    villageName, personName, TRAITS, PROFESSIONS, walkable
   };
 })(window);
