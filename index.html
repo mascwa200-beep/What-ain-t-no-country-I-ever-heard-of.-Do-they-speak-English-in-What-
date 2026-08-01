@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#0a0e1a">
+<title>PIXEL DEITY — an 8-bit god simulator</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' fill='%230a0e1a'/><rect x='6' y='2' width='4' height='4' fill='%23f0d040'/><rect x='4' y='6' width='8' height='6' fill='%235aa03c'/></svg>">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div id="app">
+
+  <canvas id="game"></canvas>
+
+  <!-- Top HUD -->
+  <header id="hud-top">
+    <div class="hud-left">
+      <div class="logo">PIXEL&nbsp;<span>DEITY</span></div>
+      <div id="planet-name" title="The world under your gaze">🪐 —</div>
+    </div>
+    <div class="hud-center">
+      <div class="stat faith" title="Divine Faith — your power. Earned from worshippers, temples &amp; answered prayers.">
+        <span class="stat-ico">✦</span>
+        <span id="faith-val">0</span>
+        <small id="faith-rate">+0/t</small>
+      </div>
+      <div class="stat" id="year-stat"><span id="year-val">Year 0</span></div>
+      <div class="stat" id="season-stat"><span id="season-val">🌱 Spring</span></div>
+      <div class="stat" id="vill-stat"><span id="vill-val">🏙 0</span></div>
+      <div id="race-counts" class="race-counts"></div>
+    </div>
+    <div class="hud-right">
+      <div class="speeds">
+        <button class="speed-btn" data-speed="0" title="Pause (Space)">❚❚</button>
+        <button class="speed-btn active" data-speed="1" title="Normal (1)">▶</button>
+        <button class="speed-btn" data-speed="2" title="Fast (2)">▶▶</button>
+        <button class="speed-btn" data-speed="4" title="Ludicrous (3)">▶▶▶</button>
+      </div>
+      <button class="icon-btn" id="btn-labels" title="Toggle town labels (L)">🏷</button>
+      <button class="icon-btn" id="btn-sound" title="Sound on/off">🔊</button>
+      <button class="icon-btn" id="btn-save" title="Save now">💾</button>
+      <button class="icon-btn" id="btn-menu" title="Menu (M)">☰</button>
+    </div>
+  </header>
+
+  <!-- Toolbar (powers) -->
+  <aside id="toolbar">
+    <div id="tools"></div>
+    <div id="power-info">
+      <div id="power-name">✋ Move Map</div>
+      <div id="power-desc">Drag to pan across your world.</div>
+      <div id="power-cost">Free</div>
+      <div class="brush-hint">Brush size: <b>[ ]</b> keys · Zoom: wheel/pinch</div>
+    </div>
+  </aside>
+
+  <!-- Right-side tab rail -->
+  <nav id="tab-rail">
+    <button class="side-tab" id="tab-cosmos" data-panel="cosmos" title="Cosmos — your planets (C)">🪐</button>
+    <button class="side-tab" id="tab-history" data-panel="history" title="History &amp; nations (H)">📜</button>
+    <button class="side-tab" id="tab-prayers" data-panel="prayers" title="Prayers (P)">🙏<span class="tab-badge" style="display:none">0</span></button>
+    <button class="side-tab" id="tab-feed" data-panel="feed" title="PixelNet — their social media">📱</button>
+    <button class="side-tab" id="tab-souls" data-panel="souls" title="The Beyond — heavens &amp; hells">👻</button>
+    <button class="side-tab" id="tab-genesis" data-panel="genesis" title="Genesis Lab — design a race">🧬</button>
+    <button class="side-tab" id="tab-time" data-panel="time" title="Time travel">⏳</button>
+    <button class="side-tab" id="tab-testament" data-panel="testament" title="Testament — story &amp; hints">📖</button>
+  </nav>
+
+  <!-- Side panels -->
+  <section class="side-panel" id="panel-cosmos">
+    <div class="panel-head">🪐 The Cosmos<button class="panel-close">✕</button></div>
+    <canvas id="cosmos-canvas"></canvas>
+    <div id="cosmos-controls" class="panel-scroll"></div>
+  </section>
+
+  <section class="side-panel" id="panel-history">
+    <div class="panel-head">📜 History<button class="panel-close">✕</button></div>
+    <div class="panel-scroll">
+      <div id="nations-list"></div>
+      <div id="legends-list"></div>
+      <div class="panel-subtitle">Chronicle</div>
+      <div id="history-list"></div>
+    </div>
+  </section>
+
+  <section class="side-panel" id="panel-prayers">
+    <div class="panel-head">🙏 Prayers<button class="panel-close">✕</button></div>
+    <div class="panel-scroll" id="prayers-list"></div>
+  </section>
+
+  <section class="side-panel" id="panel-feed">
+    <div class="panel-head">📱 PixelNet<button class="panel-close">✕</button></div>
+    <div class="panel-scroll" id="feed-list"></div>
+  </section>
+
+  <section class="side-panel" id="panel-souls">
+    <div class="panel-head">👻 The Beyond<button class="panel-close">✕</button></div>
+    <div class="panel-scroll" id="souls-list"></div>
+  </section>
+
+  <section class="side-panel" id="panel-genesis">
+    <div class="panel-head">🧬 Genesis Lab<button class="panel-close">✕</button></div>
+    <div class="panel-scroll">
+      <p class="panel-note">Dream a new people into being — body, temper, and gifts. ✦150. You made evolution; this is the intimate version.</p>
+      <label class="gen-label">Name <input id="gen-name" maxlength="16" placeholder="e.g. Mosskin"></label>
+      <label class="gen-label">Sigil
+        <select id="gen-emoji">
+          <option>🌿</option><option>🔮</option><option>🪨</option><option>🌊</option>
+          <option>🔥</option><option>🌙</option><option>⚙️</option><option>🍄</option>
+          <option>🦴</option><option>💎</option><option>🐚</option><option>🕷️</option>
+        </select>
+      </label>
+      <div class="gen-cols">
+        <label class="gen-label">Body <input type="color" id="gen-col1" value="#9ad0a0"></label>
+        <label class="gen-label">Garb <input type="color" id="gen-col2" value="#3a6a8a"></label>
+      </div>
+      <label class="gen-label">Temper <input type="range" id="gen-aggr" min="0" max="100" value="30"><small>peaceful ↔ warlike</small></label>
+      <label class="gen-label">Fertility <input type="range" id="gen-breed" min="30" max="170" value="100"></label>
+      <label class="gen-label">Strength <input type="range" id="gen-dmg" min="2" max="18" value="6"></label>
+      <label class="gen-label">Hardiness <input type="range" id="gen-hp" min="12" max="90" value="30"></label>
+      <label class="gen-label">Swiftness <input type="range" id="gen-spd" min="6" max="16" value="10"></label>
+      <label class="gen-label">Lifespan <input type="range" id="gen-life" min="1000" max="6000" value="2600" step="100"></label>
+      <div class="gen-flags">
+        <label><input type="checkbox" class="gen-flag" value="flies"> Wings</label>
+        <label><input type="checkbox" class="gen-flag" value="aquatic"> Gills</label>
+        <label><input type="checkbox" class="gen-flag" value="raider"> Raiders</label>
+        <label><input type="checkbox" class="gen-flag" value="healer"> Healers</label>
+        <label><input type="checkbox" class="gen-flag" value="horns"> Horns</label>
+        <label><input type="checkbox" class="gen-flag" value="tail"> Tail</label>
+        <label><input type="checkbox" class="gen-flag" value="nocturnal"> Nocturnal</label>
+        <label><input type="checkbox" class="gen-flag" value="tinker"> Tinkerers</label>
+      </div>
+      <button id="genesis-create" class="big-btn" style="width:100%">🧬 CREATE (✦150)</button>
+      <p class="panel-note">Tip: create a <b>Primordial</b> planet in the Cosmos and guide evolution from ooze to empire.</p>
+    </div>
+  </section>
+
+  <section class="side-panel" id="panel-time">
+    <div class="panel-head">⏳ Time<button class="panel-close">✕</button></div>
+    <div class="panel-scroll" id="time-list"></div>
+  </section>
+
+  <section class="side-panel" id="panel-testament">
+    <div class="panel-head">📖 Testament<button class="panel-close">✕</button></div>
+    <div class="panel-scroll" id="testament-list"></div>
+  </section>
+
+  <!-- Inspect panel -->
+  <section id="inspect"></section>
+
+  <!-- Event log -->
+  <section id="chronicle">
+    <div class="chron-title">📜 Chronicle</div>
+    <div id="event-log"></div>
+  </section>
+
+  <div id="toast"></div>
+
+  <!-- Intro overlay -->
+  <div id="intro" class="modal-overlay show">
+    <div class="modal intro-card">
+      <div class="intro-logo">PIXEL&nbsp;<span>DEITY</span></div>
+      <div class="intro-sub">an 8-bit god simulator · round worlds · infinite multiverse</div>
+      <div class="intro-art">🌍🪐✨⚡🧝👹🧚🐉💀👼⏳☄️</div>
+      <p class="intro-text">
+        You are the <b>One True God</b> of a round pixel multiverse. <b>Raise land</b>, <b>breathe life</b>
+        into 16 peoples (or <b>design your own</b>), and watch nations rise through the ages —
+        stone to steel to <b>social media</b> — praying, warring, posting. Answer their <b>prayers</b>,
+        anoint <b>prophets</b>, empower <b>heroes</b>, flood the world, walk your own <b>heavens and hells</b>,
+        resurrect the dead, <b>rewind time</b>, and create or unmake <b>entire planets</b> — including
+        doomed ones whose last child escapes by rocket.
+      </p>
+      <ul class="intro-tips">
+        <li>🖱 <b>Left-drag / tap</b> uses your selected power · ✋ pan · wheel/pinch zoom</li>
+        <li>🪐 The <b>Cosmos tab</b> holds your planets · 👻 the <b>Souls tab</b>, your afterlife</li>
+        <li>📖 The <b>Testament tab</b> is your story — hints inside if you want them</li>
+        <li>💾 <b>Autosaves</b>; the world keeps turning while you're away</li>
+      </ul>
+      <button id="intro-start" class="big-btn">▶ LET THERE BE LIGHT</button>
+    </div>
+  </div>
+
+  <!-- Offline progress modal -->
+  <div id="offline-modal" class="modal-overlay">
+    <div class="modal">
+      <div class="modal-title">⏳ While you were away…</div>
+      <div id="offline-body"></div>
+      <button id="offline-close" class="big-btn">Continue</button>
+    </div>
+  </div>
+
+  <!-- Menu modal -->
+  <div id="menu-modal" class="modal-overlay">
+    <div class="modal">
+      <div class="modal-title">☰ Divine Menu</div>
+      <div class="menu-btns">
+        <button id="menu-resume" class="menu-btn">▶ Resume</button>
+        <button id="menu-save" class="menu-btn">💾 Save multiverse</button>
+        <button id="menu-regen-seed" class="menu-btn">🌱 New multiverse from seed…</button>
+        <button id="menu-new" class="menu-btn danger">✦ New random multiverse</button>
+      </div>
+      <div class="menu-help">
+        <b>Controls</b><br>
+        WASD / arrows — pan · Wheel / pinch — zoom · worlds wrap around<br>
+        Space — pause · 1 / 2 / 3 — speed · 0 — pause<br>
+        [ ] — brush size · L — labels · Esc — close/deselect<br>
+        C — cosmos · P — prayers · H — history · M — menu<br><br>
+        <b>Need help?</b> Hints live in the 📖 Testament tab.
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script src="js/util.js"></script>
+<script src="js/codec.js"></script>
+<script src="js/world.js"></script>
+<script src="js/sim.js"></script>
+<script src="js/render.js"></script>
+<script src="js/society.js"></script>
+<script src="js/afterlife.js"></script>
+<script src="js/cosmos.js"></script>
+<script src="js/powers.js"></script>
+<script src="js/game.js"></script>
+</body>
+</html>
