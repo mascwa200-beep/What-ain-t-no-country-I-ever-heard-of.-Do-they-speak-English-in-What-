@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#0a0e1a">
+<title>PIXEL DEITY — an 8-bit god simulator</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' fill='%230a0e1a'/><rect x='6' y='2' width='4' height='4' fill='%23f0d040'/><rect x='4' y='6' width='8' height='6' fill='%235aa03c'/></svg>">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div id="app">
+
+  <!-- Game canvas -->
+  <canvas id="game"></canvas>
+
+  <!-- Top HUD -->
+  <header id="hud-top">
+    <div class="hud-left">
+      <div class="logo">PIXEL&nbsp;<span>DEITY</span></div>
+    </div>
+    <div class="hud-center">
+      <div class="stat faith" title="Divine Faith — your power. Earned from worshippers &amp; temples.">
+        <span class="stat-ico">✦</span>
+        <span id="faith-val">0</span>
+        <small id="faith-rate">+0/t</small>
+      </div>
+      <div class="stat" id="year-stat"><span id="year-val">Year 0</span></div>
+      <div class="stat" id="season-stat"><span id="season-val">🌱 Spring</span></div>
+      <div class="stat" id="vill-stat"><span id="vill-val">🏙 0</span></div>
+      <div id="race-counts" class="race-counts"></div>
+    </div>
+    <div class="hud-right">
+      <div class="speeds">
+        <button class="speed-btn" data-speed="0" title="Pause (Space)">❚❚</button>
+        <button class="speed-btn active" data-speed="1" title="Normal (1)">▶</button>
+        <button class="speed-btn" data-speed="2" title="Fast (2)">▶▶</button>
+        <button class="speed-btn" data-speed="4" title="Ludicrous (3)">▶▶▶</button>
+      </div>
+      <button class="icon-btn" id="btn-labels" title="Toggle town labels (L)">🏷</button>
+      <button class="icon-btn" id="btn-sound" title="Sound on/off">🔊</button>
+      <button class="icon-btn" id="btn-save" title="Save now">💾</button>
+      <button class="icon-btn" id="btn-menu" title="Menu (M)">☰</button>
+    </div>
+  </header>
+
+  <!-- Toolbar (powers) -->
+  <aside id="toolbar">
+    <div id="tools"></div>
+    <div id="power-info">
+      <div id="power-name">✋ Move Map</div>
+      <div id="power-desc">Drag to pan across your world.</div>
+      <div id="power-cost">Free</div>
+      <div class="brush-hint">Brush size: <b>[ ]</b> keys · Zoom: wheel/pinch</div>
+    </div>
+  </aside>
+
+  <!-- Inspect panel -->
+  <section id="inspect"></section>
+
+  <!-- Event log -->
+  <section id="chronicle">
+    <div class="chron-title">📜 Chronicle</div>
+    <div id="event-log"></div>
+  </section>
+
+  <!-- Toast -->
+  <div id="toast"></div>
+
+  <!-- Intro overlay -->
+  <div id="intro" class="modal-overlay show">
+    <div class="modal intro-card">
+      <div class="intro-logo">PIXEL&nbsp;<span>DEITY</span></div>
+      <div class="intro-sub">an 8-bit god simulator · infinite worlds</div>
+      <div class="intro-art">🌍✨⚡🌲🏰👹💀☄️</div>
+      <p class="intro-text">
+        You are a god over a tiny pixel world. <b>Raise land</b> from the sea,
+        <b>grow forests</b>, and <b>breathe life</b> into humans, elves, orcs and dwarves.
+        Watch civilizations rise, build cities, wage war, and fall to ruin — all on their own.
+        Bless the faithful or unleash <b>lightning, meteors and plague</b> upon them.
+      </p>
+      <ul class="intro-tips">
+        <li>🖱 <b>Left-drag / tap</b> uses your selected power</li>
+        <li>✋ <b>Move Map</b> tool or right-drag to pan · wheel/pinch to zoom</li>
+        <li>✦ <b>Faith</b> builds over time — even while you're away</li>
+        <li>💾 The world <b>autosaves</b> and keeps turning offline</li>
+      </ul>
+      <button id="intro-start" class="big-btn">▶ ENTER THE WORLD</button>
+    </div>
+  </div>
+
+  <!-- Offline progress modal -->
+  <div id="offline-modal" class="modal-overlay">
+    <div class="modal">
+      <div class="modal-title">⏳ While you were away…</div>
+      <div id="offline-body"></div>
+      <button id="offline-close" class="big-btn">Continue</button>
+    </div>
+  </div>
+
+  <!-- Menu modal -->
+  <div id="menu-modal" class="modal-overlay">
+    <div class="modal">
+      <div class="modal-title">☰ Divine Menu</div>
+      <div class="menu-btns">
+        <button id="menu-resume" class="menu-btn">▶ Resume</button>
+        <button id="menu-save" class="menu-btn">💾 Save world</button>
+        <button id="menu-regen-seed" class="menu-btn">🌱 New world from seed…</button>
+        <button id="menu-new" class="menu-btn danger">✦ New random world</button>
+      </div>
+      <div class="menu-help">
+        <b>Controls</b><br>
+        WASD / arrows — pan · Wheel / pinch — zoom<br>
+        Space — pause · 1 / 2 / 3 — speed · 0 — pause<br>
+        [ ] — brush size · L — labels · Esc — deselect · M — menu
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script src="js/util.js"></script>
+<script src="js/world.js"></script>
+<script src="js/sim.js"></script>
+<script src="js/render.js"></script>
+<script src="js/powers.js"></script>
+<script src="js/game.js"></script>
+</body>
+</html>
