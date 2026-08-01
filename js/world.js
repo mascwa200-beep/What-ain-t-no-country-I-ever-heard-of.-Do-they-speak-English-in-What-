@@ -41,6 +41,16 @@
   function inBounds(w, x, y) { return x >= 0 && y >= 0 && x < w.W && y < w.H; }
   function idx(w, x, y) { return y * w.W + x; }
 
+  // Per-tile invalidation: mutators push changed tile indices so the renderer
+  // repaints only those tiles. Falls back to a full repaint (w.dirty) when the
+  // change set gets large (big terraform brushes, world gen, load).
+  const DIRTY_CAP = 2500;
+  function markTile(w, i) {
+    if (w.dirty) return;
+    if (w.dirtyTiles.length >= DIRTY_CAP) { w.dirty = true; w.dirtyTiles.length = 0; return; }
+    w.dirtyTiles.push(i);
+  }
+
   function isWater(b) { return b === B.DEEP || b === B.WATER || b === B.SWAMP; }
   function isLand(b) { return !(b === B.DEEP || b === B.WATER); }
 
@@ -59,7 +69,8 @@
       owner: new Int16Array(n),    // village id or -1
       struct: new Uint8Array(n),   // structure id
       structHp: new Uint8Array(n),
-      dirty: true                  // terrain needs re-render
+      dirty: true,                 // full terrain re-render needed
+      dirtyTiles: []               // individual tile indices to repaint
     };
     w.owner.fill(-1);
     generate(w);
@@ -142,7 +153,7 @@
     // preserve structures on land; clear if turned to water
     assignBiome(w, i, x, y);
     if (isWater(w.biome[i])) { w.struct[i] = 0; w.owner[i] = -1; w.tree[i] = 0; }
-    w.dirty = true;
+    markTile(w, i);
   }
 
   // Raise / lower elevation in a radius (terraform)
@@ -154,12 +165,12 @@
         const d = Math.sqrt(dx * dx + dy * dy);
         if (d > radius) continue;
         const i = idx(w, x, y);
-        const f = (1 - d / radius);
+        // radius 0 would make d/radius = 0/0 = NaN and poison elev forever
+        const f = radius > 0 ? (1 - d / radius) : 1;
         w.elev[i] = PD.clamp(w.elev[i] + amount * f, 0, 1);
         reclassTile(w, x, y);
       }
     }
-    w.dirty = true;
   }
 
   function paintBiome(w, cx, cy, radius, biome, fert, tree) {
@@ -177,9 +188,9 @@
           w.biome[i] = biome; w.fert[i] = fert; w.tree[i] = tree;
           if (isWater(biome)) { w.struct[i] = 0; w.owner[i] = -1; w.tree[i] = 0; }
         }
+        markTile(w, i);
       }
     }
-    w.dirty = true;
   }
 
   // Fire simulation step: spread & burn
@@ -219,7 +230,7 @@
         else if (b === B.SWAMP) { w.biome[i] = B.DIRT; w.fert[i] = 0.2; }
         w.tree[i] = 0;
         if (w.struct[i] !== 0 && rng() < 0.5) { w.struct[i] = S.RUIN; w.owner[i] = -1; }
-        w.dirty = true;
+        markTile(w, i);
       } else {
         w.fire[i] = nf;
       }
@@ -261,7 +272,8 @@
   // find nearest walkable land tile from x,y (spiral search)
   function nearestLand(w, x, y, maxR) {
     maxR = maxR || 30;
-    x = Math.round(x); y = Math.round(y);
+    // floor, not round: tile i spans [i, i+1) in world space
+    x = Math.floor(x); y = Math.floor(y);
     if (inBounds(w, x, y) && isLand(w.biome[idx(w, x, y)])) return { x, y };
     for (let r = 1; r <= maxR; r++) {
       for (let dy = -r; dy <= r; dy++) {
@@ -279,6 +291,6 @@
     B, S, BIOME_COLORS, BIOME_COLORS2,
     createWorld, generate, classify, reclassTile,
     raise, paintBiome, stepFire, ignite, extinguish,
-    inBounds, idx, isWater, isLand, countLand, nearestLand
+    inBounds, idx, isWater, isLand, countLand, nearestLand, markTile
   };
 })(window);

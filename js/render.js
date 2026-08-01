@@ -116,45 +116,54 @@
     return r;
   }
 
-  // Ordered dithering pattern for texture (Bayer 2x2-ish via tile parity)
+  // Paint one tile (terrain + structure) into the offscreen terrain cache.
+  // Everything a tile draws stays inside its own TILE x TILE cell, which is
+  // what makes cheap per-tile invalidation possible.
+  function renderTileAt(w, t, x, y) {
+    const i = W.idx(w, x, y);
+    const b = w.biome[i];
+    const px = x * TILE, py = y * TILE;
+    t.fillStyle = W.BIOME_COLORS[b];
+    t.fillRect(px, py, TILE, TILE);
+    // dither speckle for texture (Bayer 2x2-ish via tile parity)
+    if ((x + y) & 1) {
+      t.fillStyle = W.BIOME_COLORS2[b];
+      t.fillRect(px, py, TILE / 2, TILE / 2);
+      t.fillRect(px + TILE / 2, py + TILE / 2, TILE / 2, TILE / 2);
+    }
+    // coastline highlight on shallow water
+    if (b === B.WATER && (x + y) % 3 === 0) {
+      t.fillStyle = 'rgba(255,255,255,0.05)';
+      t.fillRect(px, py + TILE - 2, TILE, 1);
+    }
+    // subtle relief on land
+    if (W.isLand(b)) {
+      if (w.elev[i] > 0.7) { t.fillStyle = 'rgba(255,255,255,0.10)'; t.fillRect(px, py, TILE, 1); }
+      t.fillStyle = 'rgba(0,0,0,0.06)';
+      t.fillRect(px, py + TILE - 1, TILE, 1);
+    }
+    if (w.tree[i] > 0) drawTree(t, px, py, b, w.tree[i]);
+    if (w.struct[i]) drawStruct(t, px, py, w.struct[i], w.owner[i]);
+  }
+
   function renderTerrain(r) {
     const w = r.world, t = r.tctx;
     for (let y = 0; y < w.H; y++) {
-      for (let x = 0; x < w.W; x++) {
-        const i = W.idx(w, x, y);
-        const b = w.biome[i];
-        let c1 = W.BIOME_COLORS[b], c2 = W.BIOME_COLORS2[b];
-        // elevation shading for land relief
-        const px = x * TILE, py = y * TILE;
-        t.fillStyle = c1;
-        t.fillRect(px, py, TILE, TILE);
-        // dither speckle for texture
-        const par = (x + y) & 1;
-        if (par) { t.fillStyle = c2; t.fillRect(px, py, TILE / 2, TILE / 2); t.fillRect(px + TILE / 2, py + TILE / 2, TILE / 2, TILE / 2); }
-        // coastline highlight on shallow water next to land
-        if (b === B.WATER) {
-          t.fillStyle = 'rgba(255,255,255,0.05)';
-          if ((x + y) % 3 === 0) t.fillRect(px, py + TILE - 2, TILE, 1);
-        }
-        // subtle relief on high land
-        if (W.isLand(b)) {
-          const e = w.elev[i];
-          if (e > 0.7) { t.fillStyle = 'rgba(255,255,255,0.10)'; t.fillRect(px, py, TILE, 1); }
-          t.fillStyle = 'rgba(0,0,0,0.06)';
-          t.fillRect(px, py + TILE - 1, TILE, 1);
-        }
-        // trees
-        if (w.tree[i] > 0) drawTree(t, px, py, b, w.tree[i]);
-      }
-    }
-    // structures painted over terrain cache
-    for (let y = 0; y < w.H; y++) {
-      for (let x = 0; x < w.W; x++) {
-        const i = W.idx(w, x, y);
-        if (w.struct[i]) drawStruct(t, x * TILE, y * TILE, w.struct[i], w.owner[i]);
-      }
+      for (let x = 0; x < w.W; x++) renderTileAt(w, t, x, y);
     }
     w.dirty = false;
+    w.dirtyTiles.length = 0;
+  }
+
+  // Repaint only invalidated tiles (the common case each frame)
+  function renderDirtyTiles(r) {
+    const w = r.world, t = r.tctx;
+    const tiles = w.dirtyTiles;
+    for (let k = 0; k < tiles.length; k++) {
+      const i = tiles[k];
+      renderTileAt(w, t, i % w.W, (i / w.W) | 0);
+    }
+    tiles.length = 0;
   }
 
   function drawTree(t, px, py, biome, dens) {
@@ -276,6 +285,7 @@
   function draw(r, sim, ui) {
     const ctx = r.ctx, cam = r.cam, world = r.world;
     if (world.dirty) renderTerrain(r);
+    else if (world.dirtyTiles.length) renderDirtyTiles(r);
 
     // background void
     ctx.fillStyle = '#05070f';
@@ -324,6 +334,10 @@
     const topLeft = screenToWorld(r, 0, 0), botRight = screenToWorld(r, r.w, r.h);
     const x0 = Math.max(0, Math.floor(topLeft.x)), y0 = Math.max(0, Math.floor(topLeft.y));
     const x1 = Math.min(world.W - 1, Math.ceil(botRight.x)), y1 = Math.min(world.H - 1, Math.ceil(botRight.y));
+    // precompute owner-id -> rgba string once per frame instead of per edge
+    const cols = new Map();
+    for (const v of sim.villages) cols.set(v.id, hexA(v.col, 0.5));
+    const fallback = 'rgba(255,255,255,0.2)';
     for (let y = y0; y <= y1; y++) {
       for (let x = x0; x <= x1; x++) {
         const i = W.idx(world, x, y);
@@ -333,8 +347,7 @@
         const right = x < world.W - 1 ? world.owner[i + 1] : -2;
         const down = y < world.H - 1 ? world.owner[i + world.W] : -2;
         if (right !== o || down !== o) {
-          const v = PD.Sim.villageById(sim, o);
-          ctx.fillStyle = v ? hexA(v.col, 0.5) : 'rgba(255,255,255,0.2)';
+          ctx.fillStyle = cols.get(o) || fallback;
           const s = worldToScreen(r, x, y);
           if (right !== o) ctx.fillRect(Math.round(s.x + cz - 1), Math.round(s.y), 1, Math.ceil(cz));
           if (down !== o) ctx.fillRect(Math.round(s.x), Math.round(s.y + cz - 1), Math.ceil(cz), 1);
@@ -469,19 +482,37 @@
   }
 
   // ---- minimap ---------------------------------------------------------
-  let miniCanvas = null, miniCtx = null, miniDirtyTick = -1;
+  let miniCanvas = null, miniCtx = null, miniDirtyTick = -1, miniImg = null;
+  let biomeLUT = null; // biome id -> [r,g,b], built once
   function drawMinimap(r, sim) {
     const world = r.world;
     const MW = 120, scale = MW / world.W, MH = Math.round(world.H * scale);
-    if (!miniCanvas) { miniCanvas = document.createElement('canvas'); miniCanvas.width = world.W; miniCanvas.height = world.H; miniCtx = miniCanvas.getContext('2d'); }
+    if (!miniCanvas) {
+      miniCanvas = document.createElement('canvas');
+      miniCanvas.width = world.W; miniCanvas.height = world.H;
+      miniCtx = miniCanvas.getContext('2d');
+    }
+    if (!biomeLUT) {
+      biomeLUT = [];
+      for (const k in W.BIOME_COLORS) biomeLUT[+k] = hexToRgb(W.BIOME_COLORS[k]);
+    }
     // redraw minimap terrain occasionally
     if (world.dirtyMini || miniDirtyTick < 0 || (sim.tick - miniDirtyTick) > 30) {
-      const img = miniCtx.createImageData(world.W, world.H);
+      if (!miniImg || miniImg.width !== world.W || miniImg.height !== world.H) {
+        miniImg = miniCtx.createImageData(world.W, world.H);
+      }
+      // owner id -> rgb, computed once per regen instead of per tile
+      const ownerRGB = new Map();
+      for (const v of sim.villages) ownerRGB.set(v.id, hexToRgb(v.col));
+      const img = miniImg;
       for (let i = 0; i < world.n; i++) {
-        const c = hexToRgb(W.BIOME_COLORS[world.biome[i]]);
-        const o = world.owner[i];
+        const c = biomeLUT[world.biome[i]];
         let rr = c[0], gg = c[1], bb = c[2];
-        if (o >= 0) { const v = PD.Sim.villageById(sim, o); if (v) { const vc = hexToRgb(v.col); rr = (rr + vc[0] * 2) / 3; gg = (gg + vc[1] * 2) / 3; bb = (bb + vc[2] * 2) / 3; } }
+        const o = world.owner[i];
+        if (o >= 0) {
+          const vc = ownerRGB.get(o);
+          if (vc) { rr = (rr + vc[0] * 2) / 3; gg = (gg + vc[1] * 2) / 3; bb = (bb + vc[2] * 2) / 3; }
+        }
         if (world.fire[i] > 0) { rr = 255; gg = 120; bb = 20; }
         const p = i * 4; img.data[p] = rr; img.data[p + 1] = gg; img.data[p + 2] = bb; img.data[p + 3] = 255;
       }
@@ -494,10 +525,13 @@
     ctx.fillRect(mx - 3, my - 3, MW + 6, MH + 6);
     ctx.imageSmoothingEnabled = false;
     ctx.drawImage(miniCanvas, mx, my, MW, MH);
-    // viewport rect
+    // viewport rect, clipped so it never spills outside the minimap
     const tl = screenToWorld(r, 0, 0), br = screenToWorld(r, r.w, r.h);
+    ctx.save();
+    ctx.beginPath(); ctx.rect(mx, my, MW, MH); ctx.clip();
     ctx.strokeStyle = '#fff'; ctx.lineWidth = 1;
     ctx.strokeRect(mx + tl.x * scale, my + tl.y * scale, (br.x - tl.x) * scale, (br.y - tl.y) * scale);
+    ctx.restore();
     ctx.strokeStyle = '#2a2f45'; ctx.strokeRect(mx - 3, my - 3, MW + 6, MH + 6);
     r._mini = { mx, my, MW, MH, scale };
   }

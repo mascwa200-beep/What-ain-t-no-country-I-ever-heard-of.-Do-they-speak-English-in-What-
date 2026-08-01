@@ -57,7 +57,7 @@
       apply(G, wx, wy) {
         const race = G.lastRace || 'human';
         if (G.faith < this.cost) { snd('error'); return 0; }
-        const v = Sim.foundVillage(G.sim, race, Math.round(wx), Math.round(wy));
+        const v = Sim.foundVillage(G.sim, race, Math.floor(wx), Math.floor(wy));
         if (!v) { snd('error'); return 0; }
         FX.shock(v.x + 0.5, v.y + 0.5, 6, '#ffe066'); snd('levelup');
         return this.cost;
@@ -69,7 +69,7 @@
       desc: 'Lift the earth from the sea. Raise mountains and forge new continents.',
       apply(G, wx, wy) {
         if (G.faith < this.cost) { snd('error'); return 0; }
-        W.raise(G.world, Math.round(wx), Math.round(wy), G.power.radius, 0.06);
+        W.raise(G.world, Math.floor(wx), Math.floor(wy), G.power.radius, 0.06);
         G.world.dirtyMini = true; snd('terra'); return this.cost;
       } },
     { id: 'lower', name: 'Lower Land', icon: '🌊', cat: 'terra', cost: 3, radius: 3, cont: true,
@@ -77,7 +77,7 @@
       desc: 'Sink the land beneath the waves. Carve seas, lakes and rivers.',
       apply(G, wx, wy) {
         if (G.faith < this.cost) { snd('error'); return 0; }
-        W.raise(G.world, Math.round(wx), Math.round(wy), G.power.radius, -0.06);
+        W.raise(G.world, Math.floor(wx), Math.floor(wy), G.power.radius, -0.06);
         G.world.dirtyMini = true; snd('terra'); return this.cost;
       } },
     { id: 'forest', name: 'Grow Forest', icon: '🌲', cat: 'terra', cost: 2, radius: 3, cont: true,
@@ -85,7 +85,7 @@
       desc: 'Cover the land in verdant woodland, rich with life and fertility.',
       apply(G, wx, wy) {
         if (G.faith < this.cost) { snd('error'); return 0; }
-        W.paintBiome(G.world, Math.round(wx), Math.round(wy), G.power.radius, B.FOREST, 0.7, 2);
+        W.paintBiome(G.world, Math.floor(wx), Math.floor(wy), G.power.radius, B.FOREST, 0.7, 2);
         G.world.dirtyMini = true; snd('terra'); return this.cost;
       } },
     { id: 'grass', name: 'Grow Grass', icon: '🌱', cat: 'terra', cost: 2, radius: 3, cont: true,
@@ -93,7 +93,7 @@
       desc: 'Spread fertile grassland, ideal for farms and grazing herds.',
       apply(G, wx, wy) {
         if (G.faith < this.cost) { snd('error'); return 0; }
-        W.paintBiome(G.world, Math.round(wx), Math.round(wy), G.power.radius, B.GRASS, 0.6, 0);
+        W.paintBiome(G.world, Math.floor(wx), Math.floor(wy), G.power.radius, B.GRASS, 0.6, 0);
         G.world.dirtyMini = true; snd('terra'); return this.cost;
       } },
     { id: 'desert', name: 'Desertify', icon: '🏜️', cat: 'terra', cost: 2, radius: 3, cont: true,
@@ -101,7 +101,7 @@
       desc: 'Bake the land into barren desert. Little grows in the burning sands.',
       apply(G, wx, wy) {
         if (G.faith < this.cost) { snd('error'); return 0; }
-        W.paintBiome(G.world, Math.round(wx), Math.round(wy), G.power.radius, B.DESERT, 0.04, 0);
+        W.paintBiome(G.world, Math.floor(wx), Math.floor(wy), G.power.radius, B.DESERT, 0.04, 0);
         G.world.dirtyMini = true; snd('terra'); return this.cost;
       } },
     { id: 'mountain', name: 'Raise Peaks', icon: '🗻', cat: 'terra', cost: 4, radius: 2, cont: true,
@@ -109,8 +109,8 @@
       desc: 'Thrust jagged rock into the sky — the cradle of the Dwarves.',
       apply(G, wx, wy) {
         if (G.faith < this.cost) { snd('error'); return 0; }
-        W.raise(G.world, Math.round(wx), Math.round(wy), G.power.radius, 0.12);
-        W.paintBiome(G.world, Math.round(wx), Math.round(wy), G.power.radius, B.ROCK, 0.05, 0);
+        W.raise(G.world, Math.floor(wx), Math.floor(wy), G.power.radius, 0.12);
+        W.paintBiome(G.world, Math.floor(wx), Math.floor(wy), G.power.radius, B.ROCK, 0.05, 0);
         G.world.dirtyMini = true; snd('terra'); return this.cost;
       } },
 
@@ -129,7 +129,7 @@
       desc: 'Summon rain to douse flames and enrich the soil.',
       apply(G, wx, wy) {
         if (G.faith < this.cost) { snd('error'); return 0; }
-        W.extinguish(G.world, Math.round(wx), Math.round(wy), G.power.radius);
+        W.extinguish(G.world, Math.floor(wx), Math.floor(wy), G.power.radius);
         G.setWeather('rain', 240);
         for (let i = 0; i < 12; i++) FX.spawn(wx + (Math.random() - 0.5) * G.power.radius * 2, wy - G.power.radius, 0.05, 0.25, 20, '#9ac0f0', 1, 0.004);
         G.world.dirtyMini = true; snd('rain'); return this.cost;
@@ -144,7 +144,7 @@
         FX.bolt(wx, wy - 30, wx, wy);
         FX.lightning(wx, wy); FX.shock(wx, wy, 3, '#cfe8ff');
         Sim.damageArea(G.sim, wx, wy, this.radius + 0.5, 40, null);
-        if (Math.random() < 0.6) W.ignite(G.world, Math.round(wx), Math.round(wy), 1);
+        if (Math.random() < 0.6) W.ignite(G.world, Math.floor(wx), Math.floor(wy), 1);
         G.flash = 0.5; snd('lightning'); return this.cost;
       } },
     { id: 'fire', name: 'Ignite', icon: '🔥', cat: 'wrath', cost: 5, radius: 2, cont: true,
@@ -152,7 +152,7 @@
       desc: 'Set the world ablaze. Fire spreads through forest and field.',
       apply(G, wx, wy) {
         if (G.faith < this.cost) { snd('error'); return 0; }
-        W.ignite(G.world, Math.round(wx), Math.round(wy), G.power.radius);
+        W.ignite(G.world, Math.floor(wx), Math.floor(wy), G.power.radius);
         FX.fireBurst(wx, wy); snd('fire'); return this.cost;
       } },
     { id: 'meteor', name: 'Meteor', icon: '☄️', cat: 'wrath', cost: 30, radius: 4, cont: false,
@@ -161,9 +161,9 @@
       apply(G, wx, wy) {
         if (G.faith < this.cost) { snd('error'); return 0; }
         FX.explosion(wx, wy, true); FX.shock(wx, wy, this.radius + 2, '#ffb060');
-        W.raise(G.world, Math.round(wx), Math.round(wy), this.radius, -0.1);
-        W.paintBiome(G.world, Math.round(wx), Math.round(wy), Math.max(1, this.radius - 2), B.ASH, 0.05, 0);
-        W.ignite(G.world, Math.round(wx), Math.round(wy), this.radius);
+        W.raise(G.world, Math.floor(wx), Math.floor(wy), this.radius, -0.1);
+        W.paintBiome(G.world, Math.floor(wx), Math.floor(wy), Math.max(1, this.radius - 2), B.ASH, 0.05, 0);
+        W.ignite(G.world, Math.floor(wx), Math.floor(wy), this.radius);
         Sim.damageArea(G.sim, wx, wy, this.radius + 1, 100, null);
         G.world.dirtyMini = true; G.flash = 0.7; G.shake = 12; snd('meteor'); return this.cost;
       } },
@@ -184,22 +184,22 @@
         // damage structures in radius
         const world = G.world, R = this.radius;
         for (let dy = -R; dy <= R; dy++) for (let dx = -R; dx <= R; dx++) {
-          const x = Math.round(wx) + dx, y = Math.round(wy) + dy;
+          const x = Math.floor(wx) + dx, y = Math.floor(wy) + dy;
           if (!W.inBounds(world, x, y) || dx * dx + dy * dy > R * R) continue;
           const i = W.idx(world, x, y);
-          if (world.struct[i] && Math.random() < 0.5) { world.struct[i] = W.S.RUIN; world.owner[i] = -1; }
+          if (world.struct[i] && Math.random() < 0.5) { world.struct[i] = W.S.RUIN; world.owner[i] = -1; W.markTile(world, i); }
         }
         Sim.damageArea(G.sim, wx, wy, R, 55, null);
         FX.shock(wx, wy, R, '#c8a060'); FX.shock(wx, wy, R * 0.6, '#e0c080');
-        G.world.dirty = true; G.world.dirtyMini = true; G.shake = 20; snd('quake'); return this.cost;
+        G.world.dirtyMini = true; G.shake = 20; snd('quake'); return this.cost;
       } },
     { id: 'freeze', name: 'Freeze', icon: '❄️', cat: 'wrath', cost: 10, radius: 5, cont: true,
       color: 'rgba(190,220,255,0.9)',
       desc: 'Cast a deep frost, turning the land to snow and chilling the weather.',
       apply(G, wx, wy) {
         if (G.faith < this.cost) { snd('error'); return 0; }
-        W.paintBiome(G.world, Math.round(wx), Math.round(wy), G.power.radius, B.SNOW, 0.08, 0);
-        W.extinguish(G.world, Math.round(wx), Math.round(wy), G.power.radius);
+        W.paintBiome(G.world, Math.floor(wx), Math.floor(wy), G.power.radius, B.SNOW, 0.08, 0);
+        W.extinguish(G.world, Math.floor(wx), Math.floor(wy), G.power.radius);
         G.setWeather('snow', 240);
         G.world.dirtyMini = true; snd('rain'); return this.cost;
       } },

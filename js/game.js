@@ -148,9 +148,10 @@
       biome: b64(w.biome), elev: f32b64(w.elev), moist: f32b64(w.moist),
       temp: f32b64(w.temp), fert: f32b64(w.fert), tree: b64(w.tree),
       owner: i16b64(w.owner), struct: b64(w.struct),
+      fire: b64(w.fire), structHp: b64(w.structHp),
       tick: s.tick, nextUnitId: s.nextUnitId, nextVillageId: s.nextVillageId,
       villages: s.villages,
-      units: s.units.filter(u => !u.dead).map(u => [u.id, u.race, +u.x.toFixed(2), +u.y.toFixed(2), Math.round(u.hp), u.age | 0, u.village, u.sick | 0, +u.food.toFixed(2)])
+      units: s.units.filter(u => !u.dead).map(u => [u.id, u.race, +u.x.toFixed(2), +u.y.toFixed(2), Math.round(u.hp), u.age | 0, u.village, u.sick | 0, +u.food.toFixed(2), Math.round(u.lifespan), u.adultAt | 0])
     };
   }
 
@@ -177,27 +178,36 @@
       w.biome.set(ub64(d.biome)); w.elev.set(uf32b64(d.elev)); w.moist.set(uf32b64(d.moist));
       w.temp.set(uf32b64(d.temp)); w.fert.set(uf32b64(d.fert)); w.tree.set(ub64(d.tree));
       w.owner.set(ui16b64(d.owner)); w.struct.set(ub64(d.struct));
+      if (d.fire) w.fire.set(ub64(d.fire));
+      if (d.structHp) w.structHp.set(ub64(d.structHp));
       w.dirty = true; w.dirtyMini = true;
       G.sim = Sim.createSim(w, PD.makeRNG(PD.hashSeed(d.seed) ^ 0x9e3779b9));
       G.sim.tick = d.tick || 0; G.sim.nextUnitId = d.nextUnitId || 1; G.sim.nextVillageId = d.nextVillageId || 1;
       G.sim.villages = d.villages || [];
       G.sim.units = (d.units || []).map(a => {
         const R = Sim.RACES[a[1]] || Sim.RACES.human;
+        // lifespan is per-unit randomized at spawn; older saves lack it, so
+        // fall back to at least (age + margin) — never kill elders on load
+        const lifespan = a[9] != null ? a[9] : Math.max(R.lifespan * 1.2, a[5] + 200);
+        const adultAt = a[10] != null ? a[10] : 70;
         return { id: a[0], race: a[1], x: a[2], y: a[3], hp: a[4], maxHp: R.hp, age: a[5], village: a[6], sick: a[7], food: a[8],
-                 adultAt: 70, lifespan: R.lifespan, state: 'wander', tx: a[2], ty: a[3], cd: 0, breedCd: 40, flip: 1, bob: Math.random() * 6.28 };
+                 adultAt, lifespan, state: 'wander', tx: a[2], ty: a[3], cd: 0, breedCd: 40,
+                 raidT: 0, raidX: 0, raidY: 0, flip: 1, bob: Math.random() * 6.28 };
       });
       Sim.recount(G.sim);
       G.faith = d.faith != null ? d.faith : 40;
       G.faithTotal = d.faithTotal || 0;
       G.lastRace = d.lastRace || 'human';
-      G.speed = d.speed || 1;
+      G.speed = (typeof d.speed === 'number') ? d.speed : 1;
       G.stats = d.stats || G.stats;
       if (G.r) { G.r.world = w; Render.renderTerrain(G.r);
         if (d.cam) { G.r.cam.x = d.cam.x; G.r.cam.y = d.cam.y; G.r.cam.zoom = d.cam.zoom; } }
-      // offline progress
-      const elapsed = (Date.now() - (d.t || Date.now())) / 1000;
-      const off = runOffline(elapsed);
-      if (off) showOffline(off);
+      // offline progress — but a world saved while paused stays frozen
+      if (G.speed !== 0) {
+        const elapsed = (Date.now() - (d.t || Date.now())) / 1000;
+        const off = runOffline(elapsed);
+        if (off) showOffline(off);
+      }
       return true;
     } catch (e) {
       console.warn('load failed', e);
@@ -232,8 +242,8 @@
       if (d < bd) { bd = d; best = u; }
     }
     if (best) { G.selected = { type: 'unit', ref: best }; Audio8.sfx('select'); refreshPanel(); return; }
-    // village by owned tile / center
-    const ix = Math.round(wx), iy = Math.round(wy);
+    // village by owned tile / center (floor: tile i spans [i, i+1))
+    const ix = Math.floor(wx), iy = Math.floor(wy);
     if (W.inBounds(G.world, ix, iy)) {
       const o = G.world.owner[W.idx(G.world, ix, iy)];
       if (o >= 0) { const v = Sim.villageById(G.sim, o); if (v) { G.selected = { type: 'village', ref: v }; Audio8.sfx('select'); refreshPanel(); return; } }
@@ -404,8 +414,10 @@
     let pinchD = 0, touchPanning = false;
     cv.addEventListener('touchstart', (e) => {
       Audio8.unlock();
-      if (e.touches.length === 2) {
-        pinchD = touchDist(e); touchPanning = false;
+      if (e.touches.length >= 2) {
+        // any multi-touch is a pinch: cancel single-finger actions so a
+        // stray third finger can never fire a power at the first finger
+        pinchD = touchDist(e); touchPanning = false; dragging = false;
       } else {
         const l = localXY(e); lastX = l.x; lastY = l.y; downX = l.x; downY = l.y; moved = 0;
         if (onMinimap(l.x, l.y)) { jumpMinimap(l.x, l.y); e.preventDefault(); return; }
@@ -416,7 +428,7 @@
       e.preventDefault();
     }, { passive: false });
     cv.addEventListener('touchmove', (e) => {
-      if (e.touches.length === 2) {
+      if (e.touches.length >= 2) {
         const nd = touchDist(e);
         const mid = touchMid(e, cv);
         const before = Render.screenToWorld(G.r, mid.x, mid.y);
@@ -449,21 +461,30 @@
       else if (k === '=' || k === '+') zoomBy(1.2);
       else if (k === '-' || k === '_') zoomBy(1 / 1.2);
       else if (k === 'escape') { G.selected = null; refreshPanel(); setPower('pan'); }
-      else if (k === 'l') { G.ui.showLabels = !G.ui.showLabels; }
+      else if (k === 'l') { toggleLabels(); }
       else if (k === 'm') { toggleMenu(); }
     });
     global.addEventListener('keyup', (e) => { keys[e.key.toLowerCase()] = false; });
 
-    // brush radius via bracket keys / wheel+shift
+    // brush radius via bracket keys (only for powers that have a brush;
+    // floor of 1 — radius 0 is reserved for point powers like Inspect)
     global.addEventListener('keydown', (e) => {
-      if (e.key === '[') { if (G.power) G.power.radius = Math.max(0, G.power.radius - 1); G.ui.brushRadius = G.power.radius; }
-      if (e.key === ']') { if (G.power) G.power.radius = Math.min(14, G.power.radius + 1); G.ui.brushRadius = G.power.radius; }
+      if (!G.power || Powers.BY_ID[G.power.id].radius === 0) return;
+      if (e.key === '[') { G.power.radius = Math.max(1, G.power.radius - 1); G.ui.brushRadius = G.power.radius; }
+      if (e.key === ']') { G.power.radius = Math.min(14, G.power.radius + 1); G.ui.brushRadius = G.power.radius; }
     });
 
     global.addEventListener('resize', () => G.r.resize());
+    // a focus change can swallow keyup events, leaving pan keys stuck down
+    global.addEventListener('blur', () => { keys = {}; });
     // save on unload
     global.addEventListener('beforeunload', () => { try { save(); } catch (e) {} });
-    document.addEventListener('visibilitychange', () => { if (document.hidden) save(); });
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) { keys = {}; save(); Audio8.suspend(); }
+      else Audio8.resumeAll();
+    });
+    // delegated clicks for the inspect panel (its innerHTML is rebuilt often)
+    $('#inspect').addEventListener('click', onInspectClick);
   }
   function touchDist(e) { const a = e.touches[0], b = e.touches[1]; return Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY); }
   function touchMid(e, cv) { const r = cv.getBoundingClientRect(); const a = e.touches[0], b = e.touches[1]; return { x: (a.clientX + b.clientX) / 2 - r.left, y: (a.clientY + b.clientY) / 2 - r.top }; }
@@ -549,7 +570,7 @@
       const u = sel.ref;
       if (u.dead) { G.selected = null; panel.classList.remove('show'); return; }
       const R = Sim.RACES[u.race];
-      html = `<div class="ins-title">${R.emoji} ${R.name.slice(0, -1) || R.name}</div>
+      html = `<div class="ins-title">${R.emoji} ${R.one || R.name}</div>
         <div class="ins-row"><span>State</span><b>${u.state}${u.sick ? ' 🤢sick' : ''}</b></div>
         <div class="ins-bar"><span>HP</span>${bar(u.hp / u.maxHp, R.col2)}</div>
         <div class="ins-bar"><span>Food</span>${bar(u.food, '#7ac043')}</div>
@@ -580,8 +601,21 @@
     }
     html += `<button class="ins-close" id="ins-close">✕ close</button>`;
     panel.innerHTML = html;
-    const sb = $('#smite-btn'); if (sb) sb.onclick = () => { const v = G.selected.ref; Powers.BY_ID.lightning.apply(G, v.x, v.y); };
-    const cb = $('#ins-close'); if (cb) cb.onclick = () => { G.selected = null; panel.classList.remove('show'); };
+    // clicks are handled by one delegated listener installed in boot() —
+    // per-rebuild onclick handlers get destroyed by the 250ms refresh
+  }
+
+  function onInspectClick(e) {
+    const btn = e.target.closest('button');
+    if (!btn) return;
+    if (btn.id === 'ins-close') {
+      G.selected = null; $('#inspect').classList.remove('show');
+    } else if (btn.id === 'smite-btn' && G.selected && G.selected.type === 'village') {
+      const v = G.selected.ref;
+      // charge faith exactly like applyPower does
+      const spent = Powers.BY_ID.lightning.apply(G, v.x, v.y);
+      if (spent > 0) { G.faith -= spent; refreshHUD(); }
+    }
   }
   function bar(v, col) { v = PD.clamp(v, 0, 1); return `<div class="bar"><div class="bar-fill" style="width:${(v * 100).toFixed(0)}%;background:${col}"></div></div>`; }
   function villName(id) { const v = Sim.villageById(G.sim, id); return v ? v.name : null; }
@@ -609,6 +643,10 @@
   }
 
   function toggleMenu() { $('#menu-modal').classList.toggle('show'); }
+  function toggleLabels() {
+    G.ui.showLabels = !G.ui.showLabels;
+    $('#btn-labels').classList.toggle('off', !G.ui.showLabels);
+  }
 
   // ================= Boot =================
   function boot() {
@@ -628,7 +666,7 @@
     document.querySelectorAll('.speed-btn').forEach(b => b.addEventListener('click', () => setSpeed(+b.dataset.speed)));
     $('#btn-menu').addEventListener('click', toggleMenu);
     $('#btn-save').addEventListener('click', () => save());
-    $('#btn-labels').addEventListener('click', () => { G.ui.showLabels = !G.ui.showLabels; $('#btn-labels').classList.toggle('off', !G.ui.showLabels); });
+    $('#btn-labels').addEventListener('click', toggleLabels);
     $('#btn-sound').addEventListener('click', () => {
       const on = !Audio8.isEnabled(); Audio8.setEnabled(on); Audio8.setMusic(on);
       $('#btn-sound').textContent = on ? '🔊' : '🔇';
@@ -663,7 +701,7 @@
     }
     // if no save, seed already created via newWorld
 
-    setSpeed(G.speed || 1);
+    setSpeed(typeof G.speed === 'number' ? G.speed : 1);
     refreshHUD();
 
     G.running = true; G.lastT = performance.now();

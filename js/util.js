@@ -168,7 +168,10 @@
       setEnabled(v) { enabled = v; if (!v) stopMusic(); },
       setMusic(v) { musicOn = v; if (v && started) startMusic(); else stopMusic(); },
       isEnabled() { return enabled; },
-      isMusic() { return musicOn; }
+      isMusic() { return musicOn; },
+      // stop creating oscillator nodes while the tab is hidden
+      suspend() { stopMusic(); if (ctx && ctx.state === 'running') ctx.suspend(); },
+      resumeAll() { if (!enabled || !started) return; resume(); if (musicOn) startMusic(); }
     };
   })();
 

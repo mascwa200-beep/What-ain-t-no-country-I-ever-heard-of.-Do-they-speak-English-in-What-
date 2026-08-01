@@ -12,13 +12,13 @@
   // ---- Race definitions ------------------------------------------------
   // aggr: base aggression, breed: breeding tempo, dmg, hp, spd (tiles/step)
   const RACES = {
-    human:   { name: 'Humans',   col: '#f2c39a', col2: '#3a5fb0', emoji: '🧑', aggr: 0.35, breed: 1.2,  dmg: 6,  hp: 30, spd: 0.10, lifespan: 2600, likes: [B.GRASS, B.FOREST, B.DIRT], sentient: true },
-    elf:     { name: 'Elves',    col: '#bfe9a0', col2: '#2f8a4a', emoji: '🧝', aggr: 0.20, breed: 0.95, dmg: 8,  hp: 26, spd: 0.12, lifespan: 4200, likes: [B.FOREST, B.JUNGLE],        sentient: true },
-    orc:     { name: 'Orcs',     col: '#8fbf6a', col2: '#4a5a24', emoji: '👹', aggr: 0.85, breed: 1.5,  dmg: 9,  hp: 38, spd: 0.11, lifespan: 1900, likes: [B.DIRT, B.DESERT, B.ROCK],  sentient: true },
-    dwarf:   { name: 'Dwarves',  col: '#e0a86a', col2: '#8a5a2a', emoji: '🧔', aggr: 0.45, breed: 1.05, dmg: 7,  hp: 46, spd: 0.08, lifespan: 3600, likes: [B.ROCK, B.SNOW, B.DIRT],    sentient: true },
-    undead:  { name: 'Undead',   col: '#b7c7c9', col2: '#4a2a4a', emoji: '💀', aggr: 1.0,  breed: 0.0,  dmg: 7,  hp: 34, spd: 0.09, lifespan: 5000, likes: [B.ASH, B.DIRT, B.ROCK],     sentient: false, monster: true },
-    critter: { name: 'Critters', col: '#e6d8b0', col2: '#b09060', emoji: '🐇', aggr: 0.0,  breed: 1.6,  dmg: 1,  hp: 8,  spd: 0.09, lifespan: 900,  likes: [B.GRASS, B.FOREST],         sentient: false, animal: true, prey: true },
-    wolf:    { name: 'Wolves',   col: '#9aa0a8', col2: '#40444a', emoji: '🐺', aggr: 0.7,  breed: 0.7,  dmg: 5,  hp: 18, spd: 0.13, lifespan: 1300, likes: [B.FOREST, B.SNOW, B.GRASS], sentient: false, animal: true, predator: true }
+    human:   { name: 'Humans',   one: 'Human',   col: '#f2c39a', col2: '#3a5fb0', emoji: '🧑', aggr: 0.35, breed: 1.2,  dmg: 6,  hp: 30, spd: 0.10, lifespan: 2600, likes: [B.GRASS, B.FOREST, B.DIRT], sentient: true },
+    elf:     { name: 'Elves',    one: 'Elf',     col: '#bfe9a0', col2: '#2f8a4a', emoji: '🧝', aggr: 0.20, breed: 0.95, dmg: 8,  hp: 26, spd: 0.12, lifespan: 4200, likes: [B.FOREST, B.JUNGLE],        sentient: true },
+    orc:     { name: 'Orcs',     one: 'Orc',     col: '#8fbf6a', col2: '#4a5a24', emoji: '👹', aggr: 0.85, breed: 1.5,  dmg: 9,  hp: 38, spd: 0.11, lifespan: 1900, likes: [B.DIRT, B.DESERT, B.ROCK],  sentient: true },
+    dwarf:   { name: 'Dwarves',  one: 'Dwarf',   col: '#e0a86a', col2: '#8a5a2a', emoji: '🧔', aggr: 0.45, breed: 1.05, dmg: 7,  hp: 46, spd: 0.08, lifespan: 3600, likes: [B.ROCK, B.SNOW, B.DIRT],    sentient: true },
+    undead:  { name: 'Undead',   one: 'Undead',  col: '#b7c7c9', col2: '#4a2a4a', emoji: '💀', aggr: 1.0,  breed: 0.0,  dmg: 7,  hp: 34, spd: 0.09, lifespan: 5000, likes: [B.ASH, B.DIRT, B.ROCK],     sentient: false, monster: true },
+    critter: { name: 'Critters', one: 'Critter', col: '#e6d8b0', col2: '#b09060', emoji: '🐇', aggr: 0.0,  breed: 1.6,  dmg: 1,  hp: 8,  spd: 0.09, lifespan: 900,  likes: [B.GRASS, B.FOREST],         sentient: false, animal: true, prey: true },
+    wolf:    { name: 'Wolves',   one: 'Wolf',    col: '#9aa0a8', col2: '#40444a', emoji: '🐺', aggr: 0.7,  breed: 0.7,  dmg: 5,  hp: 18, spd: 0.13, lifespan: 1300, likes: [B.FOREST, B.SNOW, B.GRASS], sentient: false, animal: true, predator: true }
   };
   const SENTIENT = ['human', 'elf', 'orc', 'dwarf'];
 
@@ -97,11 +97,18 @@
     const g = sim.grid; if (!g) return;
     const cx = (x / CELL) | 0, cy = (y / CELL) | 0;
     const rc = Math.ceil(r / CELL);
+    const r2 = r * r;
     for (let dy = -rc; dy <= rc; dy++) {
       for (let dx = -rc; dx <= rc; dx++) {
         const arr = g.get((cx + dx) + ',' + (cy + dy));
         if (!arr) continue;
-        for (const u of arr) if (!u.dead) cb(u);
+        for (const u of arr) {
+          if (u.dead) continue;
+          // narrow phase: the coarse cell walk over-scans up to a whole
+          // cell-block, so enforce the true radius here for every caller
+          const ddx = u.x - x, ddy = u.y - y;
+          if (ddx * ddx + ddy * ddy <= r2) cb(u);
+        }
       }
     }
   }
@@ -120,7 +127,7 @@
       lifespan: R.lifespan * (0.8 + sim.rng() * 0.4),
       state: 'wander', tx: x, ty: y,
       food: 0.8, village: (opts && opts.village != null) ? opts.village : -1,
-      cd: 0, sick: 0, breedCd: 40,
+      cd: 0, sick: 0, breedCd: 40, raidT: 0, raidX: 0, raidY: 0,
       flip: sim.rng() < 0.5 ? 1 : -1,
       bob: sim.rng() * 6.28
     };
@@ -130,6 +137,10 @@
 
   function foundVillage(sim, race, x, y) {
     const world = sim.world;
+    // hard cap on settlements (all callers respect a null return), and no
+    // ghost villages: founding needs room for at least one starter settler
+    if (sim.villages.length >= 80) return null;
+    if (sim.units.length >= sim.UNIT_CAP) return null;
     const spot = W.nearestLand(world, x, y, 20);
     if (!spot) return null;
     const R = RACES[race];
@@ -156,9 +167,10 @@
         world.owner[i] = v.id;
         if (world.fert[i] > 0.2 && farms < 3 && (dx * dx + dy * dy) <= 4) { world.struct[i] = S.FARM; world.structHp[i] = 100; farms++; }
         else if (sim.rng() < 0.3) { world.struct[i] = S.HOUSE; world.structHp[i] = 100; v.houses++; }
+        W.markTile(world, i);
       }
     }
-    world.dirty = true;
+    world.dirtyMini = true;
     // starter settlers
     for (let k = 0; k < 4; k++) {
       spawnUnit(sim, race, spot.x + (sim.rng() * 2 - 1), spot.y + (sim.rng() * 2 - 1), { village: v.id });
@@ -173,7 +185,7 @@
     if (W.isWater(world.biome[i])) return;
     world.owner[i] = v.id;
     if (struct != null) { world.struct[i] = struct; world.structHp[i] = 100; }
-    world.dirty = true;
+    W.markTile(world, i);
   }
 
   // ---- Movement helpers ------------------------------------------------
@@ -244,30 +256,40 @@
       if (u.sick > 200 && sim.rng() < 0.02) u.sick = 0; // recover
     }
 
-    // hunger
+    // hunger (the undead do not eat — only age and steel can end them)
     const v = u.village >= 0 ? villageById(sim, u.village) : null;
-    if (v && v.food > 0) {
-      u.food = PD.clamp(u.food + 0.02, 0, 1);
-      v.food -= 0.018;
-    } else {
-      // wild units forage from the land they stand on
-      const ti = W.idx(world, PD.clamp(Math.round(u.x), 0, world.W - 1), PD.clamp(Math.round(u.y), 0, world.H - 1));
-      const forage = world.fert[ti];
-      if (!RACES[u.race].monster && forage > 0.15) u.food = PD.clamp(u.food + forage * 0.012, 0, 1);
-      else u.food -= (R.animal ? 0.003 : 0.005);
-    }
-    if (u.food <= 0) {
-      u.hp -= 0.3;
-      if (u.hp <= 0) { killUnit(sim, u, 'starve'); return; }
-    } else if (u.hp < u.maxHp && u.food > 0.5) {
-      u.hp = PD.clamp(u.hp + 0.15, 0, u.maxHp);
+    if (!R.monster) {
+      if (v && v.food > 0) {
+        u.food = PD.clamp(u.food + 0.02, 0, 1);
+        v.food -= 0.018;
+      } else {
+        // wild units forage from the land they stand on
+        const ti = W.idx(world, PD.clamp(Math.floor(u.x), 0, world.W - 1), PD.clamp(Math.floor(u.y), 0, world.H - 1));
+        const forage = world.fert[ti];
+        if (forage > 0.15) u.food = PD.clamp(u.food + forage * 0.012, 0, 1);
+        else u.food -= (R.animal ? 0.003 : 0.005);
+      }
+      if (u.food <= 0) {
+        u.hp -= 0.3;
+        if (u.hp <= 0) { killUnit(sim, u, 'starve'); return; }
+      } else if (u.hp < u.maxHp && u.food > 0.5) {
+        u.hp = PD.clamp(u.hp + 0.15, 0, u.maxHp);
+      }
     }
 
     // ---- combat / hunting: scan neighbors ----
+    // village rivalry makes same-species-tolerant races fight each other
+    const rivalId = v && v.rival >= 0 ? v.rival : -1;
     let enemy = null, enemyD = 99;
     forNeighbors(sim, u.x, u.y, 3.2, (o) => {
       if (o === u) return;
-      if (hostile(u.race, o.race)) {
+      let isFoe = hostile(u.race, o.race);
+      if (!isFoe && rivalId >= 0 && o.village === rivalId) isFoe = true;
+      if (!isFoe && u.village >= 0 && o.village >= 0 && o.village !== u.village) {
+        const ov = villageById(sim, o.village);
+        if (ov && ov.rival === u.village) isFoe = true; // they declared on us
+      }
+      if (isFoe) {
         const d = PD.dist(u.x, u.y, o.x, o.y);
         if (d < enemyD) { enemyD = d; enemy = o; }
       }
@@ -288,11 +310,26 @@
           enemy.hp -= R.dmg * (0.6 + sim.rng() * 0.8);
           u.cd = 18;
           if (PD.FX) PD.FX.hit(enemy.x, enemy.y);
-          if (enemy.hp <= 0) { killUnit(sim, enemy, u.race); if (sim.rng() < 0.15 && PD.Audio8) PD.Audio8.sfx('war'); }
+          if (enemy.hp <= 0) {
+            killUnit(sim, enemy, u.race);
+            // hunters and monsters feed on the kill
+            if (R.predator || R.monster) u.food = PD.clamp(u.food + 0.6, 0, 1);
+            if (sim.rng() < 0.15 && PD.Audio8) PD.Audio8.sfx('war');
+          }
         }
       } else {
         moveToward(sim, u, R.spd * 1.15);
       }
+      return;
+    }
+
+    // ---- raiding: march on the rival village ----
+    if (u.raidT > 0) {
+      u.raidT--;
+      u.state = 'raid';
+      u.tx = u.raidX; u.ty = u.raidY;
+      moveToward(sim, u, R.spd * 1.05);
+      if (PD.dist(u.x, u.y, u.raidX, u.raidY) < 2) u.raidT = 0; // arrived; fight or go home
       return;
     }
 
@@ -353,6 +390,8 @@
   }
 
   function villageById(sim, id) {
+    // O(1) map, rebuilt each recount; falls back to a scan if stale
+    if (sim.vmap) { const v = sim.vmap.get(id); if (v) return v; }
     for (const v of sim.villages) if (v.id === id) return v;
     return null;
   }
@@ -366,7 +405,9 @@
     // Food production: scan owned tiles for fertility + farms.
     // Carrying capacity is derived from the land the village works, giving
     // logistic growth: towns grow toward a stable size, then plateau.
-    let fertSum = 0, farms = 0, ownedLand = 0;
+    // The same scan re-derives temple/house counts from the map, so fire,
+    // quakes and floods that destroy structures are always reflected.
+    let fertSum = 0, farms = 0, ownedLand = 0, temples = 0, houses = 0;
     const rad = v.radius;
     const seasonMul = [1.1, 1.25, 1.0, 0.65][sim.season]; // winter is lean
     for (let dy = -rad; dy <= rad; dy++) {
@@ -376,12 +417,15 @@
         const i = W.idx(world, x, y);
         if (world.owner[i] !== v.id) continue;
         ownedLand++;
+        if (world.struct[i] === S.TEMPLE) temples++;
+        else if (world.struct[i] === S.HOUSE) houses++;
         if (world.fire[i] > 0) continue;
         let f = world.fert[i];
         if (world.struct[i] === S.FARM) { f += 0.5; farms++; }
         fertSum += f;
       }
     }
+    v.temples = temples; v.houses = houses;
     // base forage keeps small settlements alive; land+farms scale it up
     const production = (0.7 + fertSum + farms * 0.6) * 0.06 * seasonMul;
     v.food += production;
@@ -432,10 +476,10 @@
           world.owner[i] = v.id;
           const roll = sim.rng();
           if (roll < 0.45 && world.fert[i] > 0.1) { world.struct[i] = S.FARM; }
-          else if (roll < 0.78) { world.struct[i] = S.HOUSE; v.houses++; }
+          else if (roll < 0.78) { world.struct[i] = S.HOUSE; }
           else if (roll < 0.88 && v.level >= 2 && v.temples < 3) { world.struct[i] = S.TEMPLE; v.temples++; }
           else if (roll < 0.94 && v.level >= 2) { world.struct[i] = S.TOWER; }
-          world.structHp[i] = 100; world.dirty = true; world.dirtyMini = true;
+          world.structHp[i] = 100; W.markTile(world, i); world.dirtyMini = true;
           v.food -= 1.5;
         }
       }
@@ -477,6 +521,19 @@
           v.rival = rival.id;
           if (sim.rng() < 0.3) logEvent(sim, `War! ${v.name} clashes with ${rival.name}.`, 'war');
         }
+        // muster a raiding party: a few citizens march on the enemy
+        if (v.pop >= 5 && sim.rng() < 0.5) {
+          let sent = 0;
+          for (const u of sim.units) {
+            if (sent >= 3) break;
+            if (u.dead || u.village !== v.id || u.age < u.adultAt || u.raidT > 0) continue;
+            if (sim.rng() < 0.5) continue;
+            u.raidT = 300;
+            u.raidX = rival.x + (sim.rng() * 4 - 2);
+            u.raidY = rival.y + (sim.rng() * 4 - 2);
+            sent++;
+          }
+        }
       } else v.rival = -1;
     }
   }
@@ -484,7 +541,8 @@
   // ---- Global recount & cleanup ---------------------------------------
   function recount(sim) {
     for (const k in sim.counts) sim.counts[k] = 0;
-    for (const v of sim.villages) v.pop = 0;
+    sim.vmap = new Map();
+    for (const v of sim.villages) { v.pop = 0; sim.vmap.set(v.id, v); }
     for (const u of sim.units) {
       if (u.dead) continue;
       sim.counts[u.race]++;
@@ -590,10 +648,11 @@
         if (world.owner[i] === v.id) {
           world.owner[i] = -1;
           if (world.struct[i] !== 0) world.struct[i] = (sim.rng() < 0.5 ? S.RUIN : S.NONE);
+          W.markTile(world, i);
         }
       }
     }
-    world.dirty = true;
+    world.dirtyMini = true;
   }
 
   function ambientSpawns(sim) {
