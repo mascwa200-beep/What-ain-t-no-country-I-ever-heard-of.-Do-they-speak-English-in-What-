@@ -175,9 +175,28 @@
     };
   })();
 
+  // ---- Persistent storage --------------------------------------------
+  // In the native Android app a JavascriptInterface bridge writes saves to
+  // app-private files; everywhere else this falls back to localStorage.
+  const store = (function () {
+    const bridge = global.PixelDeityBridge;
+    if (bridge && typeof bridge.getItem === 'function') {
+      return {
+        getItem(k) { try { return bridge.getItem(k); } catch (e) { return null; } },
+        setItem(k, v) { try { bridge.setItem(k, String(v)); } catch (e) { throw e; } },
+        removeItem(k) { try { bridge.removeItem(k); } catch (e) {} }
+      };
+    }
+    return {
+      getItem(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
+      setItem(k, v) { localStorage.setItem(k, v); },
+      removeItem(k) { try { localStorage.removeItem(k); } catch (e) {} }
+    };
+  })();
+
   global.PD = global.PD || {};
   Object.assign(global.PD, {
     makeRNG, hashSeed, makeNoise, Audio8,
-    clamp, lerp, smooth, dist, dist2
+    clamp, lerp, smooth, dist, dist2, store
   });
 })(window);

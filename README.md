@@ -12,19 +12,33 @@ at runtime. It works from a plain `file://` double-click, fully offline.
 
 *(Optional)* serve it if you prefer: `python3 -m http.server` → `http://localhost:8000`.
 
-### 📱 Play on your phone (Android / GrapheneOS / iOS)
+### 📱 Native Android app (the real deal — not a browser game)
 
-Grab the **single-file build** — the entire game in one ~270 KB HTML file:
+**[⬇ Download PixelDeity.apk](../../raw/main/dist/PixelDeity.apk)** (~100 KB)
 
-- **[Download PixelDeity.html](../../raw/main/dist/PixelDeity.html)** (right-click / long-press → save)
-- **[Download PixelDeity.zip](../../raw/main/dist/PixelDeity.zip)** (~75 KB)
+A genuine installable Android app: launcher icon, fullscreen immersive
+landscape, and saves written to **app-private storage** through a native
+Java bridge — no browser, no browser UI, no browser storage.
 
-On a Pixel / GrapheneOS phone: download `PixelDeity.html`, open it from your
-Files app (Vanadium or any browser handles it), rotate to landscape, play.
-It saves locally and never needs a connection. If you serve the repo over
-HTTPS instead, the included PWA manifest + service worker make it
-installable from the browser menu ("Add to Home screen") as a fullscreen
-offline app.
+**Install on Pixel / GrapheneOS:**
+1. Download `PixelDeity.apk` on the phone.
+2. Open it from Files; allow *Install unknown apps* for Files/browser when
+   prompted (GrapheneOS: per-app toggle, revoke it after if you like).
+3. Tap **Install** → open **Pixel Deity** from the launcher. Play forever.
+
+The APK is self-signed (v2+v3 schemes) and built with a plain
+`aapt2 + d8 + apksigner` pipeline — no Gradle. Rebuild it yourself with
+`android/build-apk.sh` (the signing keystore is included so updates
+install over the top without losing saves). minSdk 26, targetSdk 34.
+
+### 🌐 Other ways to play
+
+- **Single file:** [PixelDeity.html](../../raw/main/dist/PixelDeity.html)
+  (~270 KB, the whole game in one file — open it in any browser) or
+  [PixelDeity.zip](../../raw/main/dist/PixelDeity.zip)
+- **PWA:** serve the repo over HTTPS and the included manifest + service
+  worker make it installable from the browser menu, fullscreen and offline
+- **Desktop:** open `index.html`. That's it.
 
 ## 🌍 What it is — the GENESIS edition
 

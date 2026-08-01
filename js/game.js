@@ -370,7 +370,7 @@
 
   function save() {
     try {
-      localStorage.setItem(SAVE_KEY, JSON.stringify(serialize()));
+      PD.store.setItem(SAVE_KEY, JSON.stringify(serialize()));
       flashToast('Multiverse saved');
       return true;
     } catch (e) { console.warn('save failed', e); flashToast('Save failed (storage full?)'); return false; }
@@ -378,7 +378,7 @@
 
   function load() {
     let raw;
-    try { raw = localStorage.getItem(SAVE_KEY); } catch (e) { return false; }
+    try { raw = PD.store.getItem(SAVE_KEY); } catch (e) { return false; }
     if (!raw) return false;
     let d;
     try { d = JSON.parse(raw); } catch (e) { return false; }
@@ -414,8 +414,8 @@
       return false;
     }
   }
-  function hasSave() { try { return !!localStorage.getItem(SAVE_KEY); } catch (e) { return false; } }
-  function wipeSave() { try { localStorage.removeItem(SAVE_KEY); localStorage.removeItem(OLD_KEY); } catch (e) {} }
+  function hasSave() { try { return !!PD.store.getItem(SAVE_KEY); } catch (e) { return false; } }
+  function wipeSave() { try { PD.store.removeItem(SAVE_KEY); PD.store.removeItem(OLD_KEY); } catch (e) {} }
 
   // ================= Time travel =================
   function takeSnapshot() {

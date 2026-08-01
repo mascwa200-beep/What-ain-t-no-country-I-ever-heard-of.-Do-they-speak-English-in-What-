@@ -810,10 +810,29 @@ body{
     };
   })();
 
+  // ---- Persistent storage --------------------------------------------
+  // In the native Android app a JavascriptInterface bridge writes saves to
+  // app-private files; everywhere else this falls back to localStorage.
+  const store = (function () {
+    const bridge = global.PixelDeityBridge;
+    if (bridge && typeof bridge.getItem === 'function') {
+      return {
+        getItem(k) { try { return bridge.getItem(k); } catch (e) { return null; } },
+        setItem(k, v) { try { bridge.setItem(k, String(v)); } catch (e) { throw e; } },
+        removeItem(k) { try { bridge.removeItem(k); } catch (e) {} }
+      };
+    }
+    return {
+      getItem(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
+      setItem(k, v) { localStorage.setItem(k, v); },
+      removeItem(k) { try { localStorage.removeItem(k); } catch (e) {} }
+    };
+  })();
+
   global.PD = global.PD || {};
   Object.assign(global.PD, {
     makeRNG, hashSeed, makeNoise, Audio8,
-    clamp, lerp, smooth, dist, dist2
+    clamp, lerp, smooth, dist, dist2, store
   });
 })(window);
 
@@ -4857,7 +4876,7 @@ body{
 
   function save() {
     try {
-      localStorage.setItem(SAVE_KEY, JSON.stringify(serialize()));
+      PD.store.setItem(SAVE_KEY, JSON.stringify(serialize()));
       flashToast('Multiverse saved');
       return true;
     } catch (e) { console.warn('save failed', e); flashToast('Save failed (storage full?)'); return false; }
@@ -4865,7 +4884,7 @@ body{
 
   function load() {
     let raw;
-    try { raw = localStorage.getItem(SAVE_KEY); } catch (e) { return false; }
+    try { raw = PD.store.getItem(SAVE_KEY); } catch (e) { return false; }
     if (!raw) return false;
     let d;
     try { d = JSON.parse(raw); } catch (e) { return false; }
@@ -4901,8 +4920,8 @@ body{
       return false;
     }
   }
-  function hasSave() { try { return !!localStorage.getItem(SAVE_KEY); } catch (e) { return false; } }
-  function wipeSave() { try { localStorage.removeItem(SAVE_KEY); localStorage.removeItem(OLD_KEY); } catch (e) {} }
+  function hasSave() { try { return !!PD.store.getItem(SAVE_KEY); } catch (e) { return false; } }
+  function wipeSave() { try { PD.store.removeItem(SAVE_KEY); PD.store.removeItem(OLD_KEY); } catch (e) {} }
 
   // ================= Time travel =================
   function takeSnapshot() {
