@@ -96,7 +96,20 @@ You are the One True God of a **3D pixel multiverse**:
   where the orphan grows into a superpowered **Paragon**.
 - **Primordial evolution** — seed an ooze world and guide it from microbes
   to sapience. You created evolution, after all.
-- **Time travel** — the chronicle snapshots your world; rewind it, or
+- **A time dial, not a speed button** — one scale spans **−1000× through
+  1000×**: bullet-time to watch a meteor fall, or millennia-per-minute to
+  watch empires rise and fall. A live readout tells you how fast history is
+  moving.
+- **Time actually runs backwards** — hold reverse and the world un-happens:
+  cities unbuild, the dead rise out of the Beyond, fires un-burn, the sun
+  crosses the sky the wrong way. Keep going and you pass the first moment
+  into **un-creation** — the works undone, the land unshaped, then **the
+  formless Deep** (one lightless ocean, no sun) and finally **Nothing**: the
+  planet dissolves, the stars go out, and time itself stops.
+- **Then you create it again** — from Nothing, the **Genesis** suite gives
+  you the seven words, one at a time: light, firmament, dry land, grass,
+  the lights that start time moving, life, and rest.
+- **Time travel** — the chronicle also snapshots your world; rewind it, or
   **branch a parallel universe** from any recorded moment.
 - **A story, if you want it** — the **Testament tab** unfolds 12 chapters
   (Genesis → the Wired Age → Eternity) with hints hidden behind a button.
@@ -123,6 +136,8 @@ You are the One True God of a **3D pixel multiverse**:
 | **Dominion** | Install Leader · Force Peace · Incite War · Revolution |
 | **Testament** | Great Flood · Ten Plagues · Anoint Prophet · Commandments · Confusion of Tongues |
 | **Omnipotence** | Midas Touch · Black Hole · Heaven's Host · Hell's Legion · Armageddon · Necropolis · Polymorph · Fountain of Youth · Fertility Rite · Rapture · Divine Aegis · Titanize |
+| **Godhead** | Divine Voice · Empower Hero · Miracle · Calm the Core · Guide Evolution · **Judgment Day** · **Omniscience** · **Unmake From History** · **Breath of Life** · **Sabbath** |
+| **Genesis** | Let There Be Light · Separate the Waters · Let Dry Land Appear · Bring Forth Grass · Lights in the Firmament · Bring Forth Life · Rest |
 
 Plus panel-driven powers: create/destroy/rename planets (Cosmos), answer or
 refuse prayers, resurrect/ascend/condemn souls (the Beyond), rewind or branch
@@ -136,7 +151,10 @@ time, and the Genesis Lab race designer.
 | Right-drag / ✋ tool | Pan the map |
 | Wheel / pinch | Zoom (to the cursor) |
 | `WASD` / arrows | Pan |
-| `Space`, `1` `2` `3`, `0` | Pause · speed ×1 ×2 ×4 · pause |
+| `Space` · `0` | Pause |
+| `1`–`5` | Forward speeds (1× → 1000×) |
+| `,` `.` | Step the time dial down / up |
+| `R` | Reverse time |
 | `[` `]` | Brush size |
 | `L` | Toggle town labels |
 | `Esc` | Close panel / deselect |

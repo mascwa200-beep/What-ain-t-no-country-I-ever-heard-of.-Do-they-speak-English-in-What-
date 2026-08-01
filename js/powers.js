@@ -11,6 +11,15 @@
   const FX = PD.FX;
   const B = W.B;
 
+  // What the Voice actually says when it speaks
+  const VOICE_LINES = [
+    'Be not afraid.', 'I have seen you.', 'Build here.', 'The waters will come — go higher.',
+    'Your name is known to me.', 'Do not go east.', 'Feed them before you feed yourself.',
+    'I am the one who made the sky.', 'Forgive them, and I will forgive you.',
+    'What you buried, I saw.', 'Sing, and I will listen.', 'This land is a gift, not a right.',
+    'The stars are older than your grief.', 'Live.'
+  ];
+
   // helper to play sound
   function snd(n) { if (PD.Audio8) PD.Audio8.sfx(n); }
 
@@ -115,7 +124,7 @@
       } },
 
     // ---- Blessings ----
-    { id: 'bless', name: 'Bless', icon: '✨', cat: 'bless', cost: 6, radius: 4, cont: true,
+    { id: 'bless', name: 'Bless', ach: 'blessings', icon: '✨', cat: 'bless', cost: 6, radius: 4, cont: true,
       color: 'rgba(255,240,160,0.95)',
       desc: 'Heal and nourish all creatures in the light. The faithful are restored.',
       apply(G, wx, wy) {
@@ -136,7 +145,7 @@
       } },
 
     // ---- Wrath ----
-    { id: 'lightning', name: 'Lightning', icon: '⚡', cat: 'wrath', cost: 12, radius: 2, cont: false,
+    { id: 'lightning', name: 'Lightning', ach: 'smites', react: 'lightning', icon: '⚡', cat: 'wrath', cost: 12, radius: 2, cont: false,
       color: 'rgba(200,230,255,0.95)',
       desc: 'Hurl a bolt of divine lightning. Smites the living, ignites the land.',
       apply(G, wx, wy) {
@@ -155,7 +164,7 @@
         W.ignite(G.world, Math.floor(wx), Math.floor(wy), G.power.radius);
         FX.fireBurst(wx, wy); snd('fire'); return this.cost;
       } },
-    { id: 'meteor', name: 'Meteor', icon: '☄️', cat: 'wrath', cost: 30, radius: 4, cont: false,
+    { id: 'meteor', name: 'Meteor', ach: 'meteors', react: 'meteor', icon: '☄️', cat: 'wrath', cost: 30, radius: 4, cont: false,
       color: 'rgba(255,140,40,0.95)',
       desc: 'Call down a blazing meteor. It craters the earth and scorches all near.',
       apply(G, wx, wy) {
@@ -167,7 +176,7 @@
         Sim.damageArea(G.sim, wx, wy, this.radius + 1, 100, null);
         G.world.dirtyMini = true; G.flash = 0.7; G.shake = 12; snd('meteor'); return this.cost;
       } },
-    { id: 'plague', name: 'Plague', icon: '🦠', cat: 'wrath', cost: 15, radius: 4, cont: false,
+    { id: 'plague', name: 'Plague', react: 'plague', icon: '🦠', cat: 'wrath', cost: 15, radius: 4, cont: false,
       color: 'rgba(120,220,80,0.9)',
       desc: 'Unleash a creeping plague that spreads from soul to soul.',
       apply(G, wx, wy) {
@@ -176,7 +185,7 @@
         for (let i = 0; i < 12; i++) FX.spawn(wx + (Math.random() - 0.5) * this.radius * 2, wy + (Math.random() - 0.5) * this.radius * 2, 0, -0.02, 30, '#78dc50', 2);
         snd('plague'); return this.cost;
       } },
-    { id: 'quake', name: 'Earthquake', icon: '🌋', cat: 'wrath', cost: 22, radius: 6, cont: false,
+    { id: 'quake', name: 'Earthquake', react: 'quake', icon: '🌋', cat: 'wrath', cost: 22, radius: 6, cont: false,
       color: 'rgba(180,120,60,0.9)',
       desc: 'Rend the ground. Buildings crumble and the earth swallows the unlucky.',
       apply(G, wx, wy) {
@@ -227,16 +236,18 @@
         if (!u) { snd('error'); return 0; }
         u.karma += 5;
         const R = Sim.RACES[u.race];
+        const line = VOICE_LINES[(Math.random() * VOICE_LINES.length) | 0];
         if (PD.Society) {
-          PD.Society.hist(G.sim, `You spoke to ${u.name}. They fell to their knees.`, 'faith');
-          if (R.sentient && Math.random() < 0.3) {
-            PD.Society.hist(G.sim, `${u.name} now preaches of the Voice they heard.`, 'faith');
+          PD.Society.hist(G.sim, `You spoke to ${u.name}: “${line}” They fell to their knees.`, 'faith');
+          if (R.sentient && Math.random() < 0.4) {
+            PD.Society.hist(G.sim, `${u.name} repeats it to anyone who will listen: “${line}”`, 'faith');
             u.prof = 3; // priest
+            PD.Society.post(G.sim, u.name, u.race, `ok so a VOICE just said "${line}" and i have never been more normal about anything`);
           }
         }
         FX.shock(u.x, u.y, 2, '#fff2a0'); snd('bless'); return this.cost;
       } },
-    { id: 'empower', name: 'Empower Hero', icon: '🦸', cat: 'godhead', cost: 60, radius: 0, cont: false,
+    { id: 'empower', name: 'Empower Hero', ach: 'heroes', icon: '🦸', cat: 'godhead', cost: 60, radius: 0, cont: false,
       color: 'rgba(255,220,80,0.95)',
       desc: 'Fill a mortal with divine might. They become a Paragon — a hero of legend who hunts monsters.',
       apply(G, wx, wy) {
@@ -246,7 +257,7 @@
         PD.Society.empower(G.sim, u, 1);
         snd('levelup'); return this.cost;
       } },
-    { id: 'miracle', name: 'Miracle', icon: '🌟', cat: 'godhead', cost: 25, radius: 6, cont: false,
+    { id: 'miracle', name: 'Miracle', ach: 'blessings', icon: '🌟', cat: 'godhead', cost: 25, radius: 6, cont: false,
       color: 'rgba(255,250,220,0.95)',
       desc: 'A great working: the sick healed, the hungry fed, the fields made fertile, the dying saved.',
       apply(G, wx, wy) {
@@ -353,7 +364,7 @@
       } },
 
     // ---- Testament: biblical workings ----
-    { id: 'flood', name: 'Great Flood', icon: '🌊', cat: 'bible', cost: 120, radius: 0, cont: false,
+    { id: 'flood', name: 'Great Flood', ach: 'floods', story: 'wrath', icon: '🌊', cat: 'bible', cost: 120, radius: 0, cont: false,
       color: 'rgba(60,120,220,0.95)',
       desc: 'Drown the world for its wickedness. The waters rise for a season — the righteous are spared.',
       apply(G, wx, wy) {
@@ -362,7 +373,7 @@
         G.startFlood();
         snd('quake'); return this.cost;
       } },
-    { id: 'plagues', name: 'Ten Plagues', icon: '🐸', cat: 'bible', cost: 60, radius: 8, cont: false,
+    { id: 'plagues', name: 'Ten Plagues', story: 'wrath', icon: '🐸', cat: 'bible', cost: 60, radius: 8, cont: false,
       color: 'rgba(150,200,80,0.95)',
       desc: 'Visit a full suite of plagues on a land: pestilence, blight, darkness, and worse.',
       apply(G, wx, wy) {
@@ -667,7 +678,7 @@
         if (PD.Society) PD.Society.hist(G.sim, `${bv.name} glows with divine aegis. Untouchable.`, 'faith');
         snd('bless'); return this.cost;
       } },
-    { id: 'titan', name: 'Titanize', icon: '🗽', cat: 'omni', cost: 100, radius: 0, cont: false,
+    { id: 'titan', name: 'Titanize', ach: 'heroes', icon: '🗽', cat: 'omni', cost: 100, radius: 0, cont: false,
       color: 'rgba(216,176,144,0.95)',
       desc: 'Swell a mortal into a walking colossus — a paragon grown to the size of a hill.',
       apply(G, wx, wy) {
@@ -685,7 +696,126 @@
         FX.shock(best.x, best.y, 6, '#d8b090'); G.shake = 10;
         if (PD.Society) PD.Society.hist(G.sim, `${best.name} GROWS. And grows. And grows. A titan walks the earth.`, 'legend');
         snd('quake'); return this.cost;
-      } }
+      } },
+
+    // ---- Genesis: spoken over the face of the deep ----
+    // These appear one at a time, only after time has been reversed past
+    // the beginning. An empty world earns no faith, so creation is free.
+    { id: 'gen_light', name: 'Let There Be Light', icon: '☀️', cat: 'genesis', cost: 0, radius: 0, cont: false,
+      color: 'rgba(255,250,220,1)', stage: 0,
+      desc: 'The first word. Stars kindle, a sun ignites, and the darkness upon the face of the deep is parted.',
+      apply(G) { return typeof G.genesisStep === 'function' ? G.genesisStep(0) : (snd('error'), 0); } },
+    { id: 'gen_firmament', name: 'Separate the Waters', icon: '🌫️', cat: 'genesis', cost: 0, radius: 0, cont: false,
+      color: 'rgba(180,215,255,1)', stage: 1,
+      desc: 'Divide the waters from the waters. Sky from sea; a firmament, and clouds within it.',
+      apply(G) { return typeof G.genesisStep === 'function' ? G.genesisStep(1) : (snd('error'), 0); } },
+    { id: 'gen_land', name: 'Let Dry Land Appear', icon: '🏔️', cat: 'genesis', cost: 0, radius: 0, cont: false,
+      color: 'rgba(160,130,90,1)', stage: 2,
+      desc: 'Let the waters be gathered, and dry land appear. Continents rise out of the deep.',
+      apply(G) { return typeof G.genesisStep === 'function' ? G.genesisStep(2) : (snd('error'), 0); } },
+    { id: 'gen_green', name: 'Bring Forth Grass', icon: '🌿', cat: 'genesis', cost: 0, radius: 0, cont: false,
+      color: 'rgba(110,190,90,1)', stage: 3,
+      desc: 'Let the earth bring forth grass, and the herb, and the fruit tree. Green floods the world.',
+      apply(G) { return typeof G.genesisStep === 'function' ? G.genesisStep(3) : (snd('error'), 0); } },
+    { id: 'gen_lights', name: 'Lights in the Firmament', icon: '🌗', cat: 'genesis', cost: 0, radius: 0, cont: false,
+      color: 'rgba(255,235,180,1)', stage: 4,
+      desc: 'Lights to divide the day from the night, for signs and for seasons. Time begins to flow.',
+      apply(G) { return typeof G.genesisStep === 'function' ? G.genesisStep(4) : (snd('error'), 0); } },
+    { id: 'gen_life', name: 'Bring Forth Life', icon: '🐾', cat: 'genesis', cost: 0, radius: 0, cont: false,
+      color: 'rgba(230,200,150,1)', stage: 5,
+      desc: 'Let the waters teem and the earth bring forth the living creature — and then, someone to name them.',
+      apply(G) { return typeof G.genesisStep === 'function' ? G.genesisStep(5) : (snd('error'), 0); } },
+    { id: 'gen_rest', name: 'Rest', icon: '🕊️', cat: 'genesis', cost: 0, radius: 0, cont: false,
+      color: 'rgba(255,255,255,1)', stage: 6,
+      desc: 'On the seventh day, rest — and see that it is good. The world is yours again.',
+      apply(G) { return typeof G.genesisStep === 'function' ? G.genesisStep(6) : (snd('error'), 0); } },
+
+    // ---- Godhead: the omnipotence tier ----
+    { id: 'judgment', name: 'Judgment Day', icon: '⚖️', cat: 'godhead', cost: 180, radius: 0, cont: false,
+      color: 'rgba(255,240,190,0.98)', story: 'wrath',
+      desc: 'Weigh every soul at once. The righteous rise in pillars of light; the wicked are cast down. The world empties.',
+      apply(G) {
+        if (G.faith < this.cost) { snd('error'); return 0; }
+        let saved = 0, damned = 0;
+        for (const u of G.sim.units) {
+          if (u.dead) continue;
+          const R = Sim.RACES[u.race];
+          if (!R.sentient) continue;
+          const good = u.karma >= 0;
+          if (good) { u.karma += 12; saved++; for (let i = 0; i < 5; i++) FX.spawn(u.x, u.y, 0, -0.18, 34, '#fff2a0', 2); }
+          else { u.karma -= 12; damned++; for (let i = 0; i < 5; i++) FX.spawn(u.x, u.y, 0, 0.14, 30, '#c04020', 2); }
+          Sim.killUnit(G.sim, u, good ? 'rapture' : 'judgment');
+        }
+        if (!saved && !damned) { snd('error'); return 0; }
+        if (PD.Society) PD.Society.hist(G.sim, `JUDGMENT. ${saved} raised into light, ${damned} cast down. The world falls silent.`, 'fall');
+        G.flash = 1; G.shake = 14; snd('levelup');
+        return this.cost;
+      } },
+    { id: 'omniscience', name: 'Omniscience', icon: '👁️', cat: 'godhead', cost: 40, radius: 0, cont: false,
+      color: 'rgba(200,225,255,0.98)',
+      desc: 'Know every name, every hidden heart, every nation’s true intent. Toggle the all-seeing eye.',
+      apply(G) {
+        if (!G.omniscient && G.faith < this.cost) { snd('error'); return 0; }
+        G.omniscient = !G.omniscient;
+        if (PD.Society) PD.Society.hist(G.sim, G.omniscient ? 'The eye opens. Nothing is hidden.' : 'The eye closes.', 'faith');
+        snd(G.omniscient ? 'bless' : 'click');
+        return G.omniscient ? this.cost : 0;
+      } },
+    { id: 'unmake', name: 'Unmake From History', icon: '🕯️', cat: 'godhead', cost: 70, radius: 0, cont: false,
+      color: 'rgba(150,130,180,0.98)',
+      desc: 'Erase a soul so utterly they never were — struck from the chronicle, the legends, and the Beyond alike.',
+      apply(G, wx, wy) {
+        if (G.faith < this.cost) { snd('error'); return 0; }
+        const u = nearestUnit(G, wx, wy, 2.5);
+        if (!u) { snd('error'); return 0; }
+        const name = u.name;
+        u.dead = true;
+        // scrub every trace: chronicle, legends, feed, and the afterlife
+        if (PD.Society) {
+          const soc = PD.Society.ensure(G.sim);
+          const strip = (arr, key) => { for (let i = arr.length - 1; i >= 0; i--) if ((arr[i][key] || '').indexOf(name) >= 0) arr.splice(i, 1); };
+          strip(soc.history, 'text'); strip(soc.legends, 'deed'); strip(soc.feed, 'author'); strip(soc.feed, 'text');
+        }
+        if (PD.Afterlife) PD.Afterlife.erase && PD.Afterlife.erase(name);
+        for (let i = 0; i < 12; i++) FX.spawn(u.x, u.y, (Math.random() - 0.5) * 0.1, -0.05, 30, '#9a86b4', 2);
+        if (PD.Society) PD.Society.hist(G.sim, 'Someone is missing. No one can say who.', 'legend');
+        snd('plague');
+        return this.cost;
+      } },
+    { id: 'breath', name: 'Breath of Life', icon: '🌬️', cat: 'godhead', cost: 120, radius: 0, cont: false,
+      color: 'rgba(190,255,220,0.98)', ach: 'resurrections',
+      desc: 'Empty limbo. Every soul wandering the Grayfields is breathed back into living flesh.',
+      apply(G, wx, wy) {
+        if (G.faith < this.cost) { snd('error'); return 0; }
+        if (!PD.Afterlife || !G.view || G.view.kind !== 'planet') { snd('error'); return 0; }
+        const plane = PD.Afterlife.AL.planes['grayfields'];
+        if (!plane || !plane.souls.length) { snd('error'); return 0; }
+        const names = plane.souls.slice(0, 40).map(s => s.name);
+        let n = 0;
+        for (const nm of names) {
+          const spot = W.nearestLand(G.world, wx + (Math.random() * 8 - 4), wy + (Math.random() * 8 - 4), 12);
+          if (!spot) continue;
+          if (PD.Afterlife.resurrect(nm, G.sim, spot.x, spot.y)) n++;
+        }
+        if (!n) { snd('error'); return 0; }
+        FX.shock(wx, wy, 8, '#bfffdc');
+        if (PD.Society) PD.Society.hist(G.sim, `${n} souls are breathed back out of limbo. The Grayfields thin.`, 'legend');
+        snd('levelup');
+        return this.cost;
+      } },
+    { id: 'sabbath', name: 'Sabbath', icon: '⏸️', cat: 'godhead', cost: 25, radius: 0, cont: false,
+      color: 'rgba(220,220,240,0.98)',
+      desc: 'The world holds its breath. Everything stops but you — act freely in the stillness.',
+      apply(G) {
+        if (!G.sabbath && G.faith < this.cost) { snd('error'); return 0; }
+        if (typeof G.setSabbath !== 'function') { snd('error'); return 0; }
+        G.sabbath = !G.sabbath;
+        G.setSabbath(G.sabbath);
+        if (PD.Society) PD.Society.hist(G.sim, G.sabbath ? 'Everything stops. Only you still move.' : 'The world breathes again.', 'faith');
+        snd(G.sabbath ? 'bless' : 'click');
+        return G.sabbath ? this.cost : 0;
+      } },
+
   ];
 
   // helpers for targeted powers
@@ -729,6 +859,7 @@
   for (const p of POWERS) BY_ID[p.id] = p;
 
   const CATEGORIES = [
+    { id: 'genesis', name: 'Genesis' },
     { id: 'god', name: 'Divine' },
     { id: 'life', name: 'Life' },
     { id: 'terra', name: 'Terraform' },

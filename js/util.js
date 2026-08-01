@@ -78,7 +78,7 @@
   const Audio8 = (function () {
     let ctx = null, master = null, musicGain = null, sfxGain = null, verb = null, verbGain = null;
     let enabled = true, musicOn = true, started = false;
-    let musicTimer = null, windSrc = null, step = 0;
+    let musicTimer = null, windSrc = null, step = 0, timeDir = 1;
 
     function ensure() {
       if (ctx) return ctx;
@@ -180,14 +180,15 @@
     function musicStep() {
       if (!musicOn || !enabled) return;
       const chord = CHORDS[(step >> 1) % CHORDS.length];
+      const bend = timeDir < 0 ? 0.62 : 1;   // reversed time sags a fifth down
       if (step % 2 === 0) {
         for (const f of chord) {
-          voice(f, 7.5, { vol: 0.045, atk: 2.5, lp: 1100, detune: [-6, 5], dest: musicGain });
+          voice(f * bend, 7.5, { vol: 0.045, atk: 2.5, lp: timeDir < 0 ? 700 : 1100, detune: [-6, 5], dest: musicGain });
         }
-        voice(chord[0] / 2, 8, { vol: 0.06, atk: 2.0, lp: 300, detune: [0], dest: musicGain });
+        voice(chord[0] / 2 * bend, 8, { vol: 0.06, atk: 2.0, lp: 300, detune: [0], dest: musicGain });
       }
       if (Math.random() < 0.65) {
-        const f = LEAD[(Math.random() * LEAD.length) | 0];
+        const f = LEAD[(Math.random() * LEAD.length) | 0] * bend;
         voice(f, 2.4, { vol: 0.035, atk: 0.4, lp: 2600, detune: [0, 4], dest: musicGain });
       }
       step++;
@@ -223,6 +224,13 @@
       setMusic(v) { musicOn = v; if (v && started) startMusic(); else stopMusic(); },
       isEnabled() { return enabled; },
       isMusic() { return musicOn; },
+      // reversed time: drop the score into a detuned, sluggish drone
+      setTimeDirection(d) {
+        timeDir = d;
+        if (!ctx) return;
+        if (musicGain) musicGain.gain.setTargetAtTime(d < 0 ? 0.16 : 0.28, ctx.currentTime, 0.4);
+        if (verbGain) verbGain.gain.setTargetAtTime(d < 0 ? 0.85 : 0.5, ctx.currentTime, 0.4);
+      },
       suspend() { stopMusic(); if (ctx && ctx.state === 'running') ctx.suspend(); },
       resumeAll() { if (!enabled || !started) return; resume(); if (musicOn) startMusic(); }
     };

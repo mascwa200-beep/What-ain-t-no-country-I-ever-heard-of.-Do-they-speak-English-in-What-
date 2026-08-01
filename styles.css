@@ -72,6 +72,26 @@ body{
 }
 .speed-btn:hover{color:var(--ink);background:var(--panel2);}
 .speed-btn.active{color:var(--bg);background:var(--gold);}
+.speed-btn.rev{color:#ff9a8a;}
+.speed-btn.rev.active{color:#2a0a0a;background:#ff7a5a;}
+.speed-btn.sep{pointer-events:none;opacity:0.35;padding:5px 2px;}
+#time-scale{font-family:ui-monospace,monospace;font-size:11px;}
+#time-stat .reversing{color:#ff8a6a;}
+#time-stat:has(.reversing){border-color:#7a2a20;}
+
+/* rewind: the world running backwards */
+#rewind-banner{
+  position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+  z-index:30;pointer-events:none;text-align:center;display:none;
+}
+#rewind-banner.show{display:block;}
+.rw-title{
+  font-family:ui-monospace,monospace;font-size:34px;font-weight:800;letter-spacing:6px;
+  color:#cfe4ff;text-shadow:0 0 24px rgba(120,180,255,0.7);
+  animation:rwpulse 1.1s ease-in-out infinite;
+}
+.rw-sub{font-family:ui-monospace,monospace;font-size:15px;color:#8fb4e0;letter-spacing:2px;margin-top:6px;}
+@keyframes rwpulse{0%,100%{opacity:.55;}50%{opacity:1;}}
 .icon-btn{
   font-size:15px;background:var(--panel);border:1px solid var(--edge);
   border-radius:10px;padding:5px 8px;cursor:pointer;color:var(--ink);

@@ -277,7 +277,9 @@
       if (u.karma > 3 && sim.rng() < 0.1) makePrayer(sim, u, 'thanks');
     }
     // stale prayers fade (unanswered prayers cost a little faith income)
-    soc.prayers = soc.prayers.filter(p => sim.tick - p.t < 1600);
+    // abs(): under reversed time sim.tick < p.t, which would make every
+    // prayer immortal and the divine inbox grow without bound
+    soc.prayers = soc.prayers.filter(p => Math.abs(sim.tick - p.t) < 1600);
   }
 
   // Answer a prayer (invoked from the UI). Returns faith delta (negative =
@@ -488,7 +490,8 @@
     if (sim.tick % 45 === 0) generatePrayers(sim);
     if (sim.tick % 80 === 0) tradeStep(sim);
     if (sim.tick % 150 === 0) buildWonders(sim);
-    if (sim.tick % 400 === 0 && sim.tick > 400 && sim.rng() < 0.30 && !sim.isPlane) rollOmen(sim);
+    const lifeless = sim.world.mode === 'deep' || sim.world.mode === 'nothing';
+    if (sim.tick % 400 === 0 && sim.tick > 400 && sim.rng() < 0.30 && !sim.isPlane && !lifeless) rollOmen(sim);
     updateHeroes(sim);
     if (sim.soc.internetOn && sim.tick % 240 === 0 && sim.rng() < 0.6) {
       post(sim, null, SENTIENT_RACE(sim), POST_FLAVOR[(sim.rng() * POST_FLAVOR.length) | 0](sim));

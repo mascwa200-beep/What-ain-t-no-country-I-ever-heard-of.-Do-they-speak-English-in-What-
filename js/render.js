@@ -564,7 +564,7 @@
       for (const k in W.BIOME_COLORS) biomeLUT[+k] = hexToRgb(W.BIOME_COLORS[k]);
     }
     // redraw minimap terrain occasionally
-    if (world.dirtyMini || miniDirtyTick < 0 || (sim.tick - miniDirtyTick) > 30) {
+    if (world.dirtyMini || miniDirtyTick < 0 || Math.abs(sim.tick - miniDirtyTick) > 30) {
       if (!miniImg || miniImg.width !== world.W || miniImg.height !== world.H) {
         miniImg = miniCtx.createImageData(world.W, world.H);
       }

@@ -145,6 +145,26 @@
     return null;
   }
 
+  // Unmake From History: the soul is struck from the Beyond as well.
+  function erase(name) {
+    init();
+    let n = 0;
+    for (const pid in AL.planes) {
+      const plane = AL.planes[pid];
+      for (let i = plane.souls.length - 1; i >= 0; i--) {
+        if (plane.souls[i].name === name) {
+          plane.souls.splice(i, 1);
+          plane.total = Math.max(0, plane.total - 1);
+          n++;
+        }
+      }
+      if (plane.sim) {
+        for (const u of plane.sim.units) if (!u.dead && u.name === name) u.dead = true;
+      }
+    }
+    return n;
+  }
+
   function stats() {
     init();
     return PLANES.map(p => ({
@@ -173,5 +193,5 @@
     }
   }
 
-  global.PD.Afterlife = { PLANES, AL, init, receiveSoul, materialize, resurrect, judgeSoul, stats, serialize, load, routePlane };
+  global.PD.Afterlife = { PLANES, AL, init, receiveSoul, materialize, resurrect, judgeSoul, erase, stats, serialize, load, routePlane };
 })(window);

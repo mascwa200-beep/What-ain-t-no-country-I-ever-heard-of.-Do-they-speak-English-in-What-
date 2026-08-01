@@ -84,6 +84,26 @@ body{
 }
 .speed-btn:hover{color:var(--ink);background:var(--panel2);}
 .speed-btn.active{color:var(--bg);background:var(--gold);}
+.speed-btn.rev{color:#ff9a8a;}
+.speed-btn.rev.active{color:#2a0a0a;background:#ff7a5a;}
+.speed-btn.sep{pointer-events:none;opacity:0.35;padding:5px 2px;}
+#time-scale{font-family:ui-monospace,monospace;font-size:11px;}
+#time-stat .reversing{color:#ff8a6a;}
+#time-stat:has(.reversing){border-color:#7a2a20;}
+
+/* rewind: the world running backwards */
+#rewind-banner{
+  position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+  z-index:30;pointer-events:none;text-align:center;display:none;
+}
+#rewind-banner.show{display:block;}
+.rw-title{
+  font-family:ui-monospace,monospace;font-size:34px;font-weight:800;letter-spacing:6px;
+  color:#cfe4ff;text-shadow:0 0 24px rgba(120,180,255,0.7);
+  animation:rwpulse 1.1s ease-in-out infinite;
+}
+.rw-sub{font-family:ui-monospace,monospace;font-size:15px;color:#8fb4e0;letter-spacing:2px;margin-top:6px;}
+@keyframes rwpulse{0%,100%{opacity:.55;}50%{opacity:1;}}
 .icon-btn{
   font-size:15px;background:var(--panel);border:1px solid var(--edge);
   border-radius:10px;padding:5px 8px;cursor:pointer;color:var(--ink);
@@ -457,16 +477,12 @@ body{
       </div>
       <div class="stat" id="year-stat"><span id="year-val">Year 0</span></div>
       <div class="stat" id="season-stat"><span id="season-val">🌱 Spring</span></div>
+      <div class="stat" id="time-stat" title="How fast history is moving"><span id="time-scale">Normal · 20 s/yr</span></div>
       <div class="stat" id="vill-stat"><span id="vill-val">🏙 0</span></div>
       <div id="race-counts" class="race-counts"></div>
     </div>
     <div class="hud-right">
-      <div class="speeds">
-        <button class="speed-btn" data-speed="0" title="Pause (Space)">❚❚</button>
-        <button class="speed-btn active" data-speed="1" title="Normal (1)">▶</button>
-        <button class="speed-btn" data-speed="2" title="Fast (2)">▶▶</button>
-        <button class="speed-btn" data-speed="4" title="Ludicrous (3)">▶▶▶</button>
-      </div>
+      <div class="speeds" id="time-dial"><!-- built by buildTimeDial() --></div>
       <button class="icon-btn" id="btn-labels" title="Toggle town labels (L)">🏷</button>
       <button class="icon-btn" id="btn-sound" title="Sound on/off">🔊</button>
       <button class="icon-btn" id="btn-save" title="Save now">💾</button>
@@ -584,6 +600,8 @@ body{
     <div class="chron-title">📜 Chronicle</div>
     <div id="event-log"></div>
   </section>
+
+  <div id="rewind-banner"></div>
 
   <div id="toast"></div>
 
@@ -726,7 +744,7 @@ body{
   const Audio8 = (function () {
     let ctx = null, master = null, musicGain = null, sfxGain = null, verb = null, verbGain = null;
     let enabled = true, musicOn = true, started = false;
-    let musicTimer = null, windSrc = null, step = 0;
+    let musicTimer = null, windSrc = null, step = 0, timeDir = 1;
 
     function ensure() {
       if (ctx) return ctx;
@@ -828,14 +846,15 @@ body{
     function musicStep() {
       if (!musicOn || !enabled) return;
       const chord = CHORDS[(step >> 1) % CHORDS.length];
+      const bend = timeDir < 0 ? 0.62 : 1;   // reversed time sags a fifth down
       if (step % 2 === 0) {
         for (const f of chord) {
-          voice(f, 7.5, { vol: 0.045, atk: 2.5, lp: 1100, detune: [-6, 5], dest: musicGain });
+          voice(f * bend, 7.5, { vol: 0.045, atk: 2.5, lp: timeDir < 0 ? 700 : 1100, detune: [-6, 5], dest: musicGain });
         }
-        voice(chord[0] / 2, 8, { vol: 0.06, atk: 2.0, lp: 300, detune: [0], dest: musicGain });
+        voice(chord[0] / 2 * bend, 8, { vol: 0.06, atk: 2.0, lp: 300, detune: [0], dest: musicGain });
       }
       if (Math.random() < 0.65) {
-        const f = LEAD[(Math.random() * LEAD.length) | 0];
+        const f = LEAD[(Math.random() * LEAD.length) | 0] * bend;
         voice(f, 2.4, { vol: 0.035, atk: 0.4, lp: 2600, detune: [0, 4], dest: musicGain });
       }
       step++;
@@ -871,6 +890,13 @@ body{
       setMusic(v) { musicOn = v; if (v && started) startMusic(); else stopMusic(); },
       isEnabled() { return enabled; },
       isMusic() { return musicOn; },
+      // reversed time: drop the score into a detuned, sluggish drone
+      setTimeDirection(d) {
+        timeDir = d;
+        if (!ctx) return;
+        if (musicGain) musicGain.gain.setTargetAtTime(d < 0 ? 0.16 : 0.28, ctx.currentTime, 0.4);
+        if (verbGain) verbGain.gain.setTargetAtTime(d < 0 ? 0.85 : 0.5, ctx.currentTime, 0.4);
+      },
       suspend() { stopMusic(); if (ctx && ctx.state === 'running') ctx.suspend(); },
       resumeAll() { if (!enabled || !started) return; resume(); if (musicOn) startMusic(); }
     };
@@ -1145,6 +1171,14 @@ body{
         w.biome[i] = ((i * 13) % 4 === 0) ? B.SAND : B.OOZE;
         w.fert[i] = 0.55; w.tree[i] = 0;
       }
+    } else if (m === 'deep' || m === 'nothing') {
+      // without form, and void; darkness upon the face of the deep
+      w.biome[i] = B.DEEP; w.fert[i] = 0; w.tree[i] = 0;
+      w.struct[i] = 0; w.owner[i] = -1;
+    } else if (m === 'firmament') {
+      // waters divided, but no land yet
+      if (!isWater(b)) { w.biome[i] = B.WATER; }
+      w.fert[i] = 0; w.tree[i] = 0;
     } else if (m === 'void') {
       if (b === B.DEEP || b === B.WATER) { w.biome[i] = B.DEEP; }
       else { w.biome[i] = ((i * 11) % 6 === 0) ? B.SNOW : B.VOIDSTONE; w.fert[i] = 0.04; w.tree[i] = 0; }
@@ -2752,7 +2786,7 @@ body{
       for (const k in W.BIOME_COLORS) biomeLUT[+k] = hexToRgb(W.BIOME_COLORS[k]);
     }
     // redraw minimap terrain occasionally
-    if (world.dirtyMini || miniDirtyTick < 0 || (sim.tick - miniDirtyTick) > 30) {
+    if (world.dirtyMini || miniDirtyTick < 0 || Math.abs(sim.tick - miniDirtyTick) > 30) {
       if (!miniImg || miniImg.width !== world.W || miniImg.height !== world.H) {
         miniImg = miniCtx.createImageData(world.W, world.H);
       }
@@ -3082,9 +3116,11 @@ void main(){ gl_FragColor = vCol; }`;
         this.lightning(x1, y1);
       },
       update() {
+        // under reversed time everything falls upward and inward again
+        const dir = (global.G && global.G.speed < 0) ? -1 : 1;
         for (let i = parts.length - 1; i >= 0; i--) {
           const q = parts[i];
-          q.p[0] += q.v[0]; q.p[1] += q.v[1]; q.p[2] += q.v[2];
+          q.p[0] += q.v[0] * dir; q.p[1] += q.v[1] * dir; q.p[2] += q.v[2] * dir;
           // spherical gravity: everything falls back to the world
           if (q.grav) {
             const l = Math.hypot(q.p[0], q.p[1], q.p[2]) || 1;
@@ -3690,11 +3726,18 @@ void main(){ gl_FragColor = vCol; }`;
     let sun = [Math.sin(cyc), 0.25, Math.cos(cyc)];
     if (world.mode === 'hell') sun = [0.2, -0.6, 0.5];
     if (world.mode === 'heaven') sun = [0.3, 0.9, 0.3];
+    // before the first word there is no sun at all
+    const unlit = world.mode === 'deep' || world.mode === 'nothing';
+    if (unlit) sun = [0, 0, 0];
+    if (world.mode === 'firmament') sun = [0.4, 0.55, 0.4];
     const sl = Math.hypot(sun[0], sun[1], sun[2]); sun = [sun[0] / sl, sun[1] / sl, sun[2] / sl];
 
     const atmo = world.mode === 'hell' ? [0.9, 0.25, 0.1]
       : world.mode === 'heaven' ? [1.0, 0.85, 0.4]
       : world.mode === 'void' ? [0.45, 0.3, 0.8]
+      : world.mode === 'deep' ? [0.05, 0.06, 0.12]
+      : world.mode === 'nothing' ? [0.02, 0.02, 0.04]
+      : world.mode === 'firmament' ? [0.30, 0.45, 0.85]
       : [0.35, 0.55, 1.0];
 
     const p = PD.Cosmos && PD.Cosmos.active ? PD.Cosmos.active() : null;
@@ -3703,10 +3746,12 @@ void main(){ gl_FragColor = vCol; }`;
 
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
-    // stars
+    // stars — they go out as the last of creation is unmade
+    const dissolve = (global.G && global.G.dissolve) || 0;
     gl.disable(gl.DEPTH_TEST);
-    drawPoints(r, vp, r.bufStars, r.bufStarCol, r.bufStarSize, r.nStars);
+    if (dissolve < 0.98) drawPoints(r, vp, r.bufStars, r.bufStarCol, r.bufStarSize, r.nStars);
     gl.enable(gl.DEPTH_TEST);
+    if (dissolve >= 1) { drawOverlay2D(r, sim, ui); return; }  // nothing left to draw
 
     // planet
     const pp = r.progPlanet;
@@ -3715,7 +3760,7 @@ void main(){ gl_FragColor = vCol; }`;
     bindAttr(gl, pp.a.aUV, r.bufUV, 2);
     bindAttr(gl, pp.a.aH, r.bufH, 1);
     gl.uniformMatrix4fv(pp.u.uMVP, false, vp);
-    gl.uniform1f(pp.u.uDisp, 0.13);
+    gl.uniform1f(pp.u.uDisp, 0.13 * (1 - dissolve));
     gl.uniform1f(pp.u.uSea, 0.38);
     gl.uniform3fv(pp.u.uSun, sun);
     gl.uniform3fv(pp.u.uEye, eye);
@@ -3910,6 +3955,22 @@ void main(){ gl_FragColor = vCol; }`;
     if (!ctx) return;
     ctx.clearRect(0, 0, r.w, r.h);
 
+    // omniscience: every soul named and weighed
+    if (global.G && global.G.omniscient && r.cam.dist < 4.2) {
+      ctx.font = '9px ui-monospace, monospace';
+      ctx.textAlign = 'center';
+      let shown = 0;
+      for (const u of sim.units) {
+        if (u.dead || shown > 90) continue;
+        const s2 = worldToScreen(r, u.x, u.y);
+        if (!s2) continue;
+        shown++;
+        ctx.fillStyle = u.karma >= 0 ? 'rgba(150,255,190,0.92)' : 'rgba(255,150,130,0.92)';
+        ctx.fillText(`${u.name} ${u.karma >= 0 ? '+' : ''}${Math.round(u.karma)}`, s2.x, s2.y - 10);
+      }
+      ctx.textAlign = 'left';
+    }
+
     // village labels (front hemisphere, close zoom)
     if (ui.showLabels && r.cam.dist < 3.4) {
       ctx.font = '7px monospace';
@@ -3963,7 +4024,8 @@ void main(){ gl_FragColor = vCol; }`;
     }
 
     // the sun itself, with a soft flare when it swings into view
-    if (r._vp) {
+    const noSun = r.world.mode === 'deep' || r.world.mode === 'nothing';
+    if (r._vp && !noSun) {
       const cyc = (sim.tick % 480) / 480 * Math.PI * 2;
       const sp = [Math.sin(cyc) * 30, 7, Math.cos(cyc) * 30];
       const m = r._vp;
@@ -4005,7 +4067,7 @@ void main(){ gl_FragColor = vCol; }`;
       biomeLUT = [];
       for (const k in W.BIOME_COLORS) biomeLUT[+k] = R2.hexToRgb(W.BIOME_COLORS[k]);
     }
-    if (world.dirtyMini || miniTick < 0 || (sim.tick - miniTick) > 30) {
+    if (world.dirtyMini || miniTick < 0 || Math.abs(sim.tick - miniTick) > 30) {
       if (!miniImg || miniImg.width !== world.W) miniImg = miniCtx.createImageData(world.W, world.H);
       const ownerRGB = new Map();
       for (const v of sim.villages) ownerRGB.set(v.id, R2.hexToRgb(v.col));
@@ -4342,7 +4404,9 @@ void main(){ gl_FragColor = vCol; }`;
       if (u.karma > 3 && sim.rng() < 0.1) makePrayer(sim, u, 'thanks');
     }
     // stale prayers fade (unanswered prayers cost a little faith income)
-    soc.prayers = soc.prayers.filter(p => sim.tick - p.t < 1600);
+    // abs(): under reversed time sim.tick < p.t, which would make every
+    // prayer immortal and the divine inbox grow without bound
+    soc.prayers = soc.prayers.filter(p => Math.abs(sim.tick - p.t) < 1600);
   }
 
   // Answer a prayer (invoked from the UI). Returns faith delta (negative =
@@ -4553,7 +4617,8 @@ void main(){ gl_FragColor = vCol; }`;
     if (sim.tick % 45 === 0) generatePrayers(sim);
     if (sim.tick % 80 === 0) tradeStep(sim);
     if (sim.tick % 150 === 0) buildWonders(sim);
-    if (sim.tick % 400 === 0 && sim.tick > 400 && sim.rng() < 0.30 && !sim.isPlane) rollOmen(sim);
+    const lifeless = sim.world.mode === 'deep' || sim.world.mode === 'nothing';
+    if (sim.tick % 400 === 0 && sim.tick > 400 && sim.rng() < 0.30 && !sim.isPlane && !lifeless) rollOmen(sim);
     updateHeroes(sim);
     if (sim.soc.internetOn && sim.tick % 240 === 0 && sim.rng() < 0.6) {
       post(sim, null, SENTIENT_RACE(sim), POST_FLAVOR[(sim.rng() * POST_FLAVOR.length) | 0](sim));
@@ -4724,6 +4789,26 @@ void main(){ gl_FragColor = vCol; }`;
     return null;
   }
 
+  // Unmake From History: the soul is struck from the Beyond as well.
+  function erase(name) {
+    init();
+    let n = 0;
+    for (const pid in AL.planes) {
+      const plane = AL.planes[pid];
+      for (let i = plane.souls.length - 1; i >= 0; i--) {
+        if (plane.souls[i].name === name) {
+          plane.souls.splice(i, 1);
+          plane.total = Math.max(0, plane.total - 1);
+          n++;
+        }
+      }
+      if (plane.sim) {
+        for (const u of plane.sim.units) if (!u.dead && u.name === name) u.dead = true;
+      }
+    }
+    return n;
+  }
+
   function stats() {
     init();
     return PLANES.map(p => ({
@@ -4752,7 +4837,7 @@ void main(){ gl_FragColor = vCol; }`;
     }
   }
 
-  global.PD.Afterlife = { PLANES, AL, init, receiveSoul, materialize, resurrect, judgeSoul, stats, serialize, load, routePlane };
+  global.PD.Afterlife = { PLANES, AL, init, receiveSoul, materialize, resurrect, judgeSoul, erase, stats, serialize, load, routePlane };
 })(window);
 
 </script>
@@ -4906,7 +4991,7 @@ void main(){ gl_FragColor = vCol; }`;
       world.struct[i] = 0; world.owner[i] = -1; world.fert[i] = 0;
     }
     world.mode = 'hell';
-    world.dirty = true; world.dirtyMini = true;
+    world.dirty = true; world.dirtyMini = true; world.dirtyGlobe = true;
     for (const u of sim.units) if (!u.dead) PD.Sim.killUnit(sim, u, 'apocalypse');
     sim.villages.length = 0;
     if (PD.Society) PD.Society.hist(sim, `${p.name} HAS SHATTERED. ${p.name} is no more. The Beyond weeps with new souls.`, 'fall');
@@ -5012,7 +5097,7 @@ void main(){ gl_FragColor = vCol; }`;
   // color cache per planet for globe sampling
   function planetColors(p) {
     const world = p.world;
-    if (!p._cols || (p._colsTick || 0) < (p.sim.tick - 60) || world.dirtyGlobe) {
+    if (!p._cols || Math.abs(p.sim.tick - (p._colsTick || 0)) > 60 || world.dirtyGlobe) {
       const cols = p._cols || (p._cols = new Uint8Array(world.n * 3));
       for (let i = 0; i < world.n; i++) {
         const c = PD.Render.hexToRgb(W.BIOME_COLORS[world.biome[i]]);
@@ -5081,6 +5166,15 @@ void main(){ gl_FragColor = vCol; }`;
   const Sim = PD.Sim;
   const FX = PD.FX;
   const B = W.B;
+
+  // What the Voice actually says when it speaks
+  const VOICE_LINES = [
+    'Be not afraid.', 'I have seen you.', 'Build here.', 'The waters will come — go higher.',
+    'Your name is known to me.', 'Do not go east.', 'Feed them before you feed yourself.',
+    'I am the one who made the sky.', 'Forgive them, and I will forgive you.',
+    'What you buried, I saw.', 'Sing, and I will listen.', 'This land is a gift, not a right.',
+    'The stars are older than your grief.', 'Live.'
+  ];
 
   // helper to play sound
   function snd(n) { if (PD.Audio8) PD.Audio8.sfx(n); }
@@ -5186,7 +5280,7 @@ void main(){ gl_FragColor = vCol; }`;
       } },
 
     // ---- Blessings ----
-    { id: 'bless', name: 'Bless', icon: '✨', cat: 'bless', cost: 6, radius: 4, cont: true,
+    { id: 'bless', name: 'Bless', ach: 'blessings', icon: '✨', cat: 'bless', cost: 6, radius: 4, cont: true,
       color: 'rgba(255,240,160,0.95)',
       desc: 'Heal and nourish all creatures in the light. The faithful are restored.',
       apply(G, wx, wy) {
@@ -5207,7 +5301,7 @@ void main(){ gl_FragColor = vCol; }`;
       } },
 
     // ---- Wrath ----
-    { id: 'lightning', name: 'Lightning', icon: '⚡', cat: 'wrath', cost: 12, radius: 2, cont: false,
+    { id: 'lightning', name: 'Lightning', ach: 'smites', react: 'lightning', icon: '⚡', cat: 'wrath', cost: 12, radius: 2, cont: false,
       color: 'rgba(200,230,255,0.95)',
       desc: 'Hurl a bolt of divine lightning. Smites the living, ignites the land.',
       apply(G, wx, wy) {
@@ -5226,7 +5320,7 @@ void main(){ gl_FragColor = vCol; }`;
         W.ignite(G.world, Math.floor(wx), Math.floor(wy), G.power.radius);
         FX.fireBurst(wx, wy); snd('fire'); return this.cost;
       } },
-    { id: 'meteor', name: 'Meteor', icon: '☄️', cat: 'wrath', cost: 30, radius: 4, cont: false,
+    { id: 'meteor', name: 'Meteor', ach: 'meteors', react: 'meteor', icon: '☄️', cat: 'wrath', cost: 30, radius: 4, cont: false,
       color: 'rgba(255,140,40,0.95)',
       desc: 'Call down a blazing meteor. It craters the earth and scorches all near.',
       apply(G, wx, wy) {
@@ -5238,7 +5332,7 @@ void main(){ gl_FragColor = vCol; }`;
         Sim.damageArea(G.sim, wx, wy, this.radius + 1, 100, null);
         G.world.dirtyMini = true; G.flash = 0.7; G.shake = 12; snd('meteor'); return this.cost;
       } },
-    { id: 'plague', name: 'Plague', icon: '🦠', cat: 'wrath', cost: 15, radius: 4, cont: false,
+    { id: 'plague', name: 'Plague', react: 'plague', icon: '🦠', cat: 'wrath', cost: 15, radius: 4, cont: false,
       color: 'rgba(120,220,80,0.9)',
       desc: 'Unleash a creeping plague that spreads from soul to soul.',
       apply(G, wx, wy) {
@@ -5247,7 +5341,7 @@ void main(){ gl_FragColor = vCol; }`;
         for (let i = 0; i < 12; i++) FX.spawn(wx + (Math.random() - 0.5) * this.radius * 2, wy + (Math.random() - 0.5) * this.radius * 2, 0, -0.02, 30, '#78dc50', 2);
         snd('plague'); return this.cost;
       } },
-    { id: 'quake', name: 'Earthquake', icon: '🌋', cat: 'wrath', cost: 22, radius: 6, cont: false,
+    { id: 'quake', name: 'Earthquake', react: 'quake', icon: '🌋', cat: 'wrath', cost: 22, radius: 6, cont: false,
       color: 'rgba(180,120,60,0.9)',
       desc: 'Rend the ground. Buildings crumble and the earth swallows the unlucky.',
       apply(G, wx, wy) {
@@ -5298,16 +5392,18 @@ void main(){ gl_FragColor = vCol; }`;
         if (!u) { snd('error'); return 0; }
         u.karma += 5;
         const R = Sim.RACES[u.race];
+        const line = VOICE_LINES[(Math.random() * VOICE_LINES.length) | 0];
         if (PD.Society) {
-          PD.Society.hist(G.sim, `You spoke to ${u.name}. They fell to their knees.`, 'faith');
-          if (R.sentient && Math.random() < 0.3) {
-            PD.Society.hist(G.sim, `${u.name} now preaches of the Voice they heard.`, 'faith');
+          PD.Society.hist(G.sim, `You spoke to ${u.name}: “${line}” They fell to their knees.`, 'faith');
+          if (R.sentient && Math.random() < 0.4) {
+            PD.Society.hist(G.sim, `${u.name} repeats it to anyone who will listen: “${line}”`, 'faith');
             u.prof = 3; // priest
+            PD.Society.post(G.sim, u.name, u.race, `ok so a VOICE just said "${line}" and i have never been more normal about anything`);
           }
         }
         FX.shock(u.x, u.y, 2, '#fff2a0'); snd('bless'); return this.cost;
       } },
-    { id: 'empower', name: 'Empower Hero', icon: '🦸', cat: 'godhead', cost: 60, radius: 0, cont: false,
+    { id: 'empower', name: 'Empower Hero', ach: 'heroes', icon: '🦸', cat: 'godhead', cost: 60, radius: 0, cont: false,
       color: 'rgba(255,220,80,0.95)',
       desc: 'Fill a mortal with divine might. They become a Paragon — a hero of legend who hunts monsters.',
       apply(G, wx, wy) {
@@ -5317,7 +5413,7 @@ void main(){ gl_FragColor = vCol; }`;
         PD.Society.empower(G.sim, u, 1);
         snd('levelup'); return this.cost;
       } },
-    { id: 'miracle', name: 'Miracle', icon: '🌟', cat: 'godhead', cost: 25, radius: 6, cont: false,
+    { id: 'miracle', name: 'Miracle', ach: 'blessings', icon: '🌟', cat: 'godhead', cost: 25, radius: 6, cont: false,
       color: 'rgba(255,250,220,0.95)',
       desc: 'A great working: the sick healed, the hungry fed, the fields made fertile, the dying saved.',
       apply(G, wx, wy) {
@@ -5424,7 +5520,7 @@ void main(){ gl_FragColor = vCol; }`;
       } },
 
     // ---- Testament: biblical workings ----
-    { id: 'flood', name: 'Great Flood', icon: '🌊', cat: 'bible', cost: 120, radius: 0, cont: false,
+    { id: 'flood', name: 'Great Flood', ach: 'floods', story: 'wrath', icon: '🌊', cat: 'bible', cost: 120, radius: 0, cont: false,
       color: 'rgba(60,120,220,0.95)',
       desc: 'Drown the world for its wickedness. The waters rise for a season — the righteous are spared.',
       apply(G, wx, wy) {
@@ -5433,7 +5529,7 @@ void main(){ gl_FragColor = vCol; }`;
         G.startFlood();
         snd('quake'); return this.cost;
       } },
-    { id: 'plagues', name: 'Ten Plagues', icon: '🐸', cat: 'bible', cost: 60, radius: 8, cont: false,
+    { id: 'plagues', name: 'Ten Plagues', story: 'wrath', icon: '🐸', cat: 'bible', cost: 60, radius: 8, cont: false,
       color: 'rgba(150,200,80,0.95)',
       desc: 'Visit a full suite of plagues on a land: pestilence, blight, darkness, and worse.',
       apply(G, wx, wy) {
@@ -5738,7 +5834,7 @@ void main(){ gl_FragColor = vCol; }`;
         if (PD.Society) PD.Society.hist(G.sim, `${bv.name} glows with divine aegis. Untouchable.`, 'faith');
         snd('bless'); return this.cost;
       } },
-    { id: 'titan', name: 'Titanize', icon: '🗽', cat: 'omni', cost: 100, radius: 0, cont: false,
+    { id: 'titan', name: 'Titanize', ach: 'heroes', icon: '🗽', cat: 'omni', cost: 100, radius: 0, cont: false,
       color: 'rgba(216,176,144,0.95)',
       desc: 'Swell a mortal into a walking colossus — a paragon grown to the size of a hill.',
       apply(G, wx, wy) {
@@ -5756,7 +5852,126 @@ void main(){ gl_FragColor = vCol; }`;
         FX.shock(best.x, best.y, 6, '#d8b090'); G.shake = 10;
         if (PD.Society) PD.Society.hist(G.sim, `${best.name} GROWS. And grows. And grows. A titan walks the earth.`, 'legend');
         snd('quake'); return this.cost;
-      } }
+      } },
+
+    // ---- Genesis: spoken over the face of the deep ----
+    // These appear one at a time, only after time has been reversed past
+    // the beginning. An empty world earns no faith, so creation is free.
+    { id: 'gen_light', name: 'Let There Be Light', icon: '☀️', cat: 'genesis', cost: 0, radius: 0, cont: false,
+      color: 'rgba(255,250,220,1)', stage: 0,
+      desc: 'The first word. Stars kindle, a sun ignites, and the darkness upon the face of the deep is parted.',
+      apply(G) { return typeof G.genesisStep === 'function' ? G.genesisStep(0) : (snd('error'), 0); } },
+    { id: 'gen_firmament', name: 'Separate the Waters', icon: '🌫️', cat: 'genesis', cost: 0, radius: 0, cont: false,
+      color: 'rgba(180,215,255,1)', stage: 1,
+      desc: 'Divide the waters from the waters. Sky from sea; a firmament, and clouds within it.',
+      apply(G) { return typeof G.genesisStep === 'function' ? G.genesisStep(1) : (snd('error'), 0); } },
+    { id: 'gen_land', name: 'Let Dry Land Appear', icon: '🏔️', cat: 'genesis', cost: 0, radius: 0, cont: false,
+      color: 'rgba(160,130,90,1)', stage: 2,
+      desc: 'Let the waters be gathered, and dry land appear. Continents rise out of the deep.',
+      apply(G) { return typeof G.genesisStep === 'function' ? G.genesisStep(2) : (snd('error'), 0); } },
+    { id: 'gen_green', name: 'Bring Forth Grass', icon: '🌿', cat: 'genesis', cost: 0, radius: 0, cont: false,
+      color: 'rgba(110,190,90,1)', stage: 3,
+      desc: 'Let the earth bring forth grass, and the herb, and the fruit tree. Green floods the world.',
+      apply(G) { return typeof G.genesisStep === 'function' ? G.genesisStep(3) : (snd('error'), 0); } },
+    { id: 'gen_lights', name: 'Lights in the Firmament', icon: '🌗', cat: 'genesis', cost: 0, radius: 0, cont: false,
+      color: 'rgba(255,235,180,1)', stage: 4,
+      desc: 'Lights to divide the day from the night, for signs and for seasons. Time begins to flow.',
+      apply(G) { return typeof G.genesisStep === 'function' ? G.genesisStep(4) : (snd('error'), 0); } },
+    { id: 'gen_life', name: 'Bring Forth Life', icon: '🐾', cat: 'genesis', cost: 0, radius: 0, cont: false,
+      color: 'rgba(230,200,150,1)', stage: 5,
+      desc: 'Let the waters teem and the earth bring forth the living creature — and then, someone to name them.',
+      apply(G) { return typeof G.genesisStep === 'function' ? G.genesisStep(5) : (snd('error'), 0); } },
+    { id: 'gen_rest', name: 'Rest', icon: '🕊️', cat: 'genesis', cost: 0, radius: 0, cont: false,
+      color: 'rgba(255,255,255,1)', stage: 6,
+      desc: 'On the seventh day, rest — and see that it is good. The world is yours again.',
+      apply(G) { return typeof G.genesisStep === 'function' ? G.genesisStep(6) : (snd('error'), 0); } },
+
+    // ---- Godhead: the omnipotence tier ----
+    { id: 'judgment', name: 'Judgment Day', icon: '⚖️', cat: 'godhead', cost: 180, radius: 0, cont: false,
+      color: 'rgba(255,240,190,0.98)', story: 'wrath',
+      desc: 'Weigh every soul at once. The righteous rise in pillars of light; the wicked are cast down. The world empties.',
+      apply(G) {
+        if (G.faith < this.cost) { snd('error'); return 0; }
+        let saved = 0, damned = 0;
+        for (const u of G.sim.units) {
+          if (u.dead) continue;
+          const R = Sim.RACES[u.race];
+          if (!R.sentient) continue;
+          const good = u.karma >= 0;
+          if (good) { u.karma += 12; saved++; for (let i = 0; i < 5; i++) FX.spawn(u.x, u.y, 0, -0.18, 34, '#fff2a0', 2); }
+          else { u.karma -= 12; damned++; for (let i = 0; i < 5; i++) FX.spawn(u.x, u.y, 0, 0.14, 30, '#c04020', 2); }
+          Sim.killUnit(G.sim, u, good ? 'rapture' : 'judgment');
+        }
+        if (!saved && !damned) { snd('error'); return 0; }
+        if (PD.Society) PD.Society.hist(G.sim, `JUDGMENT. ${saved} raised into light, ${damned} cast down. The world falls silent.`, 'fall');
+        G.flash = 1; G.shake = 14; snd('levelup');
+        return this.cost;
+      } },
+    { id: 'omniscience', name: 'Omniscience', icon: '👁️', cat: 'godhead', cost: 40, radius: 0, cont: false,
+      color: 'rgba(200,225,255,0.98)',
+      desc: 'Know every name, every hidden heart, every nation’s true intent. Toggle the all-seeing eye.',
+      apply(G) {
+        if (!G.omniscient && G.faith < this.cost) { snd('error'); return 0; }
+        G.omniscient = !G.omniscient;
+        if (PD.Society) PD.Society.hist(G.sim, G.omniscient ? 'The eye opens. Nothing is hidden.' : 'The eye closes.', 'faith');
+        snd(G.omniscient ? 'bless' : 'click');
+        return G.omniscient ? this.cost : 0;
+      } },
+    { id: 'unmake', name: 'Unmake From History', icon: '🕯️', cat: 'godhead', cost: 70, radius: 0, cont: false,
+      color: 'rgba(150,130,180,0.98)',
+      desc: 'Erase a soul so utterly they never were — struck from the chronicle, the legends, and the Beyond alike.',
+      apply(G, wx, wy) {
+        if (G.faith < this.cost) { snd('error'); return 0; }
+        const u = nearestUnit(G, wx, wy, 2.5);
+        if (!u) { snd('error'); return 0; }
+        const name = u.name;
+        u.dead = true;
+        // scrub every trace: chronicle, legends, feed, and the afterlife
+        if (PD.Society) {
+          const soc = PD.Society.ensure(G.sim);
+          const strip = (arr, key) => { for (let i = arr.length - 1; i >= 0; i--) if ((arr[i][key] || '').indexOf(name) >= 0) arr.splice(i, 1); };
+          strip(soc.history, 'text'); strip(soc.legends, 'deed'); strip(soc.feed, 'author'); strip(soc.feed, 'text');
+        }
+        if (PD.Afterlife) PD.Afterlife.erase && PD.Afterlife.erase(name);
+        for (let i = 0; i < 12; i++) FX.spawn(u.x, u.y, (Math.random() - 0.5) * 0.1, -0.05, 30, '#9a86b4', 2);
+        if (PD.Society) PD.Society.hist(G.sim, 'Someone is missing. No one can say who.', 'legend');
+        snd('plague');
+        return this.cost;
+      } },
+    { id: 'breath', name: 'Breath of Life', icon: '🌬️', cat: 'godhead', cost: 120, radius: 0, cont: false,
+      color: 'rgba(190,255,220,0.98)', ach: 'resurrections',
+      desc: 'Empty limbo. Every soul wandering the Grayfields is breathed back into living flesh.',
+      apply(G, wx, wy) {
+        if (G.faith < this.cost) { snd('error'); return 0; }
+        if (!PD.Afterlife || !G.view || G.view.kind !== 'planet') { snd('error'); return 0; }
+        const plane = PD.Afterlife.AL.planes['grayfields'];
+        if (!plane || !plane.souls.length) { snd('error'); return 0; }
+        const names = plane.souls.slice(0, 40).map(s => s.name);
+        let n = 0;
+        for (const nm of names) {
+          const spot = W.nearestLand(G.world, wx + (Math.random() * 8 - 4), wy + (Math.random() * 8 - 4), 12);
+          if (!spot) continue;
+          if (PD.Afterlife.resurrect(nm, G.sim, spot.x, spot.y)) n++;
+        }
+        if (!n) { snd('error'); return 0; }
+        FX.shock(wx, wy, 8, '#bfffdc');
+        if (PD.Society) PD.Society.hist(G.sim, `${n} souls are breathed back out of limbo. The Grayfields thin.`, 'legend');
+        snd('levelup');
+        return this.cost;
+      } },
+    { id: 'sabbath', name: 'Sabbath', icon: '⏸️', cat: 'godhead', cost: 25, radius: 0, cont: false,
+      color: 'rgba(220,220,240,0.98)',
+      desc: 'The world holds its breath. Everything stops but you — act freely in the stillness.',
+      apply(G) {
+        if (!G.sabbath && G.faith < this.cost) { snd('error'); return 0; }
+        if (typeof G.setSabbath !== 'function') { snd('error'); return 0; }
+        G.sabbath = !G.sabbath;
+        G.setSabbath(G.sabbath);
+        if (PD.Society) PD.Society.hist(G.sim, G.sabbath ? 'Everything stops. Only you still move.' : 'The world breathes again.', 'faith');
+        snd(G.sabbath ? 'bless' : 'click');
+        return G.sabbath ? this.cost : 0;
+      } },
+
   ];
 
   // helpers for targeted powers
@@ -5800,6 +6015,7 @@ void main(){ gl_FragColor = vCol; }`;
   for (const p of POWERS) BY_ID[p.id] = p;
 
   const CATEGORIES = [
+    { id: 'genesis', name: 'Genesis' },
     { id: 'god', name: 'Divine' },
     { id: 'life', name: 'Life' },
     { id: 'terra', name: 'Terraform' },
@@ -5836,6 +6052,27 @@ void main(){ gl_FragColor = vCol; }`;
   const SAVE_KEY = 'pixeldeity_save_v2';
   const OLD_KEY = 'pixeldeity_save_v1';
   const STEP_MS = 1000 / 6;
+
+  // ================= The time dial =================
+  // One scale spanning reverse -> forward. Reverse speeds play recorded
+  // history backwards; past the record they un-create the world itself.
+  const TIME_SCALES = [
+    { v: -1000, label: '⧏⧏⧏', name: 'Unmaking' },
+    { v: -100,  label: '⧏⧏',  name: 'Ages Reversed' },
+    { v: -10,   label: '⧏',   name: 'Rewind' },
+    { v: -1,    label: '◀',   name: 'Backwards' },
+    { v: 0,     label: '❚❚', name: 'Paused' },
+    { v: 0.1,   label: '▷',   name: 'Bullet Time' },
+    { v: 0.25,  label: '▷',   name: 'Slow' },
+    { v: 1,     label: '▶',   name: 'Normal' },
+    { v: 5,     label: '▶▶', name: 'Fast' },
+    { v: 25,    label: '▶▶', name: 'Very Fast' },
+    { v: 100,   label: '▶▶▶', name: 'Centuries' },
+    { v: 1000,  label: '▶▶▶', name: 'Millennia' }
+  ];
+  const IDX_PAUSE = 4, IDX_NORMAL = 7;
+  // ticks per displayed year (the HUD has always divided by 120)
+  const TICKS_PER_YEAR = 120;
   const $ = (s) => document.querySelector(s);
 
   const BIOME_NAMES = ['Deep Ocean', 'Water', 'Sand', 'Grassland', 'Forest', 'Dirt', 'Mountain', 'Snow', 'Desert', 'Jungle', 'Swamp', 'Ash', 'Hellrock', 'Lava', 'Cloudfield', 'Golden Meadow', 'Primordial Ooze', 'Voidstone'];
@@ -5845,7 +6082,7 @@ void main(){ gl_FragColor = vCol; }`;
     view: { kind: 'planet', id: -1 },       // or {kind:'plane', id:'elysium'}
     faith: 60, faithTotal: 0,
     power: null, lastRace: 'human',
-    speed: 1, paused: false,
+    speed: 1, speedIdx: 7, paused: false,
     acc: 0, lastT: 0,
     selected: null,
     weather: 'clear', weatherT: 0,
@@ -5892,6 +6129,8 @@ void main(){ gl_FragColor = vCol; }`;
     Cosmos.C.nextId = 1;
     G.faith = 60; G.faithTotal = 0;
     G.timeline.length = 0;
+    initRewind();
+    G.creationStage = null; G.dissolve = 0;
     G.story = { done: {}, active: 0 };
     const p = Cosmos.createPlanet('verdant', seedStr);
     Cosmos.C.activeId = p.id;
@@ -5986,7 +6225,11 @@ void main(){ gl_FragColor = vCol; }`;
   // ================= Sim stepping =================
   function simStep() {
     Sim.step(G.sim, 1);
-    if (G.view.kind === 'planet') {
+    if (G.view.kind === 'planet' && G.speed > 0) {
+      const ap = Cosmos.active();
+      if (ap) recordRewind(ap);
+    }
+    if (G.view.kind === 'planet' && G.speed > 0) {
       Cosmos.tickAll(G.sim);
       Cosmos.checkStarchild(G.sim);
     }
@@ -6120,11 +6363,14 @@ void main(){ gl_FragColor = vCol; }`;
       fire: Codec.packU8(w.fire), structHp: Codec.packU8(w.structHp),
       tick: s.tick, nextUnitId: s.nextUnitId, nextVillageId: s.nextVillageId,
       villages: s.villages, soc: s.soc || null, starchild: s._starchild || null,
+      bloodMoon: s.bloodMoonT || 0,
+      // the pre-flood heightmap: lose this mid-flood and the drowning is permanent
+      preFlood: w._preFlood ? Codec.packF01(w._preFlood) : null,
       units: s.units.filter(u => !u.dead).map(u => [
         u.id, u.race, +u.x.toFixed(2), +u.y.toFixed(2), Math.round(u.hp),
         u.age | 0, u.village, u.sick | 0, +u.food.toFixed(2),
         Math.round(u.lifespan), u.adultAt | 0, u.name, u.trait, u.prof,
-        Math.round(u.karma * 10) / 10, u.paragon | 0, u.big || 0
+        Math.round(u.karma * 10) / 10, u.paragon | 0, u.big || 0, Math.round(u.maxHp)
       ])
     };
   }
@@ -6149,12 +6395,14 @@ void main(){ gl_FragColor = vCol; }`;
     sim.villages = d.villages || [];
     sim.soc = d.soc || null;
     sim._starchild = d.starchild || null;
+    sim.bloodMoonT = d.bloodMoon || 0;
     sim.planetName = d.name;
+    if (d.preFlood) world._preFlood = Codec.unpackF01(d.preFlood, n);
     sim.units = (d.units || []).map(a => {
       const R = Sim.RACES[a[1]] || Sim.RACES.human;
       return {
         id: a[0], race: Sim.RACES[a[1]] ? a[1] : 'human', x: a[2], y: a[3],
-        hp: a[4], maxHp: a[15] > 0 ? R.hp * (1 + a[15] * 2) : R.hp,
+        hp: a[4], maxHp: a[17] || (a[15] > 0 ? R.hp * (1 + a[15] * 2) : R.hp),
         age: a[5], village: a[6], sick: a[7], food: a[8],
         lifespan: a[9] != null ? a[9] : Math.max(R.lifespan * 1.2, a[5] + 200),
         adultAt: a[10] != null ? a[10] : 70,
@@ -6179,6 +6427,10 @@ void main(){ gl_FragColor = vCol; }`;
       speed: G.speed, stats: G.stats, story: G.story,
       divinity: G.divinity, ach: G.ach,
       view: G.view, floodT: G.floodT,
+      // in-flight divine events: without these a 250-faith Armageddon just
+      // stops on reload, and a mid-flood save loses _preFlood forever
+      armageddon: G.armageddon, storm: G.storm, tornado: G.tornado,
+      weather: G.weather, weatherT: G.weatherT,
       cam: G.r ? { lon: G.r.cam.lon, lat: G.r.cam.lat, dist: G.r.cam.dist } : null,
       cosmos: { nextId: Cosmos.C.nextId, activeId: Cosmos.C.activeId, customRaces: Cosmos.customRaces },
       planets: Cosmos.C.planets.map(packPlanet),
@@ -6209,6 +6461,9 @@ void main(){ gl_FragColor = vCol; }`;
     try {
       // custom races must exist before units referencing them are unpacked
       for (const cr of (d.cosmos && d.cosmos.customRaces) || []) Cosmos.registerRace(cr);
+      // ...and give them their toolbar buttons back (registerRace alone
+      // restores the race but not the power to place it)
+      for (const cr of (d.cosmos && d.cosmos.customRaces) || []) addCustomSpawnPower(cr.key);
       Cosmos.C.planets.length = 0;
       for (const pd of d.planets) Cosmos.C.planets.push(unpackPlanet(pd));
       Cosmos.C.nextId = (d.cosmos && d.cosmos.nextId) || (Cosmos.C.planets.length + 1);
@@ -6217,12 +6472,18 @@ void main(){ gl_FragColor = vCol; }`;
       G.faith = d.faith != null ? d.faith : 60;
       G.faithTotal = d.faithTotal || 0;
       G.lastRace = d.lastRace || 'human';
-      G.speed = (typeof d.speed === 'number') ? d.speed : 1;
+      // never resume a save mid-rewind
+      G.speed = (typeof d.speed === 'number') ? Math.max(0, d.speed) : 1;
       G.stats = d.stats || G.stats;
       G.story = d.story || G.story;
       G.divinity = d.divinity || 0;
       G.ach = d.ach || {};
-      G.floodT = 0; // floods don't survive reload (waters recede in our absence)
+      // in-flight events resume where they left off
+      G.armageddon = d.armageddon || 0;
+      G.storm = d.storm || null;
+      G.tornado = d.tornado || null;
+      if (d.weather) G.setWeather(d.weather, d.weatherT || 0);
+      G.floodT = d.floodT || 0;
       G.view = (d.view && d.view.kind === 'planet' && Cosmos.getPlanet(d.view.id)) ? d.view : { kind: 'planet', id: Cosmos.C.activeId };
       bindView();
       if (d.cam && d.cam.lon != null && G.r) { G.r.cam.lon = d.cam.lon; G.r.cam.lat = d.cam.lat; G.r.cam.dist = d.cam.dist; }
@@ -6255,11 +6516,12 @@ void main(){ gl_FragColor = vCol; }`;
     const snap = G.timeline[idx]; if (!snap) return;
     const pd = JSON.parse(snap.data);
     if (branch) {
-      // a new universe forks from the old moment
+      // a new universe forks from the old moment — check capacity BEFORE
+      // consuming an id, or a failed branch leaks one
+      if (Cosmos.C.planets.length >= 10) { flashToast('The void is full — destroy a world first'); return; }
       pd.id = Cosmos.C.nextId++;
       pd.name = snap.planetName + ' ⧗';
       pd.orbit = { r: 60 + Cosmos.C.planets.length * 34, a: Math.random() * 6.28, spd: 0.001 };
-      if (Cosmos.C.planets.length >= 10) { flashToast('The void is full — destroy a world first'); return; }
       const p = unpackPlanet(pd);
       Cosmos.C.planets.push(p);
       gotoPlanet(p.id);
@@ -6275,6 +6537,306 @@ void main(){ gl_FragColor = vCol; }`;
     if (PD.Society) PD.Society.hist(G.sim, branch ? 'You forked time itself.' : 'You turned back time itself.', 'legend');
     ach('timetravels');
   }
+
+  // ================= Rewind: time running backwards =================
+  // A full snapshot is ~310KB, so a naive dense buffer would cost tens of
+  // megabytes. Instead we keep two tiers:
+  //   fine  — packed unit motion only (~13KB), for smooth reverse movement
+  //   full  — real restore points (terrain, villages, society, souls)
+  // Between full frames the fine frames drive what you SEE; crossing a full
+  // frame restores what actually IS.
+  const REWIND = {
+    fineEvery: 4,      // sim ticks between motion frames
+    fullEvery: 60,     // sim ticks between true restore points
+    fineCap: 400,      // ~27 min of 1x play
+    fullCap: 24        // ~7.5MB worst case
+  };
+
+  function initRewind() {
+    G.rewind = { fine: [], full: [], undo: null, stage: 0, prog: 0 };
+  }
+
+  // Motion-only frame: ids + positions + hp as typed arrays (no JSON).
+  function captureFine(sim) {
+    const live = [];
+    for (const u of sim.units) if (!u.dead) live.push(u);
+    const n = live.length;
+    const ids = new Int32Array(n), xy = new Float32Array(n * 2), hp = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      ids[i] = live[i].id;
+      xy[i * 2] = live[i].x; xy[i * 2 + 1] = live[i].y;
+      hp[i] = live[i].hp;
+    }
+    return { tick: sim.tick, ids, xy, hp, faith: G.faith };
+  }
+
+  // Full restore point. Extends packPlanet with the state it drops, so a
+  // restore doesn't scramble everyone's movement or strand souls.
+  function captureFull(p) {
+    const d = packPlanet(p);
+    const motion = [];
+    for (const u of p.sim.units) {
+      if (u.dead) continue;
+      motion.push([u.id, u.state, +u.tx.toFixed(2), +u.ty.toFixed(2), u.cd, u.breedCd, u.raidT, u.flip]);
+    }
+    return {
+      tick: p.sim.tick, planetId: p.id, data: d, motion,
+      souls: PD.Afterlife.serialize(),
+      faith: G.faith, faithTotal: G.faithTotal,
+      stats: JSON.parse(JSON.stringify(G.stats)),
+      ach: JSON.parse(JSON.stringify(G.ach)),
+      ev: { armageddon: G.armageddon, storm: G.storm, tornado: G.tornado, floodT: G.floodT }
+    };
+  }
+
+  function recordRewind(p) {
+    const rw = G.rewind; if (!rw) return;
+    const t = p.sim.tick;
+    if (t % REWIND.fineEvery === 0) {
+      rw.fine.push(captureFine(p.sim));
+      if (rw.fine.length > REWIND.fineCap) rw.fine.shift();
+    }
+    if (t % REWIND.fullEvery === 0) {
+      rw.full.push(captureFull(p));
+      if (rw.full.length > REWIND.fullCap) rw.full.shift();
+      // fine frames older than the oldest restore point are unusable
+      const floor = rw.full[0].tick;
+      while (rw.fine.length && rw.fine[0].tick < floor) rw.fine.shift();
+    }
+  }
+
+  // Apply a full restore point in place.
+  function restoreFull(f) {
+    const i = Cosmos.C.planets.findIndex(x => x.id === f.planetId);
+    if (i < 0) return false;
+    const p = unpackPlanet(f.data);
+    // put movement back the way it was — packPlanet resets it
+    const byId = new Map();
+    for (const u of p.sim.units) byId.set(u.id, u);
+    for (const m of f.motion || []) {
+      const u = byId.get(m[0]);
+      if (!u) continue;
+      u.state = m[1]; u.tx = m[2]; u.ty = m[3];
+      u.cd = m[4]; u.breedCd = m[5]; u.raidT = m[6]; u.flip = m[7];
+    }
+    Cosmos.C.planets[i] = p;
+    if (G.view.kind === 'planet' && G.view.id === f.planetId) {
+      G.world = p.world; G.sim = p.sim;
+      if (G.r) Render.setWorld(G.r, G.world);
+    }
+    PD.Afterlife.load(f.souls);
+    G.faith = f.faith; G.faithTotal = f.faithTotal;
+    G.stats = f.stats; G.ach = f.ach;
+    if (f.ev) { G.armageddon = f.ev.armageddon; G.storm = f.ev.storm; G.tornado = f.ev.tornado; G.floodT = f.ev.floodT; }
+    p.world.dirty = p.world.dirtyMini = p.world.dirtyGlobe = true;
+    return true;
+  }
+
+  // Apply a motion-only frame to the live sim: people walk backwards.
+  function applyFine(sim, f) {
+    const byId = new Map();
+    for (const u of sim.units) if (!u.dead) byId.set(u.id, u);
+    for (let i = 0; i < f.ids.length; i++) {
+      const u = byId.get(f.ids[i]);
+      if (!u) continue;
+      u.x = f.xy[i * 2]; u.y = f.xy[i * 2 + 1]; u.hp = f.hp[i];
+    }
+    sim.tick = f.tick;
+    G.faith = f.faith;
+    sim.season = Math.floor((sim.tick % 480) / 120);
+    sim.isNight = Math.cos(((sim.tick % 480) / 480) * 6.283) * 0.5 + 0.15 > 0.3;
+  }
+
+  // Driven from loop() whenever G.speed < 0.
+  function stepRewind(dt) {
+    const rw = G.rewind; if (!rw) return;
+    if (G.view.kind !== 'planet') { flashToast('Only living worlds can be rewound'); setSpeedIdx(IDX_PAUSE); return; }
+    const p = Cosmos.active(); if (!p) return;
+    const rate = Math.abs(G.speed);
+    // how many recorded ticks to unwind this frame
+    let budget = Math.max(1, Math.round(rate * 6 * dt / 1000 * REWIND.fineEvery));
+
+    while (budget > 0 && rw.fine.length) {
+      const f = rw.fine[rw.fine.length - 1];
+      // crossing a restore point: put the world itself back
+      const full = rw.full.length ? rw.full[rw.full.length - 1] : null;
+      if (full && f.tick <= full.tick) {
+        rw.full.pop();
+        restoreFull(full);
+      } else {
+        applyFine(p.sim, f);
+      }
+      rw.fine.pop();
+      budget -= REWIND.fineEvery;
+    }
+    if (!rw.fine.length) {
+      // past the beginning of the record — un-create the world itself
+      stepUncreate(p, dt, rate);
+    }
+    p.world.dirtyMini = true;
+  }
+
+  // ---- Un-creation: the world unmakes itself, stage by stage ----
+  const UNCREATE_STAGES = [
+    { id: 'unbuild', name: 'THE WORKS UNDONE', sub: 'cities unbuild · nations forget' },
+    { id: 'unshape', name: 'THE LAND UNSHAPES', sub: 'mountains sink · forests recede' },
+    { id: 'deep',    name: 'THE FORMLESS DEEP', sub: 'darkness upon the face of the deep' },
+    { id: 'nothing', name: 'NOTHING',           sub: 'before the beginning' }
+  ];
+
+  function stepUncreate(p, dt, rate) {
+    const rw = G.rewind, world = p.world, sim = p.sim;
+    rw.prog += (dt / 1000) * Math.min(4, 0.35 + rate * 0.02);
+    const stage = rw.stage;
+
+    if (stage === 0) {           // ---- Unbuilding ----
+      const frac = Math.min(1, rw.prog / 3);
+      let cleared = 0;
+      for (let k = 0; k < 900; k++) {
+        const i = (Math.random() * world.n) | 0;
+        if (world.struct[i] || world.owner[i] >= 0) {
+          world.struct[i] = 0; world.owner[i] = -1; W.markTile(world, i); cleared++;
+        }
+      }
+      // people fade out of existence
+      const live = sim.units.filter(u => !u.dead);
+      const target = Math.floor(live.length * (1 - frac));
+      for (let i = live.length - 1; i > target; i--) {
+        const u = live[i];
+        if (PD.FX) PD.FX.puff(u.x, u.y, '#8fb4e0');
+        u.dead = true;
+      }
+      sim.villages.length = Math.floor(sim.villages.length * (1 - frac));
+      if (frac >= 1 || (!cleared && !live.length)) { rw.stage = 1; rw.prog = 0; sim.soc = null; }
+
+    } else if (stage === 1) {    // ---- Unshaping ----
+      const t = Math.min(1, rw.prog / 4);
+      for (let i = 0; i < world.n; i++) {
+        // every height eases toward a featureless sphere at sea level
+        world.elev[i] += (0.40 - world.elev[i]) * 0.06;
+        world.fert[i] *= 0.94;
+        if (world.tree[i] && Math.random() < 0.06) world.tree[i]--;
+      }
+      W.classify(world);
+      world.dirty = world.dirtyMini = world.dirtyGlobe = true;
+      if (t >= 1) { rw.stage = 2; rw.prog = 0; }
+
+    } else if (stage === 2) {    // ---- The Deep ----
+      world.mode = 'deep';
+      for (let i = 0; i < world.n; i++) {
+        world.elev[i] += (0.10 - world.elev[i]) * 0.10;
+        world.biome[i] = W.B.DEEP; world.fert[i] = 0; world.tree[i] = 0;
+        world.struct[i] = 0; world.owner[i] = -1;
+      }
+      world.dirty = world.dirtyMini = world.dirtyGlobe = true;
+      sim.units.length = 0; sim.villages.length = 0; sim.tick = 0;
+      if (rw.prog > 3.5) { rw.stage = 3; rw.prog = 0; }
+
+    } else {                     // ---- Nothing ----
+      world.mode = 'nothing';
+      G.dissolve = Math.min(1, (G.dissolve || 0) + dt / 2500);
+      if (G.dissolve >= 1) {
+        // time itself stops; only Genesis can start it again
+        G.creationStage = 0;
+        setSpeedIdx(IDX_PAUSE, true);
+        buildToolbar();
+        flashToast('In the beginning…');
+      }
+    }
+  }
+
+  function rewindBannerText() {
+    const rw = G.rewind;
+    if (!rw) return null;
+    if (rw.fine.length) return { t: '⟲ REWINDING', s: 'Year ' + Math.floor(G.sim.tick / TICKS_PER_YEAR) };
+    const st = UNCREATE_STAGES[Math.min(rw.stage, UNCREATE_STAGES.length - 1)];
+    return { t: st.name, s: st.sub };
+  }
+
+  // ================= Genesis: creation, step by step =================
+  // Reached only by rewinding past the beginning. Each step is a real
+  // world-shaping operation on the empty sphere, in order.
+  const GENESIS_NAMES = ['light', 'firmament', 'land', 'green', 'lights', 'life', 'rest'];
+
+  G.genesisStep = function (stage) {
+    if (G.creationStage !== stage) { Audio8.sfx('error'); return 0; }
+    const p = Cosmos.active();
+    if (!p) { Audio8.sfx('error'); return 0; }
+    const world = p.world, sim = p.sim;
+
+    if (stage === 0) {              // Let there be light
+      G.dissolve = 0;
+      world.mode = 'deep';
+      G.flash = 1;
+      if (PD.Society) PD.Society.hist(sim, 'And there was light. The darkness upon the face of the deep is parted.', 'era');
+
+    } else if (stage === 1) {       // Separate the waters — a sky
+      world.mode = 'firmament';
+      for (let i = 0; i < world.n; i++) { world.elev[i] = 0.30; world.biome[i] = W.B.DEEP; }
+      W.classify(world);
+      if (PD.Society) PD.Society.hist(sim, 'A firmament divides the waters. There is a sky, and weather in it.', 'era');
+
+    } else if (stage === 2) {       // Dry land appears
+      world.mode = 'normal';
+      const seed = p.seed + '-genesis';
+      const fresh = W.createWorld(world.W, world.H, seed, {});
+      world.elev.set(fresh.elev); world.moist.set(fresh.moist); world.temp.set(fresh.temp);
+      // land rises but nothing grows on it yet
+      W.classify(world);
+      for (let i = 0; i < world.n; i++) { world.tree[i] = 0; if (W.isLand(world.biome[i])) world.fert[i] = 0.05; }
+      if (PD.Society) PD.Society.hist(sim, 'The waters gather. Dry land appears, bare and new.', 'era');
+
+    } else if (stage === 3) {       // Vegetation
+      for (let i = 0; i < world.n; i++) {
+        if (!W.isLand(world.biome[i])) continue;
+        const m = world.moist[i], t = world.temp[i];
+        if (t > 0.28 && m > 0.5) { world.biome[i] = m > 0.68 && t > 0.68 ? W.B.JUNGLE : W.B.FOREST; world.tree[i] = 2; world.fert[i] = 0.75; }
+        else if (t > 0.28 && m > 0.3) { world.biome[i] = W.B.GRASS; world.fert[i] = 0.6; }
+      }
+      if (PD.Society) PD.Society.hist(sim, 'The earth brings forth grass, and the herb, and the fruit tree.', 'era');
+
+    } else if (stage === 4) {       // Lights in the firmament — time starts
+      sim.tick = 0;
+      if (PD.Society) PD.Society.hist(sim, 'Lights in the firmament, for signs and for seasons. Time begins to move.', 'era');
+
+    } else if (stage === 5) {       // Life
+      for (let k = 0; k < 60; k++) {
+        const spot = W.nearestLand(world, (sim.rng() * world.W) | 0, (sim.rng() * world.H) | 0, 14);
+        if (spot) Sim.spawnUnit(sim, sim.rng() < 0.8 ? 'critter' : 'wolf', spot.x, spot.y);
+      }
+      seedInitialLife(sim, world);
+      Sim.recount(sim);
+      if (PD.Society) PD.Society.hist(sim, 'The waters teem, the earth brings forth the living creature — and someone to name them.', 'era');
+
+    } else if (stage === 6) {       // Rest
+      G.faith += 500;
+      G.creationStage = null;
+      p.type = 'verdant';
+      if (PD.Society) PD.Society.hist(sim, 'And on the seventh day: rest. It is good. +500 ✦', 'legend');
+      flashToast('Creation complete · +500 ✦');
+      initRewind();
+      setSpeedIdx(IDX_NORMAL);
+      buildToolbar();
+      world.dirty = world.dirtyMini = world.dirtyGlobe = true;
+      Audio8.sfx('levelup');
+      return 0;
+    }
+
+    world.dirty = world.dirtyMini = world.dirtyGlobe = true;
+    if (G.r) Render.setWorld(G.r, world);
+    G.creationStage = stage + 1;
+    if (stage === 4) setSpeedIdx(IDX_NORMAL, true);  // time may flow again
+    buildToolbar();
+    Audio8.sfx('levelup');
+    PD.FX.shock(world.W / 2, world.H / 2, 20, '#ffffff');
+    return 0;
+  };
+
+  // Sabbath: the world holds still, but the god does not.
+  G.setSabbath = function (on) {
+    if (on) { G._preSabbathIdx = G.speedIdx; setSpeedIdx(IDX_PAUSE, true); }
+    else setSpeedIdx(G._preSabbathIdx != null ? G._preSabbathIdx : IDX_NORMAL, true);
+  };
 
   // ================= Testament story =================
   const CHAPTERS = [
@@ -6344,6 +6906,18 @@ void main(){ gl_FragColor = vCol; }`;
     Audio8.sfx('click');
   }
 
+  // Every power declares its own hooks (ach / story / react), so adding a
+  // power no longer means editing three hardcoded lists in this file.
+  function onPowerUsed(p, spent) {
+    if (spent != null) G.faith -= spent;
+    refreshHUD();
+    const story = p.story || (p.cat === 'terra' ? 'terra' : (p.cat === 'wrath' ? 'wrath' : null));
+    if (story === 'terra') G._usedTerra = true;
+    else if (story === 'wrath') G._usedWrath = true;
+    if (p.ach) ach(p.ach);
+    if (p.react && PD.Society) PD.Society.reactToMiracle(G.sim, p.react);
+  }
+
   // ================= Game loop =================
   function loop(t) {
     if (!G.running) return;
@@ -6353,8 +6927,18 @@ void main(){ gl_FragColor = vCol; }`;
 
     if (!G.paused && G.speed > 0) {
       G.acc += dt * G.speed;
-      let guard = 0;
-      while (G.acc >= STEP_MS && guard < 40) { simStep(); G.acc -= STEP_MS; guard++; }
+      // step against a wall-clock budget rather than a fixed count, so
+      // 1000x self-tunes to the device instead of pegging at 40/frame
+      const budgetStart = performance.now();
+      let steps = 0;
+      while (G.acc >= STEP_MS) {
+        simStep(); G.acc -= STEP_MS; steps++;
+        if ((steps & 7) === 0 && performance.now() - budgetStart > 12) break;
+      }
+      // never let the accumulator run away: unspent time is dropped, not banked
+      if (G.acc > STEP_MS * 4) G.acc = STEP_MS * 4;
+    } else if (G.speed < 0) {
+      stepRewind(dt);
     }
 
     if (G.weatherT > 0) { G.weatherT -= dt / STEP_MS; if (G.weatherT <= 0) { G.weather = 'clear'; G.r.weather = 'clear'; } }
@@ -6376,14 +6960,18 @@ void main(){ gl_FragColor = vCol; }`;
     if (G.hudTimer > 250) {
       refreshHUD(); if (G.selected) refreshPanelSel();
       refreshOpenPanel();
-      stepStory();
+      if (G.speed > 0) stepStory();
       G.hudTimer = 0;
     }
 
-    G.saveTimer += dt;
-    if (G.saveTimer > 20000) { save(); G.saveTimer = 0; }
-    G.snapTimer += dt;
-    if (G.snapTimer > 90000) { takeSnapshot(); G.snapTimer = 0; }
+    // autosave and the chronicle only advance while time moves forward —
+    // never persist or bookmark a world mid-unmaking
+    if (G.speed > 0) {
+      G.saveTimer += dt;
+      if (G.saveTimer > 20000) { save(); G.saveTimer = 0; }
+      G.snapTimer += dt;
+      if (G.snapTimer > 90000) { takeSnapshot(); G.snapTimer = 0; }
+    }
 
     if (G.openPanel === 'cosmos') drawCosmos(t);
 
@@ -6392,6 +6980,31 @@ void main(){ gl_FragColor = vCol; }`;
 
   function drawOverlays() {
     if (!G.r.octx) return;
+    // ---- time running backwards: grade the whole frame ----
+    const ban = $('#rewind-banner');
+    if (G.speed < 0) {
+      const ctx = G.r.octx, w = G.r.w, h = G.r.h;
+      ctx.fillStyle = 'rgba(40,90,160,0.13)';
+      ctx.fillRect(0, 0, w, h);
+      // scanline tear sweeping upward — reality skipping in reverse
+      const sweep = (1 - ((G.lastT * 0.0006) % 1)) * h;
+      const g = ctx.createLinearGradient(0, sweep - 60, 0, sweep + 60);
+      g.addColorStop(0, 'rgba(150,200,255,0)');
+      g.addColorStop(0.5, 'rgba(180,220,255,0.16)');
+      g.addColorStop(1, 'rgba(150,200,255,0)');
+      ctx.fillStyle = g; ctx.fillRect(0, sweep - 60, w, 120);
+      ctx.fillStyle = 'rgba(200,230,255,0.05)';
+      for (let y = 0; y < h; y += 4) ctx.fillRect(0, y, w, 1);
+      if (ban) {
+        const txt = rewindBannerText();
+        if (txt) {
+          ban.classList.add('show');
+          ban.innerHTML = `<div class="rw-title">${txt.t}</div><div class="rw-sub">${txt.s}</div>`;
+        }
+      }
+    } else if (ban && ban.classList.contains('show')) {
+      ban.classList.remove('show');
+    }
     // tornado funnel: a rising spiral of dust in true 3D
     if (G.tornado) {
       const t = G.tornado;
@@ -6467,17 +7080,7 @@ void main(){ gl_FragColor = vCol; }`;
       const p = G.power;
       if (!p || !wc) return; // clicked past the planet's limb into space
       const spent = p.apply(G, wc.x, wc.y);
-      if (spent > 0) {
-        G.faith -= spent; refreshHUD();
-        if (p.cat === 'terra') G._usedTerra = true;
-        if (p.cat === 'wrath' || p.id === 'flood' || p.id === 'plagues') G._usedWrath = true;
-        if (p.id === 'lightning') ach('smites');
-        else if (p.id === 'meteor') ach('meteors');
-        else if (p.id === 'bless' || p.id === 'miracle') ach('blessings');
-        else if (p.id === 'flood') ach('floods');
-        else if (p.id === 'empower' || p.id === 'titan') ach('heroes');
-        if (PD.Society && ['meteor', 'lightning', 'quake', 'plague'].indexOf(p.id) >= 0) PD.Society.reactToMiracle(G.sim, p.id === 'plague' ? 'plague' : p.id);
-      }
+      if (spent > 0) onPowerUsed(p);
     }
     function onMinimap(x, y) {
       const m = G.r._mini;
@@ -6569,10 +7172,15 @@ void main(){ gl_FragColor = vCol; }`;
     global.addEventListener('keydown', (e) => {
       const k = e.key.toLowerCase(); keys[k] = true;
       if (k === ' ') { e.preventDefault(); togglePause(); }
-      else if (k === '1') setSpeed(1);
-      else if (k === '2') setSpeed(2);
-      else if (k === '3') setSpeed(4);
-      else if (k === '0') setSpeed(0);
+      else if (k === '1') setSpeedIdx(IDX_NORMAL);
+      else if (k === '2') setSpeedIdx(IDX_NORMAL + 1);
+      else if (k === '3') setSpeedIdx(IDX_NORMAL + 2);
+      else if (k === '4') setSpeedIdx(IDX_NORMAL + 3);
+      else if (k === '5') setSpeedIdx(IDX_NORMAL + 4);
+      else if (k === '0') setSpeedIdx(IDX_PAUSE);
+      else if (k === ',') setSpeedIdx(G.speedIdx - 1);
+      else if (k === '.') setSpeedIdx(G.speedIdx + 1);
+      else if (k === 'r') setSpeedIdx(G.speed < 0 ? Math.max(0, G.speedIdx - 1) : IDX_PAUSE - 1);
       else if (k === '=' || k === '+') zoomBy(1.2);
       else if (k === '-' || k === '_') zoomBy(1 / 1.2);
       else if (k === 'escape') {
@@ -6606,23 +7214,71 @@ void main(){ gl_FragColor = vCol; }`;
   function zoomBy(f) { const cam = G.r.cam; cam.dist /= f; cam.idle = 0; clampCam(); }
 
   // ================= Speed / pause =================
-  function setSpeed(s) {
-    G.speed = s; G.paused = (s === 0);
-    document.querySelectorAll('.speed-btn').forEach(b => b.classList.toggle('active', +b.dataset.speed === s));
-    Audio8.sfx('click');
+  function setSpeedIdx(i, quiet) {
+    i = PD.clamp(i | 0, 0, TIME_SCALES.length - 1);
+    // creation is not yet finished: time cannot run until there is a world
+    if (G.creationStage != null && G.creationStage < 5 && TIME_SCALES[i].v !== 0) {
+      flashToast('Time does not flow yet. Finish the creation.');
+      i = IDX_PAUSE;
+    }
+    const prev = G.speed;
+    G.speedIdx = i;
+    G.speed = TIME_SCALES[i].v;
+    G.paused = (G.speed === 0);
+    if (G.speed <= 0) G.acc = 0;
+    document.querySelectorAll('.speed-btn').forEach(b => b.classList.toggle('active', +b.dataset.idx === i));
+    // audio follows the arrow of time
+    if (Audio8.setTimeDirection && (prev < 0) !== (G.speed < 0)) Audio8.setTimeDirection(G.speed < 0 ? -1 : 1);
+    if (!quiet) Audio8.sfx('click');
+    refreshHUD();
   }
-  function togglePause() { setSpeed(G.paused ? (G._lastSpeed || 1) : (G._lastSpeed = G.speed, 0)); }
+  // numeric entry point (hotkeys, saves): snap to the nearest scale stop
+  function setSpeed(v) {
+    let best = IDX_PAUSE, bd = Infinity;
+    for (let i = 0; i < TIME_SCALES.length; i++) {
+      const d = Math.abs(TIME_SCALES[i].v - v);
+      if (d < bd) { bd = d; best = i; }
+    }
+    setSpeedIdx(best);
+  }
+  function togglePause() {
+    if (G.paused) setSpeedIdx(G._lastIdx || IDX_NORMAL);
+    else { G._lastIdx = G.speedIdx; setSpeedIdx(IDX_PAUSE); }
+  }
   function toggleLabels() {
     G.ui.showLabels = !G.ui.showLabels;
     $('#btn-labels').classList.toggle('off', !G.ui.showLabels);
   }
 
   // ================= Toolbar =================
+  function buildTimeDial() {
+    const wrap = $('#time-dial');
+    if (!wrap) return;
+    let html = '';
+    for (let i = 0; i < TIME_SCALES.length; i++) {
+      const sc = TIME_SCALES[i];
+      if (i === IDX_PAUSE) html += '<button class="speed-btn sep" tabindex="-1">│</button>';
+      const cls = 'speed-btn' + (sc.v < 0 ? ' rev' : '') + (i === G.speedIdx ? ' active' : '');
+      const mag = Math.abs(sc.v);
+      const tip = sc.name + (sc.v === 0 ? '' : ' (' + (sc.v < 0 ? '−' : '') + (mag < 1 ? mag : mag) + '×)');
+      html += `<button class="${cls}" data-idx="${i}" title="${tip}">${sc.label}</button>`;
+    }
+    wrap.innerHTML = html;
+  }
+
   function buildToolbar() {
     const wrap = $('#tools');
     wrap.innerHTML = '';
+    const creating = G.creationStage != null;
     for (const cat of Powers.CATEGORIES) {
-      const powers = Powers.POWERS.filter(x => x.cat === cat.id);
+      let powers = Powers.POWERS.filter(x => x.cat === cat.id);
+      if (cat.id === 'genesis') {
+        // one word at a time, in order
+        powers = creating ? powers.filter(x => x.stage === G.creationStage) : [];
+      } else if (creating) {
+        // nothing else can be done to a world that does not yet exist
+        powers = powers.filter(x => x.cat === 'god');
+      }
       if (!powers.length) continue;
       const group = document.createElement('div');
       group.className = 'tool-group';
@@ -6683,6 +7339,16 @@ void main(){ gl_FragColor = vCol; }`;
   function refreshHUD() {
     $('#faith-val').textContent = Math.floor(G.faith);
     $('#faith-rate').textContent = '+' + faithPerStep().toFixed(1) + '/t' + (G.divinity > 0 ? ' ⍟' + G.divinity : '');
+    const ts = $('#time-scale');
+    if (ts) {
+      const sc = TIME_SCALES[G.speedIdx] || TIME_SCALES[IDX_NORMAL];
+      // 6 sim steps per real second at 1x, TICKS_PER_YEAR ticks per year
+      const yps = Math.abs(sc.v) * 6 / TICKS_PER_YEAR;
+      const rate = sc.v === 0 ? 'held' :
+        (yps >= 1 ? yps.toFixed(0) + ' yr/s' : (1 / yps).toFixed(0) + ' s/yr');
+      ts.textContent = sc.name + ' · ' + rate;
+      ts.classList.toggle('reversing', sc.v < 0);
+    }
     const c = G.sim.counts;
     const rc = $('#race-counts'); rc.innerHTML = '';
     const shown = Object.keys(Sim.RACES).filter(k => (c[k] || 0) > 0).slice(0, 8);
@@ -6776,18 +7442,18 @@ void main(){ gl_FragColor = vCol; }`;
     if (btn.id === 'smite-btn' && G.selected && G.selected.type === 'village') {
       const v = G.selected.ref;
       const spent = Powers.BY_ID.lightning.apply(G, v.x, v.y);
-      if (spent > 0) { G.faith -= spent; refreshHUD(); }
+      if (spent > 0) onPowerUsed(Powers.BY_ID.lightning, spent);
       return;
     }
     const act = btn.dataset.act;
     if (act && G.selected && G.selected.type === 'unit') {
       const u = G.selected.ref;
-      let spent = 0;
-      if (act === 'blessone') { if (G.faith >= 4) { u.hp = u.maxHp; u.food = 1; u.sick = 0; u.karma += 1; PD.FX.spark(u.x, u.y); Audio8.sfx('bless'); spent = 4; } }
-      else if (act === 'voiceone') spent = Powers.BY_ID.voice.apply(G, u.x, u.y);
-      else if (act === 'empowerone') spent = Powers.BY_ID.empower.apply(G, u.x, u.y);
-      else if (act === 'smiteone') spent = Powers.BY_ID.lightning.apply(G, u.x, u.y);
-      if (spent > 0) { G.faith -= spent; refreshHUD(); }
+      let spent = 0, pw = null;
+      if (act === 'blessone') { if (G.faith >= 4) { u.hp = u.maxHp; u.food = 1; u.sick = 0; u.karma += 1; PD.FX.spark(u.x, u.y); Audio8.sfx('bless'); spent = 4; pw = Powers.BY_ID.bless; } }
+      else if (act === 'voiceone') { pw = Powers.BY_ID.voice; spent = pw.apply(G, u.x, u.y); }
+      else if (act === 'empowerone') { pw = Powers.BY_ID.empower; spent = pw.apply(G, u.x, u.y); }
+      else if (act === 'smiteone') { pw = Powers.BY_ID.lightning; spent = pw.apply(G, u.x, u.y); }
+      if (spent > 0) onPowerUsed(pw || { cat: 'god' }, spent);
     }
   }
   function bar(v, col) { v = PD.clamp(v, 0, 1); return `<div class="bar"><div class="bar-fill" style="width:${(v * 100).toFixed(0)}%;background:${col}"></div></div>`; }
@@ -7194,7 +7860,12 @@ void main(){ gl_FragColor = vCol; }`;
     buildToolbar();
     bindPanels();
 
-    document.querySelectorAll('.speed-btn').forEach(b => b.addEventListener('click', () => setSpeed(+b.dataset.speed)));
+    buildTimeDial();
+    // delegated: the dial is re-rendered, so per-button listeners would go stale
+    $('#time-dial').addEventListener('click', (e) => {
+      const b = e.target.closest('.speed-btn');
+      if (b && b.dataset.idx != null) setSpeedIdx(+b.dataset.idx);
+    });
     $('#btn-menu').addEventListener('click', toggleMenu);
     $('#btn-save').addEventListener('click', () => save());
     $('#btn-labels').addEventListener('click', toggleLabels);
@@ -7227,7 +7898,7 @@ void main(){ gl_FragColor = vCol; }`;
       if (ok) $('#intro').classList.add('hide');
     }
 
-    setSpeed(typeof G.speed === 'number' ? G.speed : 1);
+    setSpeed(typeof G.speed === 'number' ? Math.max(0, G.speed) : 1);
     refreshHUD();
     renderTestament();
 

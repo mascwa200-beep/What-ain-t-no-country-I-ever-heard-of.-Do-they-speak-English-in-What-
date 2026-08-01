@@ -32,16 +32,12 @@
       </div>
       <div class="stat" id="year-stat"><span id="year-val">Year 0</span></div>
       <div class="stat" id="season-stat"><span id="season-val">🌱 Spring</span></div>
+      <div class="stat" id="time-stat" title="How fast history is moving"><span id="time-scale">Normal · 20 s/yr</span></div>
       <div class="stat" id="vill-stat"><span id="vill-val">🏙 0</span></div>
       <div id="race-counts" class="race-counts"></div>
     </div>
     <div class="hud-right">
-      <div class="speeds">
-        <button class="speed-btn" data-speed="0" title="Pause (Space)">❚❚</button>
-        <button class="speed-btn active" data-speed="1" title="Normal (1)">▶</button>
-        <button class="speed-btn" data-speed="2" title="Fast (2)">▶▶</button>
-        <button class="speed-btn" data-speed="4" title="Ludicrous (3)">▶▶▶</button>
-      </div>
+      <div class="speeds" id="time-dial"><!-- built by buildTimeDial() --></div>
       <button class="icon-btn" id="btn-labels" title="Toggle town labels (L)">🏷</button>
       <button class="icon-btn" id="btn-sound" title="Sound on/off">🔊</button>
       <button class="icon-btn" id="btn-save" title="Save now">💾</button>
@@ -159,6 +155,8 @@
     <div class="chron-title">📜 Chronicle</div>
     <div id="event-log"></div>
   </section>
+
+  <div id="rewind-banner"></div>
 
   <div id="toast"></div>
 

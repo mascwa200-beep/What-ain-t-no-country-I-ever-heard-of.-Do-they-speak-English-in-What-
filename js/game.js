@@ -18,6 +18,27 @@
   const SAVE_KEY = 'pixeldeity_save_v2';
   const OLD_KEY = 'pixeldeity_save_v1';
   const STEP_MS = 1000 / 6;
+
+  // ================= The time dial =================
+  // One scale spanning reverse -> forward. Reverse speeds play recorded
+  // history backwards; past the record they un-create the world itself.
+  const TIME_SCALES = [
+    { v: -1000, label: '⧏⧏⧏', name: 'Unmaking' },
+    { v: -100,  label: '⧏⧏',  name: 'Ages Reversed' },
+    { v: -10,   label: '⧏',   name: 'Rewind' },
+    { v: -1,    label: '◀',   name: 'Backwards' },
+    { v: 0,     label: '❚❚', name: 'Paused' },
+    { v: 0.1,   label: '▷',   name: 'Bullet Time' },
+    { v: 0.25,  label: '▷',   name: 'Slow' },
+    { v: 1,     label: '▶',   name: 'Normal' },
+    { v: 5,     label: '▶▶', name: 'Fast' },
+    { v: 25,    label: '▶▶', name: 'Very Fast' },
+    { v: 100,   label: '▶▶▶', name: 'Centuries' },
+    { v: 1000,  label: '▶▶▶', name: 'Millennia' }
+  ];
+  const IDX_PAUSE = 4, IDX_NORMAL = 7;
+  // ticks per displayed year (the HUD has always divided by 120)
+  const TICKS_PER_YEAR = 120;
   const $ = (s) => document.querySelector(s);
 
   const BIOME_NAMES = ['Deep Ocean', 'Water', 'Sand', 'Grassland', 'Forest', 'Dirt', 'Mountain', 'Snow', 'Desert', 'Jungle', 'Swamp', 'Ash', 'Hellrock', 'Lava', 'Cloudfield', 'Golden Meadow', 'Primordial Ooze', 'Voidstone'];
@@ -27,7 +48,7 @@
     view: { kind: 'planet', id: -1 },       // or {kind:'plane', id:'elysium'}
     faith: 60, faithTotal: 0,
     power: null, lastRace: 'human',
-    speed: 1, paused: false,
+    speed: 1, speedIdx: 7, paused: false,
     acc: 0, lastT: 0,
     selected: null,
     weather: 'clear', weatherT: 0,
@@ -74,6 +95,8 @@
     Cosmos.C.nextId = 1;
     G.faith = 60; G.faithTotal = 0;
     G.timeline.length = 0;
+    initRewind();
+    G.creationStage = null; G.dissolve = 0;
     G.story = { done: {}, active: 0 };
     const p = Cosmos.createPlanet('verdant', seedStr);
     Cosmos.C.activeId = p.id;
@@ -168,7 +191,11 @@
   // ================= Sim stepping =================
   function simStep() {
     Sim.step(G.sim, 1);
-    if (G.view.kind === 'planet') {
+    if (G.view.kind === 'planet' && G.speed > 0) {
+      const ap = Cosmos.active();
+      if (ap) recordRewind(ap);
+    }
+    if (G.view.kind === 'planet' && G.speed > 0) {
       Cosmos.tickAll(G.sim);
       Cosmos.checkStarchild(G.sim);
     }
@@ -302,11 +329,14 @@
       fire: Codec.packU8(w.fire), structHp: Codec.packU8(w.structHp),
       tick: s.tick, nextUnitId: s.nextUnitId, nextVillageId: s.nextVillageId,
       villages: s.villages, soc: s.soc || null, starchild: s._starchild || null,
+      bloodMoon: s.bloodMoonT || 0,
+      // the pre-flood heightmap: lose this mid-flood and the drowning is permanent
+      preFlood: w._preFlood ? Codec.packF01(w._preFlood) : null,
       units: s.units.filter(u => !u.dead).map(u => [
         u.id, u.race, +u.x.toFixed(2), +u.y.toFixed(2), Math.round(u.hp),
         u.age | 0, u.village, u.sick | 0, +u.food.toFixed(2),
         Math.round(u.lifespan), u.adultAt | 0, u.name, u.trait, u.prof,
-        Math.round(u.karma * 10) / 10, u.paragon | 0, u.big || 0
+        Math.round(u.karma * 10) / 10, u.paragon | 0, u.big || 0, Math.round(u.maxHp)
       ])
     };
   }
@@ -331,12 +361,14 @@
     sim.villages = d.villages || [];
     sim.soc = d.soc || null;
     sim._starchild = d.starchild || null;
+    sim.bloodMoonT = d.bloodMoon || 0;
     sim.planetName = d.name;
+    if (d.preFlood) world._preFlood = Codec.unpackF01(d.preFlood, n);
     sim.units = (d.units || []).map(a => {
       const R = Sim.RACES[a[1]] || Sim.RACES.human;
       return {
         id: a[0], race: Sim.RACES[a[1]] ? a[1] : 'human', x: a[2], y: a[3],
-        hp: a[4], maxHp: a[15] > 0 ? R.hp * (1 + a[15] * 2) : R.hp,
+        hp: a[4], maxHp: a[17] || (a[15] > 0 ? R.hp * (1 + a[15] * 2) : R.hp),
         age: a[5], village: a[6], sick: a[7], food: a[8],
         lifespan: a[9] != null ? a[9] : Math.max(R.lifespan * 1.2, a[5] + 200),
         adultAt: a[10] != null ? a[10] : 70,
@@ -361,6 +393,10 @@
       speed: G.speed, stats: G.stats, story: G.story,
       divinity: G.divinity, ach: G.ach,
       view: G.view, floodT: G.floodT,
+      // in-flight divine events: without these a 250-faith Armageddon just
+      // stops on reload, and a mid-flood save loses _preFlood forever
+      armageddon: G.armageddon, storm: G.storm, tornado: G.tornado,
+      weather: G.weather, weatherT: G.weatherT,
       cam: G.r ? { lon: G.r.cam.lon, lat: G.r.cam.lat, dist: G.r.cam.dist } : null,
       cosmos: { nextId: Cosmos.C.nextId, activeId: Cosmos.C.activeId, customRaces: Cosmos.customRaces },
       planets: Cosmos.C.planets.map(packPlanet),
@@ -391,6 +427,9 @@
     try {
       // custom races must exist before units referencing them are unpacked
       for (const cr of (d.cosmos && d.cosmos.customRaces) || []) Cosmos.registerRace(cr);
+      // ...and give them their toolbar buttons back (registerRace alone
+      // restores the race but not the power to place it)
+      for (const cr of (d.cosmos && d.cosmos.customRaces) || []) addCustomSpawnPower(cr.key);
       Cosmos.C.planets.length = 0;
       for (const pd of d.planets) Cosmos.C.planets.push(unpackPlanet(pd));
       Cosmos.C.nextId = (d.cosmos && d.cosmos.nextId) || (Cosmos.C.planets.length + 1);
@@ -399,12 +438,18 @@
       G.faith = d.faith != null ? d.faith : 60;
       G.faithTotal = d.faithTotal || 0;
       G.lastRace = d.lastRace || 'human';
-      G.speed = (typeof d.speed === 'number') ? d.speed : 1;
+      // never resume a save mid-rewind
+      G.speed = (typeof d.speed === 'number') ? Math.max(0, d.speed) : 1;
       G.stats = d.stats || G.stats;
       G.story = d.story || G.story;
       G.divinity = d.divinity || 0;
       G.ach = d.ach || {};
-      G.floodT = 0; // floods don't survive reload (waters recede in our absence)
+      // in-flight events resume where they left off
+      G.armageddon = d.armageddon || 0;
+      G.storm = d.storm || null;
+      G.tornado = d.tornado || null;
+      if (d.weather) G.setWeather(d.weather, d.weatherT || 0);
+      G.floodT = d.floodT || 0;
       G.view = (d.view && d.view.kind === 'planet' && Cosmos.getPlanet(d.view.id)) ? d.view : { kind: 'planet', id: Cosmos.C.activeId };
       bindView();
       if (d.cam && d.cam.lon != null && G.r) { G.r.cam.lon = d.cam.lon; G.r.cam.lat = d.cam.lat; G.r.cam.dist = d.cam.dist; }
@@ -437,11 +482,12 @@
     const snap = G.timeline[idx]; if (!snap) return;
     const pd = JSON.parse(snap.data);
     if (branch) {
-      // a new universe forks from the old moment
+      // a new universe forks from the old moment — check capacity BEFORE
+      // consuming an id, or a failed branch leaks one
+      if (Cosmos.C.planets.length >= 10) { flashToast('The void is full — destroy a world first'); return; }
       pd.id = Cosmos.C.nextId++;
       pd.name = snap.planetName + ' ⧗';
       pd.orbit = { r: 60 + Cosmos.C.planets.length * 34, a: Math.random() * 6.28, spd: 0.001 };
-      if (Cosmos.C.planets.length >= 10) { flashToast('The void is full — destroy a world first'); return; }
       const p = unpackPlanet(pd);
       Cosmos.C.planets.push(p);
       gotoPlanet(p.id);
@@ -457,6 +503,306 @@
     if (PD.Society) PD.Society.hist(G.sim, branch ? 'You forked time itself.' : 'You turned back time itself.', 'legend');
     ach('timetravels');
   }
+
+  // ================= Rewind: time running backwards =================
+  // A full snapshot is ~310KB, so a naive dense buffer would cost tens of
+  // megabytes. Instead we keep two tiers:
+  //   fine  — packed unit motion only (~13KB), for smooth reverse movement
+  //   full  — real restore points (terrain, villages, society, souls)
+  // Between full frames the fine frames drive what you SEE; crossing a full
+  // frame restores what actually IS.
+  const REWIND = {
+    fineEvery: 4,      // sim ticks between motion frames
+    fullEvery: 60,     // sim ticks between true restore points
+    fineCap: 400,      // ~27 min of 1x play
+    fullCap: 24        // ~7.5MB worst case
+  };
+
+  function initRewind() {
+    G.rewind = { fine: [], full: [], undo: null, stage: 0, prog: 0 };
+  }
+
+  // Motion-only frame: ids + positions + hp as typed arrays (no JSON).
+  function captureFine(sim) {
+    const live = [];
+    for (const u of sim.units) if (!u.dead) live.push(u);
+    const n = live.length;
+    const ids = new Int32Array(n), xy = new Float32Array(n * 2), hp = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      ids[i] = live[i].id;
+      xy[i * 2] = live[i].x; xy[i * 2 + 1] = live[i].y;
+      hp[i] = live[i].hp;
+    }
+    return { tick: sim.tick, ids, xy, hp, faith: G.faith };
+  }
+
+  // Full restore point. Extends packPlanet with the state it drops, so a
+  // restore doesn't scramble everyone's movement or strand souls.
+  function captureFull(p) {
+    const d = packPlanet(p);
+    const motion = [];
+    for (const u of p.sim.units) {
+      if (u.dead) continue;
+      motion.push([u.id, u.state, +u.tx.toFixed(2), +u.ty.toFixed(2), u.cd, u.breedCd, u.raidT, u.flip]);
+    }
+    return {
+      tick: p.sim.tick, planetId: p.id, data: d, motion,
+      souls: PD.Afterlife.serialize(),
+      faith: G.faith, faithTotal: G.faithTotal,
+      stats: JSON.parse(JSON.stringify(G.stats)),
+      ach: JSON.parse(JSON.stringify(G.ach)),
+      ev: { armageddon: G.armageddon, storm: G.storm, tornado: G.tornado, floodT: G.floodT }
+    };
+  }
+
+  function recordRewind(p) {
+    const rw = G.rewind; if (!rw) return;
+    const t = p.sim.tick;
+    if (t % REWIND.fineEvery === 0) {
+      rw.fine.push(captureFine(p.sim));
+      if (rw.fine.length > REWIND.fineCap) rw.fine.shift();
+    }
+    if (t % REWIND.fullEvery === 0) {
+      rw.full.push(captureFull(p));
+      if (rw.full.length > REWIND.fullCap) rw.full.shift();
+      // fine frames older than the oldest restore point are unusable
+      const floor = rw.full[0].tick;
+      while (rw.fine.length && rw.fine[0].tick < floor) rw.fine.shift();
+    }
+  }
+
+  // Apply a full restore point in place.
+  function restoreFull(f) {
+    const i = Cosmos.C.planets.findIndex(x => x.id === f.planetId);
+    if (i < 0) return false;
+    const p = unpackPlanet(f.data);
+    // put movement back the way it was — packPlanet resets it
+    const byId = new Map();
+    for (const u of p.sim.units) byId.set(u.id, u);
+    for (const m of f.motion || []) {
+      const u = byId.get(m[0]);
+      if (!u) continue;
+      u.state = m[1]; u.tx = m[2]; u.ty = m[3];
+      u.cd = m[4]; u.breedCd = m[5]; u.raidT = m[6]; u.flip = m[7];
+    }
+    Cosmos.C.planets[i] = p;
+    if (G.view.kind === 'planet' && G.view.id === f.planetId) {
+      G.world = p.world; G.sim = p.sim;
+      if (G.r) Render.setWorld(G.r, G.world);
+    }
+    PD.Afterlife.load(f.souls);
+    G.faith = f.faith; G.faithTotal = f.faithTotal;
+    G.stats = f.stats; G.ach = f.ach;
+    if (f.ev) { G.armageddon = f.ev.armageddon; G.storm = f.ev.storm; G.tornado = f.ev.tornado; G.floodT = f.ev.floodT; }
+    p.world.dirty = p.world.dirtyMini = p.world.dirtyGlobe = true;
+    return true;
+  }
+
+  // Apply a motion-only frame to the live sim: people walk backwards.
+  function applyFine(sim, f) {
+    const byId = new Map();
+    for (const u of sim.units) if (!u.dead) byId.set(u.id, u);
+    for (let i = 0; i < f.ids.length; i++) {
+      const u = byId.get(f.ids[i]);
+      if (!u) continue;
+      u.x = f.xy[i * 2]; u.y = f.xy[i * 2 + 1]; u.hp = f.hp[i];
+    }
+    sim.tick = f.tick;
+    G.faith = f.faith;
+    sim.season = Math.floor((sim.tick % 480) / 120);
+    sim.isNight = Math.cos(((sim.tick % 480) / 480) * 6.283) * 0.5 + 0.15 > 0.3;
+  }
+
+  // Driven from loop() whenever G.speed < 0.
+  function stepRewind(dt) {
+    const rw = G.rewind; if (!rw) return;
+    if (G.view.kind !== 'planet') { flashToast('Only living worlds can be rewound'); setSpeedIdx(IDX_PAUSE); return; }
+    const p = Cosmos.active(); if (!p) return;
+    const rate = Math.abs(G.speed);
+    // how many recorded ticks to unwind this frame
+    let budget = Math.max(1, Math.round(rate * 6 * dt / 1000 * REWIND.fineEvery));
+
+    while (budget > 0 && rw.fine.length) {
+      const f = rw.fine[rw.fine.length - 1];
+      // crossing a restore point: put the world itself back
+      const full = rw.full.length ? rw.full[rw.full.length - 1] : null;
+      if (full && f.tick <= full.tick) {
+        rw.full.pop();
+        restoreFull(full);
+      } else {
+        applyFine(p.sim, f);
+      }
+      rw.fine.pop();
+      budget -= REWIND.fineEvery;
+    }
+    if (!rw.fine.length) {
+      // past the beginning of the record — un-create the world itself
+      stepUncreate(p, dt, rate);
+    }
+    p.world.dirtyMini = true;
+  }
+
+  // ---- Un-creation: the world unmakes itself, stage by stage ----
+  const UNCREATE_STAGES = [
+    { id: 'unbuild', name: 'THE WORKS UNDONE', sub: 'cities unbuild · nations forget' },
+    { id: 'unshape', name: 'THE LAND UNSHAPES', sub: 'mountains sink · forests recede' },
+    { id: 'deep',    name: 'THE FORMLESS DEEP', sub: 'darkness upon the face of the deep' },
+    { id: 'nothing', name: 'NOTHING',           sub: 'before the beginning' }
+  ];
+
+  function stepUncreate(p, dt, rate) {
+    const rw = G.rewind, world = p.world, sim = p.sim;
+    rw.prog += (dt / 1000) * Math.min(4, 0.35 + rate * 0.02);
+    const stage = rw.stage;
+
+    if (stage === 0) {           // ---- Unbuilding ----
+      const frac = Math.min(1, rw.prog / 3);
+      let cleared = 0;
+      for (let k = 0; k < 900; k++) {
+        const i = (Math.random() * world.n) | 0;
+        if (world.struct[i] || world.owner[i] >= 0) {
+          world.struct[i] = 0; world.owner[i] = -1; W.markTile(world, i); cleared++;
+        }
+      }
+      // people fade out of existence
+      const live = sim.units.filter(u => !u.dead);
+      const target = Math.floor(live.length * (1 - frac));
+      for (let i = live.length - 1; i > target; i--) {
+        const u = live[i];
+        if (PD.FX) PD.FX.puff(u.x, u.y, '#8fb4e0');
+        u.dead = true;
+      }
+      sim.villages.length = Math.floor(sim.villages.length * (1 - frac));
+      if (frac >= 1 || (!cleared && !live.length)) { rw.stage = 1; rw.prog = 0; sim.soc = null; }
+
+    } else if (stage === 1) {    // ---- Unshaping ----
+      const t = Math.min(1, rw.prog / 4);
+      for (let i = 0; i < world.n; i++) {
+        // every height eases toward a featureless sphere at sea level
+        world.elev[i] += (0.40 - world.elev[i]) * 0.06;
+        world.fert[i] *= 0.94;
+        if (world.tree[i] && Math.random() < 0.06) world.tree[i]--;
+      }
+      W.classify(world);
+      world.dirty = world.dirtyMini = world.dirtyGlobe = true;
+      if (t >= 1) { rw.stage = 2; rw.prog = 0; }
+
+    } else if (stage === 2) {    // ---- The Deep ----
+      world.mode = 'deep';
+      for (let i = 0; i < world.n; i++) {
+        world.elev[i] += (0.10 - world.elev[i]) * 0.10;
+        world.biome[i] = W.B.DEEP; world.fert[i] = 0; world.tree[i] = 0;
+        world.struct[i] = 0; world.owner[i] = -1;
+      }
+      world.dirty = world.dirtyMini = world.dirtyGlobe = true;
+      sim.units.length = 0; sim.villages.length = 0; sim.tick = 0;
+      if (rw.prog > 3.5) { rw.stage = 3; rw.prog = 0; }
+
+    } else {                     // ---- Nothing ----
+      world.mode = 'nothing';
+      G.dissolve = Math.min(1, (G.dissolve || 0) + dt / 2500);
+      if (G.dissolve >= 1) {
+        // time itself stops; only Genesis can start it again
+        G.creationStage = 0;
+        setSpeedIdx(IDX_PAUSE, true);
+        buildToolbar();
+        flashToast('In the beginning…');
+      }
+    }
+  }
+
+  function rewindBannerText() {
+    const rw = G.rewind;
+    if (!rw) return null;
+    if (rw.fine.length) return { t: '⟲ REWINDING', s: 'Year ' + Math.floor(G.sim.tick / TICKS_PER_YEAR) };
+    const st = UNCREATE_STAGES[Math.min(rw.stage, UNCREATE_STAGES.length - 1)];
+    return { t: st.name, s: st.sub };
+  }
+
+  // ================= Genesis: creation, step by step =================
+  // Reached only by rewinding past the beginning. Each step is a real
+  // world-shaping operation on the empty sphere, in order.
+  const GENESIS_NAMES = ['light', 'firmament', 'land', 'green', 'lights', 'life', 'rest'];
+
+  G.genesisStep = function (stage) {
+    if (G.creationStage !== stage) { Audio8.sfx('error'); return 0; }
+    const p = Cosmos.active();
+    if (!p) { Audio8.sfx('error'); return 0; }
+    const world = p.world, sim = p.sim;
+
+    if (stage === 0) {              // Let there be light
+      G.dissolve = 0;
+      world.mode = 'deep';
+      G.flash = 1;
+      if (PD.Society) PD.Society.hist(sim, 'And there was light. The darkness upon the face of the deep is parted.', 'era');
+
+    } else if (stage === 1) {       // Separate the waters — a sky
+      world.mode = 'firmament';
+      for (let i = 0; i < world.n; i++) { world.elev[i] = 0.30; world.biome[i] = W.B.DEEP; }
+      W.classify(world);
+      if (PD.Society) PD.Society.hist(sim, 'A firmament divides the waters. There is a sky, and weather in it.', 'era');
+
+    } else if (stage === 2) {       // Dry land appears
+      world.mode = 'normal';
+      const seed = p.seed + '-genesis';
+      const fresh = W.createWorld(world.W, world.H, seed, {});
+      world.elev.set(fresh.elev); world.moist.set(fresh.moist); world.temp.set(fresh.temp);
+      // land rises but nothing grows on it yet
+      W.classify(world);
+      for (let i = 0; i < world.n; i++) { world.tree[i] = 0; if (W.isLand(world.biome[i])) world.fert[i] = 0.05; }
+      if (PD.Society) PD.Society.hist(sim, 'The waters gather. Dry land appears, bare and new.', 'era');
+
+    } else if (stage === 3) {       // Vegetation
+      for (let i = 0; i < world.n; i++) {
+        if (!W.isLand(world.biome[i])) continue;
+        const m = world.moist[i], t = world.temp[i];
+        if (t > 0.28 && m > 0.5) { world.biome[i] = m > 0.68 && t > 0.68 ? W.B.JUNGLE : W.B.FOREST; world.tree[i] = 2; world.fert[i] = 0.75; }
+        else if (t > 0.28 && m > 0.3) { world.biome[i] = W.B.GRASS; world.fert[i] = 0.6; }
+      }
+      if (PD.Society) PD.Society.hist(sim, 'The earth brings forth grass, and the herb, and the fruit tree.', 'era');
+
+    } else if (stage === 4) {       // Lights in the firmament — time starts
+      sim.tick = 0;
+      if (PD.Society) PD.Society.hist(sim, 'Lights in the firmament, for signs and for seasons. Time begins to move.', 'era');
+
+    } else if (stage === 5) {       // Life
+      for (let k = 0; k < 60; k++) {
+        const spot = W.nearestLand(world, (sim.rng() * world.W) | 0, (sim.rng() * world.H) | 0, 14);
+        if (spot) Sim.spawnUnit(sim, sim.rng() < 0.8 ? 'critter' : 'wolf', spot.x, spot.y);
+      }
+      seedInitialLife(sim, world);
+      Sim.recount(sim);
+      if (PD.Society) PD.Society.hist(sim, 'The waters teem, the earth brings forth the living creature — and someone to name them.', 'era');
+
+    } else if (stage === 6) {       // Rest
+      G.faith += 500;
+      G.creationStage = null;
+      p.type = 'verdant';
+      if (PD.Society) PD.Society.hist(sim, 'And on the seventh day: rest. It is good. +500 ✦', 'legend');
+      flashToast('Creation complete · +500 ✦');
+      initRewind();
+      setSpeedIdx(IDX_NORMAL);
+      buildToolbar();
+      world.dirty = world.dirtyMini = world.dirtyGlobe = true;
+      Audio8.sfx('levelup');
+      return 0;
+    }
+
+    world.dirty = world.dirtyMini = world.dirtyGlobe = true;
+    if (G.r) Render.setWorld(G.r, world);
+    G.creationStage = stage + 1;
+    if (stage === 4) setSpeedIdx(IDX_NORMAL, true);  // time may flow again
+    buildToolbar();
+    Audio8.sfx('levelup');
+    PD.FX.shock(world.W / 2, world.H / 2, 20, '#ffffff');
+    return 0;
+  };
+
+  // Sabbath: the world holds still, but the god does not.
+  G.setSabbath = function (on) {
+    if (on) { G._preSabbathIdx = G.speedIdx; setSpeedIdx(IDX_PAUSE, true); }
+    else setSpeedIdx(G._preSabbathIdx != null ? G._preSabbathIdx : IDX_NORMAL, true);
+  };
 
   // ================= Testament story =================
   const CHAPTERS = [
@@ -526,6 +872,18 @@
     Audio8.sfx('click');
   }
 
+  // Every power declares its own hooks (ach / story / react), so adding a
+  // power no longer means editing three hardcoded lists in this file.
+  function onPowerUsed(p, spent) {
+    if (spent != null) G.faith -= spent;
+    refreshHUD();
+    const story = p.story || (p.cat === 'terra' ? 'terra' : (p.cat === 'wrath' ? 'wrath' : null));
+    if (story === 'terra') G._usedTerra = true;
+    else if (story === 'wrath') G._usedWrath = true;
+    if (p.ach) ach(p.ach);
+    if (p.react && PD.Society) PD.Society.reactToMiracle(G.sim, p.react);
+  }
+
   // ================= Game loop =================
   function loop(t) {
     if (!G.running) return;
@@ -535,8 +893,18 @@
 
     if (!G.paused && G.speed > 0) {
       G.acc += dt * G.speed;
-      let guard = 0;
-      while (G.acc >= STEP_MS && guard < 40) { simStep(); G.acc -= STEP_MS; guard++; }
+      // step against a wall-clock budget rather than a fixed count, so
+      // 1000x self-tunes to the device instead of pegging at 40/frame
+      const budgetStart = performance.now();
+      let steps = 0;
+      while (G.acc >= STEP_MS) {
+        simStep(); G.acc -= STEP_MS; steps++;
+        if ((steps & 7) === 0 && performance.now() - budgetStart > 12) break;
+      }
+      // never let the accumulator run away: unspent time is dropped, not banked
+      if (G.acc > STEP_MS * 4) G.acc = STEP_MS * 4;
+    } else if (G.speed < 0) {
+      stepRewind(dt);
     }
 
     if (G.weatherT > 0) { G.weatherT -= dt / STEP_MS; if (G.weatherT <= 0) { G.weather = 'clear'; G.r.weather = 'clear'; } }
@@ -558,14 +926,18 @@
     if (G.hudTimer > 250) {
       refreshHUD(); if (G.selected) refreshPanelSel();
       refreshOpenPanel();
-      stepStory();
+      if (G.speed > 0) stepStory();
       G.hudTimer = 0;
     }
 
-    G.saveTimer += dt;
-    if (G.saveTimer > 20000) { save(); G.saveTimer = 0; }
-    G.snapTimer += dt;
-    if (G.snapTimer > 90000) { takeSnapshot(); G.snapTimer = 0; }
+    // autosave and the chronicle only advance while time moves forward —
+    // never persist or bookmark a world mid-unmaking
+    if (G.speed > 0) {
+      G.saveTimer += dt;
+      if (G.saveTimer > 20000) { save(); G.saveTimer = 0; }
+      G.snapTimer += dt;
+      if (G.snapTimer > 90000) { takeSnapshot(); G.snapTimer = 0; }
+    }
 
     if (G.openPanel === 'cosmos') drawCosmos(t);
 
@@ -574,6 +946,31 @@
 
   function drawOverlays() {
     if (!G.r.octx) return;
+    // ---- time running backwards: grade the whole frame ----
+    const ban = $('#rewind-banner');
+    if (G.speed < 0) {
+      const ctx = G.r.octx, w = G.r.w, h = G.r.h;
+      ctx.fillStyle = 'rgba(40,90,160,0.13)';
+      ctx.fillRect(0, 0, w, h);
+      // scanline tear sweeping upward — reality skipping in reverse
+      const sweep = (1 - ((G.lastT * 0.0006) % 1)) * h;
+      const g = ctx.createLinearGradient(0, sweep - 60, 0, sweep + 60);
+      g.addColorStop(0, 'rgba(150,200,255,0)');
+      g.addColorStop(0.5, 'rgba(180,220,255,0.16)');
+      g.addColorStop(1, 'rgba(150,200,255,0)');
+      ctx.fillStyle = g; ctx.fillRect(0, sweep - 60, w, 120);
+      ctx.fillStyle = 'rgba(200,230,255,0.05)';
+      for (let y = 0; y < h; y += 4) ctx.fillRect(0, y, w, 1);
+      if (ban) {
+        const txt = rewindBannerText();
+        if (txt) {
+          ban.classList.add('show');
+          ban.innerHTML = `<div class="rw-title">${txt.t}</div><div class="rw-sub">${txt.s}</div>`;
+        }
+      }
+    } else if (ban && ban.classList.contains('show')) {
+      ban.classList.remove('show');
+    }
     // tornado funnel: a rising spiral of dust in true 3D
     if (G.tornado) {
       const t = G.tornado;
@@ -649,17 +1046,7 @@
       const p = G.power;
       if (!p || !wc) return; // clicked past the planet's limb into space
       const spent = p.apply(G, wc.x, wc.y);
-      if (spent > 0) {
-        G.faith -= spent; refreshHUD();
-        if (p.cat === 'terra') G._usedTerra = true;
-        if (p.cat === 'wrath' || p.id === 'flood' || p.id === 'plagues') G._usedWrath = true;
-        if (p.id === 'lightning') ach('smites');
-        else if (p.id === 'meteor') ach('meteors');
-        else if (p.id === 'bless' || p.id === 'miracle') ach('blessings');
-        else if (p.id === 'flood') ach('floods');
-        else if (p.id === 'empower' || p.id === 'titan') ach('heroes');
-        if (PD.Society && ['meteor', 'lightning', 'quake', 'plague'].indexOf(p.id) >= 0) PD.Society.reactToMiracle(G.sim, p.id === 'plague' ? 'plague' : p.id);
-      }
+      if (spent > 0) onPowerUsed(p);
     }
     function onMinimap(x, y) {
       const m = G.r._mini;
@@ -751,10 +1138,15 @@
     global.addEventListener('keydown', (e) => {
       const k = e.key.toLowerCase(); keys[k] = true;
       if (k === ' ') { e.preventDefault(); togglePause(); }
-      else if (k === '1') setSpeed(1);
-      else if (k === '2') setSpeed(2);
-      else if (k === '3') setSpeed(4);
-      else if (k === '0') setSpeed(0);
+      else if (k === '1') setSpeedIdx(IDX_NORMAL);
+      else if (k === '2') setSpeedIdx(IDX_NORMAL + 1);
+      else if (k === '3') setSpeedIdx(IDX_NORMAL + 2);
+      else if (k === '4') setSpeedIdx(IDX_NORMAL + 3);
+      else if (k === '5') setSpeedIdx(IDX_NORMAL + 4);
+      else if (k === '0') setSpeedIdx(IDX_PAUSE);
+      else if (k === ',') setSpeedIdx(G.speedIdx - 1);
+      else if (k === '.') setSpeedIdx(G.speedIdx + 1);
+      else if (k === 'r') setSpeedIdx(G.speed < 0 ? Math.max(0, G.speedIdx - 1) : IDX_PAUSE - 1);
       else if (k === '=' || k === '+') zoomBy(1.2);
       else if (k === '-' || k === '_') zoomBy(1 / 1.2);
       else if (k === 'escape') {
@@ -788,23 +1180,71 @@
   function zoomBy(f) { const cam = G.r.cam; cam.dist /= f; cam.idle = 0; clampCam(); }
 
   // ================= Speed / pause =================
-  function setSpeed(s) {
-    G.speed = s; G.paused = (s === 0);
-    document.querySelectorAll('.speed-btn').forEach(b => b.classList.toggle('active', +b.dataset.speed === s));
-    Audio8.sfx('click');
+  function setSpeedIdx(i, quiet) {
+    i = PD.clamp(i | 0, 0, TIME_SCALES.length - 1);
+    // creation is not yet finished: time cannot run until there is a world
+    if (G.creationStage != null && G.creationStage < 5 && TIME_SCALES[i].v !== 0) {
+      flashToast('Time does not flow yet. Finish the creation.');
+      i = IDX_PAUSE;
+    }
+    const prev = G.speed;
+    G.speedIdx = i;
+    G.speed = TIME_SCALES[i].v;
+    G.paused = (G.speed === 0);
+    if (G.speed <= 0) G.acc = 0;
+    document.querySelectorAll('.speed-btn').forEach(b => b.classList.toggle('active', +b.dataset.idx === i));
+    // audio follows the arrow of time
+    if (Audio8.setTimeDirection && (prev < 0) !== (G.speed < 0)) Audio8.setTimeDirection(G.speed < 0 ? -1 : 1);
+    if (!quiet) Audio8.sfx('click');
+    refreshHUD();
   }
-  function togglePause() { setSpeed(G.paused ? (G._lastSpeed || 1) : (G._lastSpeed = G.speed, 0)); }
+  // numeric entry point (hotkeys, saves): snap to the nearest scale stop
+  function setSpeed(v) {
+    let best = IDX_PAUSE, bd = Infinity;
+    for (let i = 0; i < TIME_SCALES.length; i++) {
+      const d = Math.abs(TIME_SCALES[i].v - v);
+      if (d < bd) { bd = d; best = i; }
+    }
+    setSpeedIdx(best);
+  }
+  function togglePause() {
+    if (G.paused) setSpeedIdx(G._lastIdx || IDX_NORMAL);
+    else { G._lastIdx = G.speedIdx; setSpeedIdx(IDX_PAUSE); }
+  }
   function toggleLabels() {
     G.ui.showLabels = !G.ui.showLabels;
     $('#btn-labels').classList.toggle('off', !G.ui.showLabels);
   }
 
   // ================= Toolbar =================
+  function buildTimeDial() {
+    const wrap = $('#time-dial');
+    if (!wrap) return;
+    let html = '';
+    for (let i = 0; i < TIME_SCALES.length; i++) {
+      const sc = TIME_SCALES[i];
+      if (i === IDX_PAUSE) html += '<button class="speed-btn sep" tabindex="-1">│</button>';
+      const cls = 'speed-btn' + (sc.v < 0 ? ' rev' : '') + (i === G.speedIdx ? ' active' : '');
+      const mag = Math.abs(sc.v);
+      const tip = sc.name + (sc.v === 0 ? '' : ' (' + (sc.v < 0 ? '−' : '') + (mag < 1 ? mag : mag) + '×)');
+      html += `<button class="${cls}" data-idx="${i}" title="${tip}">${sc.label}</button>`;
+    }
+    wrap.innerHTML = html;
+  }
+
   function buildToolbar() {
     const wrap = $('#tools');
     wrap.innerHTML = '';
+    const creating = G.creationStage != null;
     for (const cat of Powers.CATEGORIES) {
-      const powers = Powers.POWERS.filter(x => x.cat === cat.id);
+      let powers = Powers.POWERS.filter(x => x.cat === cat.id);
+      if (cat.id === 'genesis') {
+        // one word at a time, in order
+        powers = creating ? powers.filter(x => x.stage === G.creationStage) : [];
+      } else if (creating) {
+        // nothing else can be done to a world that does not yet exist
+        powers = powers.filter(x => x.cat === 'god');
+      }
       if (!powers.length) continue;
       const group = document.createElement('div');
       group.className = 'tool-group';
@@ -865,6 +1305,16 @@
   function refreshHUD() {
     $('#faith-val').textContent = Math.floor(G.faith);
     $('#faith-rate').textContent = '+' + faithPerStep().toFixed(1) + '/t' + (G.divinity > 0 ? ' ⍟' + G.divinity : '');
+    const ts = $('#time-scale');
+    if (ts) {
+      const sc = TIME_SCALES[G.speedIdx] || TIME_SCALES[IDX_NORMAL];
+      // 6 sim steps per real second at 1x, TICKS_PER_YEAR ticks per year
+      const yps = Math.abs(sc.v) * 6 / TICKS_PER_YEAR;
+      const rate = sc.v === 0 ? 'held' :
+        (yps >= 1 ? yps.toFixed(0) + ' yr/s' : (1 / yps).toFixed(0) + ' s/yr');
+      ts.textContent = sc.name + ' · ' + rate;
+      ts.classList.toggle('reversing', sc.v < 0);
+    }
     const c = G.sim.counts;
     const rc = $('#race-counts'); rc.innerHTML = '';
     const shown = Object.keys(Sim.RACES).filter(k => (c[k] || 0) > 0).slice(0, 8);
@@ -958,18 +1408,18 @@
     if (btn.id === 'smite-btn' && G.selected && G.selected.type === 'village') {
       const v = G.selected.ref;
       const spent = Powers.BY_ID.lightning.apply(G, v.x, v.y);
-      if (spent > 0) { G.faith -= spent; refreshHUD(); }
+      if (spent > 0) onPowerUsed(Powers.BY_ID.lightning, spent);
       return;
     }
     const act = btn.dataset.act;
     if (act && G.selected && G.selected.type === 'unit') {
       const u = G.selected.ref;
-      let spent = 0;
-      if (act === 'blessone') { if (G.faith >= 4) { u.hp = u.maxHp; u.food = 1; u.sick = 0; u.karma += 1; PD.FX.spark(u.x, u.y); Audio8.sfx('bless'); spent = 4; } }
-      else if (act === 'voiceone') spent = Powers.BY_ID.voice.apply(G, u.x, u.y);
-      else if (act === 'empowerone') spent = Powers.BY_ID.empower.apply(G, u.x, u.y);
-      else if (act === 'smiteone') spent = Powers.BY_ID.lightning.apply(G, u.x, u.y);
-      if (spent > 0) { G.faith -= spent; refreshHUD(); }
+      let spent = 0, pw = null;
+      if (act === 'blessone') { if (G.faith >= 4) { u.hp = u.maxHp; u.food = 1; u.sick = 0; u.karma += 1; PD.FX.spark(u.x, u.y); Audio8.sfx('bless'); spent = 4; pw = Powers.BY_ID.bless; } }
+      else if (act === 'voiceone') { pw = Powers.BY_ID.voice; spent = pw.apply(G, u.x, u.y); }
+      else if (act === 'empowerone') { pw = Powers.BY_ID.empower; spent = pw.apply(G, u.x, u.y); }
+      else if (act === 'smiteone') { pw = Powers.BY_ID.lightning; spent = pw.apply(G, u.x, u.y); }
+      if (spent > 0) onPowerUsed(pw || { cat: 'god' }, spent);
     }
   }
   function bar(v, col) { v = PD.clamp(v, 0, 1); return `<div class="bar"><div class="bar-fill" style="width:${(v * 100).toFixed(0)}%;background:${col}"></div></div>`; }
@@ -1376,7 +1826,12 @@
     buildToolbar();
     bindPanels();
 
-    document.querySelectorAll('.speed-btn').forEach(b => b.addEventListener('click', () => setSpeed(+b.dataset.speed)));
+    buildTimeDial();
+    // delegated: the dial is re-rendered, so per-button listeners would go stale
+    $('#time-dial').addEventListener('click', (e) => {
+      const b = e.target.closest('.speed-btn');
+      if (b && b.dataset.idx != null) setSpeedIdx(+b.dataset.idx);
+    });
     $('#btn-menu').addEventListener('click', toggleMenu);
     $('#btn-save').addEventListener('click', () => save());
     $('#btn-labels').addEventListener('click', toggleLabels);
@@ -1409,7 +1864,7 @@
       if (ok) $('#intro').classList.add('hide');
     }
 
-    setSpeed(typeof G.speed === 'number' ? G.speed : 1);
+    setSpeed(typeof G.speed === 'number' ? Math.max(0, G.speed) : 1);
     refreshHUD();
     renderTestament();
 

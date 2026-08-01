@@ -255,9 +255,11 @@ void main(){ gl_FragColor = vCol; }`;
         this.lightning(x1, y1);
       },
       update() {
+        // under reversed time everything falls upward and inward again
+        const dir = (global.G && global.G.speed < 0) ? -1 : 1;
         for (let i = parts.length - 1; i >= 0; i--) {
           const q = parts[i];
-          q.p[0] += q.v[0]; q.p[1] += q.v[1]; q.p[2] += q.v[2];
+          q.p[0] += q.v[0] * dir; q.p[1] += q.v[1] * dir; q.p[2] += q.v[2] * dir;
           // spherical gravity: everything falls back to the world
           if (q.grav) {
             const l = Math.hypot(q.p[0], q.p[1], q.p[2]) || 1;
@@ -863,11 +865,18 @@ void main(){ gl_FragColor = vCol; }`;
     let sun = [Math.sin(cyc), 0.25, Math.cos(cyc)];
     if (world.mode === 'hell') sun = [0.2, -0.6, 0.5];
     if (world.mode === 'heaven') sun = [0.3, 0.9, 0.3];
+    // before the first word there is no sun at all
+    const unlit = world.mode === 'deep' || world.mode === 'nothing';
+    if (unlit) sun = [0, 0, 0];
+    if (world.mode === 'firmament') sun = [0.4, 0.55, 0.4];
     const sl = Math.hypot(sun[0], sun[1], sun[2]); sun = [sun[0] / sl, sun[1] / sl, sun[2] / sl];
 
     const atmo = world.mode === 'hell' ? [0.9, 0.25, 0.1]
       : world.mode === 'heaven' ? [1.0, 0.85, 0.4]
       : world.mode === 'void' ? [0.45, 0.3, 0.8]
+      : world.mode === 'deep' ? [0.05, 0.06, 0.12]
+      : world.mode === 'nothing' ? [0.02, 0.02, 0.04]
+      : world.mode === 'firmament' ? [0.30, 0.45, 0.85]
       : [0.35, 0.55, 1.0];
 
     const p = PD.Cosmos && PD.Cosmos.active ? PD.Cosmos.active() : null;
@@ -876,10 +885,12 @@ void main(){ gl_FragColor = vCol; }`;
 
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
-    // stars
+    // stars — they go out as the last of creation is unmade
+    const dissolve = (global.G && global.G.dissolve) || 0;
     gl.disable(gl.DEPTH_TEST);
-    drawPoints(r, vp, r.bufStars, r.bufStarCol, r.bufStarSize, r.nStars);
+    if (dissolve < 0.98) drawPoints(r, vp, r.bufStars, r.bufStarCol, r.bufStarSize, r.nStars);
     gl.enable(gl.DEPTH_TEST);
+    if (dissolve >= 1) { drawOverlay2D(r, sim, ui); return; }  // nothing left to draw
 
     // planet
     const pp = r.progPlanet;
@@ -888,7 +899,7 @@ void main(){ gl_FragColor = vCol; }`;
     bindAttr(gl, pp.a.aUV, r.bufUV, 2);
     bindAttr(gl, pp.a.aH, r.bufH, 1);
     gl.uniformMatrix4fv(pp.u.uMVP, false, vp);
-    gl.uniform1f(pp.u.uDisp, 0.13);
+    gl.uniform1f(pp.u.uDisp, 0.13 * (1 - dissolve));
     gl.uniform1f(pp.u.uSea, 0.38);
     gl.uniform3fv(pp.u.uSun, sun);
     gl.uniform3fv(pp.u.uEye, eye);
@@ -1083,6 +1094,22 @@ void main(){ gl_FragColor = vCol; }`;
     if (!ctx) return;
     ctx.clearRect(0, 0, r.w, r.h);
 
+    // omniscience: every soul named and weighed
+    if (global.G && global.G.omniscient && r.cam.dist < 4.2) {
+      ctx.font = '9px ui-monospace, monospace';
+      ctx.textAlign = 'center';
+      let shown = 0;
+      for (const u of sim.units) {
+        if (u.dead || shown > 90) continue;
+        const s2 = worldToScreen(r, u.x, u.y);
+        if (!s2) continue;
+        shown++;
+        ctx.fillStyle = u.karma >= 0 ? 'rgba(150,255,190,0.92)' : 'rgba(255,150,130,0.92)';
+        ctx.fillText(`${u.name} ${u.karma >= 0 ? '+' : ''}${Math.round(u.karma)}`, s2.x, s2.y - 10);
+      }
+      ctx.textAlign = 'left';
+    }
+
     // village labels (front hemisphere, close zoom)
     if (ui.showLabels && r.cam.dist < 3.4) {
       ctx.font = '7px monospace';
@@ -1136,7 +1163,8 @@ void main(){ gl_FragColor = vCol; }`;
     }
 
     // the sun itself, with a soft flare when it swings into view
-    if (r._vp) {
+    const noSun = r.world.mode === 'deep' || r.world.mode === 'nothing';
+    if (r._vp && !noSun) {
       const cyc = (sim.tick % 480) / 480 * Math.PI * 2;
       const sp = [Math.sin(cyc) * 30, 7, Math.cos(cyc) * 30];
       const m = r._vp;
@@ -1178,7 +1206,7 @@ void main(){ gl_FragColor = vCol; }`;
       biomeLUT = [];
       for (const k in W.BIOME_COLORS) biomeLUT[+k] = R2.hexToRgb(W.BIOME_COLORS[k]);
     }
-    if (world.dirtyMini || miniTick < 0 || (sim.tick - miniTick) > 30) {
+    if (world.dirtyMini || miniTick < 0 || Math.abs(sim.tick - miniTick) > 30) {
       if (!miniImg || miniImg.width !== world.W) miniImg = miniCtx.createImageData(world.W, world.H);
       const ownerRGB = new Map();
       for (const v of sim.villages) ownerRGB.set(v.id, R2.hexToRgb(v.col));
