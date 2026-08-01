@@ -1,10 +1,20 @@
-# ✦ PIXEL DEITY — an 8-bit god simulator on REAL 3D PLANETS
+# ✦ PIXEL DEITY — a cinematic god simulator
 
 A complete, offline-first idle god game — *WorldBox* souls on *Solar Smash*
-bodies. Your pixel civilizations live on genuine 3D planets floating in
-space: spin them, zoom from orbit to street level, and strike anywhere on
-the sphere. Custom WebGL engine, zero dependencies, no build step — open
-`index.html` and you are a god.
+bodies. Civilizations live on genuine 3D planets floating in space: spin
+them, zoom from orbit to street level, and strike anywhere on the sphere.
+
+**Fully high-definition.** No pixel art, no chiptune. Terrain is baked into
+1440×960 albedo *and* normal maps with hypsometric color ramps, depth-graded
+oceans, wave-lit coastlines, forest mottling, snowlines and city districts —
+then lit per-pixel with normal-mapped sunlight, specular sun-glint, rim-
+scattered atmosphere and a filmic tone-map. The soundtrack is a generative
+ambient score: reverb-drenched pads, detuned voices, sub-bass and stellar
+wind. The UI is frosted glass.
+
+All of it is *computed*, not downloaded — the entire game is still a few
+hundred kilobytes, offline forever, with zero dependencies and no build
+step. Open `index.html` and you are a god.
 
 ## ▶ Play
 
@@ -42,12 +52,12 @@ install over the top without losing saves). minSdk 26, targetSdk 34.
   worker make it installable from the browser menu, fullscreen and offline
 - **Desktop:** open `index.html`. That's it.
 
-## 🌍 What it is — the GENESIS edition, now fully 3D
+## 🌍 What it is — the GENESIS edition, now fully 3D and high-definition
 
 You are the One True God of a **3D pixel multiverse**:
 
-- **Real 3D planets (Solar Smash style)** — a custom WebGL engine wraps the
-  8-bit world around a displaced sphere: pixel mountains with real relief, a
+- **Real 3D planets (Solar Smash style)** — a custom WebGL engine wraps a
+  high-definition world around a displaced sphere: mountains with real relief, a
   sweeping day/night terminator, **city lights glowing on the night side**,
   wildfires visible from orbit, sun-glint oceans, drifting cloud layers, an
   atmosphere that matches the world (blue for the living, red for hell,
@@ -142,14 +152,15 @@ buildless so the "built version" *is* the source:
 ```
 index.html       shell + HUD/toolbar/tab-rail/panels
 styles.css       retro UI theme
-js/util.js       seeded RNG, fractal value noise, 8-bit WebAudio synth
+js/util.js       seeded RNG, fractal value noise, cinematic WebAudio score
 js/codec.js      RLE + quantized typed-array save codec (a planet ≈ tens of KB)
 js/world.js      procgen → 18 biomes, ROUND wrap worlds, terraforming, fire sim
 js/sim.js        21 races, units w/ identity+karma, villages, ecology, combat
 js/society.js    nations, politics, religion, prayers, tech eras, PixelNet, history
 js/afterlife.js  souls, the five planes of the Beyond, angels/demons, resurrection
 js/cosmos.js     the multiverse: planets, spinning globes, doomed cores, evolution, Genesis Lab
-js/render.js     cached terrain, seam-wrapped camera, sprites, particles, minimap
+js/render.js     terrain baking helpers + colour tables
+js/render3d.js   HD WebGL planet engine: albedo/normal bake, PBR-ish shading, FX
 js/powers.js     the god's toolbox (40 powers)
 js/game.js       loop, faith economy, floods/storms/time travel, panels, save/load
 ```

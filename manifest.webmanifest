@@ -1,7 +1,7 @@
 {
-  "name": "Pixel Deity — 8-bit God Simulator",
+  "name": "Pixel Deity — Cinematic God Simulator",
   "short_name": "Pixel Deity",
-  "description": "An offline 8-bit god simulator: round pixel worlds, emergent civilizations, heavens and hells, and a whole multiverse in your pocket.",
+  "description": "An offline cinematic god simulator: living 3D worlds, emergent civilizations, heavens and hells, and a whole multiverse in your pocket.",
   "start_url": "./index.html",
   "scope": "./",
   "display": "fullscreen",

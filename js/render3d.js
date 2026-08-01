@@ -74,32 +74,48 @@ void main(){
   const FS_PLANET = `
 precision mediump float;
 varying vec2 vUV; varying vec3 vN; varying float vLand;
-uniform sampler2D uTex; uniform sampler2D uData;
+uniform sampler2D uTex; uniform sampler2D uData; uniform sampler2D uNorm;
 uniform vec3 uSun; uniform vec3 uEye; uniform vec3 uAtmo;
 uniform float uBlood; uniform float uDoom; uniform float uTime;
 void main(){
   vec3 base = texture2D(uTex, vUV).rgb;
   vec4 data = texture2D(uData, vUV); // r=city light g=water b=fire a=crackmask
-  vec3 N = normalize(vN);
+  vec3 Ns = normalize(vN);
+  // tangent frame on the sphere: east (d/dlon) and south (d/dgrid-y)
+  vec3 east = normalize(vec3(Ns.z, 0.0, -Ns.x) + vec3(0.0001));
+  vec3 south = normalize(cross(east, Ns));
+  vec3 Nt = texture2D(uNorm, vUV).xyz * 2.0 - 1.0;
+  vec3 N = normalize(east * Nt.x + south * Nt.y + Ns * max(Nt.z, 0.2));
   float diff = max(dot(N, uSun), 0.0);
-  float light = 0.22 + 0.9 * diff;
+  float terminator = max(dot(Ns, uSun), 0.0);
+  float light = 0.16 + 1.05 * diff;
   vec3 col = base * light;
-  // ocean sun-glint
-  col += vec3(0.9,0.95,1.0) * data.g * pow(diff, 24.0) * 0.35;
+  // warm sunlight, cool skylight ambient
+  col += base * vec3(0.10, 0.12, 0.18) * (1.0 - diff);
+  // specular: crisp on water, faint sheen on land
+  vec3 V = normalize(uEye);
+  vec3 H = normalize(uSun + V);
+  float spec = pow(max(dot(N, H), 0.0), mix(10.0, 90.0, data.g));
+  col += vec3(1.0, 0.97, 0.9) * spec * mix(0.06, 0.55, data.g) * terminator;
   // night side: the cities are awake
-  float night = 1.0 - smoothstep(0.0, 0.22, diff);
-  col += vec3(1.0, 0.85, 0.45) * data.r * night * 1.4;
+  float night = 1.0 - smoothstep(0.0, 0.18, terminator);
+  col += vec3(1.0, 0.82, 0.45) * data.r * night * 1.7;
+  col += vec3(0.4, 0.5, 0.9) * data.r * night * 0.3; // cool halo
   // wildfire glow visible from orbit
   float flick = 0.75 + 0.25 * sin(uTime * 18.0 + vUV.x * 200.0 + vUV.y * 140.0);
-  col += vec3(1.0, 0.45, 0.1) * data.b * flick * 1.6;
+  col += vec3(1.0, 0.45, 0.1) * data.b * flick * 1.7;
   // doomed core: magma cracks bleed through the crust
   col += vec3(1.0, 0.25, 0.05) * data.a * uDoom * (0.7 + 0.3 * sin(uTime * 6.0));
   // blood moon tint
   col = mix(col, col * vec3(1.5, 0.5, 0.5), uBlood * 0.45);
-  // atmosphere rim
-  vec3 V = normalize(uEye);
-  float rim = pow(1.0 - max(dot(N, V), 0.0), 2.5);
-  col += uAtmo * rim * (0.35 + 0.4 * diff);
+  // atmosphere rim scattering
+  float rim = pow(1.0 - max(dot(Ns, V), 0.0), 2.2);
+  col += uAtmo * rim * (0.22 + 0.55 * terminator);
+  // filmic-ish tonemap + gamma
+  col = col / (col + vec3(0.62)) * 1.55;
+  float lum = dot(col, vec3(0.299, 0.587, 0.114));
+  col = mix(vec3(lum), col, 1.18);            // gentle saturation lift
+  col = pow(max(col, 0.0), vec3(0.95));
   gl_FragColor = vec4(col, 1.0);
 }`;
   const VS_CLOUD = `
@@ -114,7 +130,7 @@ uniform sampler2D uTex; uniform vec3 uSun;
 void main(){
   float a = texture2D(uTex, vUV).r;
   float diff = max(dot(normalize(vN), uSun), 0.0);
-  gl_FragColor = vec4(vec3(0.6 + 0.65 * diff), a * 0.55);
+  gl_FragColor = vec4(vec3(0.66 + 0.6 * diff), a * 0.5);
 }`;
   const VS_ATMO = `
 attribute vec3 aPos; uniform mat4 uMVP; varying vec3 vN;
@@ -134,8 +150,10 @@ void main(){ vCol = aCol; gl_Position = uMVP * vec4(aPos, 1.0); gl_PointSize = a
 precision mediump float; varying vec4 vCol;
 void main(){
   vec2 d = gl_PointCoord - 0.5;
-  if (dot(d,d) > 0.25) discard;
-  gl_FragColor = vCol;
+  float r2 = dot(d,d);
+  if (r2 > 0.25) discard;
+  float soft = smoothstep(0.25, 0.02, r2);
+  gl_FragColor = vec4(vCol.rgb * (0.85 + soft * 0.5), vCol.a * soft);
 }`;
   const VS_LINE = `
 attribute vec3 aPos; attribute vec4 aCol; uniform mat4 uMVP; varying vec4 vCol;
@@ -314,18 +332,259 @@ void main(){ gl_FragColor = vCol; }`;
     return r;
   }
 
+  // ================= HD terrain bake ===================================
+  // No more chunky tiles. Per-pixel albedo + normal maps are baked from
+  // bilinearly-sampled world fields, with hypsometric ramps, depth-graded
+  // oceans, beaches, forest mottling, snowlines, city districts and
+  // micro-detail — then lit per-pixel by the shader. Photorealism from
+  // math, not gigabytes of assets.
+  //
+  // Speed matters: everything expensive is precomputed once per bake into
+  // tile-resolution fields, sampling is hoisted per row, and all noise
+  // comes from a wrapping lookup tile instead of live fBm.
+  const HD = 8;          // baked pixels per tile -> 1440x960 for a 180x120 world
+  const NT = 256;        // detail-noise tile size (wraps)
+  const SEA = 0.38;
+
+  const HD_COLORS = {
+    2:  [214, 196, 148], 3:  [92, 138, 62],  4:  [44, 94, 48],
+    5:  [125, 101, 74],  6:  [120, 118, 120], 7: [235, 240, 246],
+    8:  [204, 168, 110], 9:  [36, 104, 54],  10: [84, 104, 66],
+    11: [56, 50, 52],    12: [92, 44, 52],   13: [255, 92, 20],
+    14: [235, 238, 248], 15: [222, 198, 112], 16: [66, 96, 80],
+    17: [44, 36, 66]
+  };
+
+  // per-renderer scratch: tile-resolution fields + noise LUT
+  function ensureFields(r) {
+    const w = r.world, n = w.n;
+    if (!r.f || r.f.n !== n) {
+      r.f = {
+        n, cr: new Float32Array(n), cg: new Float32Array(n), cb: new Float32Array(n),
+        water: new Float32Array(n), lava: new Float32Array(n), tree: new Float32Array(n),
+        gx: new Float32Array(n), gy: new Float32Array(n)
+      };
+    }
+    if (!r.noiseTile) {
+      const nz = PD.makeNoise(0xD37A11);
+      const t1 = new Float32Array(NT * NT), t2 = new Float32Array(NT * NT);
+      for (let y = 0; y < NT; y++) for (let x = 0; x < NT; x++) {
+        // crossfade with a shifted copy so the tile wraps seamlessly
+        const u = x / NT, v = y / NT;
+        const a1 = nz.fbm(x * 0.09, y * 0.09, 3), b1 = nz.fbm((x - NT) * 0.09, y * 0.09, 3);
+        const c1 = nz.fbm(x * 0.09, (y - NT) * 0.09, 3), d1 = nz.fbm((x - NT) * 0.09, (y - NT) * 0.09, 3);
+        t1[y * NT + x] = ((a1 * (1 - u) + b1 * u) * (1 - v) + (c1 * (1 - u) + d1 * u) * v);
+        const a2 = nz.fbm(x * 0.023 + 40, y * 0.023, 4), b2 = nz.fbm((x - NT) * 0.023 + 40, y * 0.023, 4);
+        const c2 = nz.fbm(x * 0.023 + 40, (y - NT) * 0.023, 4), d2 = nz.fbm((x - NT) * 0.023 + 40, (y - NT) * 0.023, 4);
+        t2[y * NT + x] = ((a2 * (1 - u) + b2 * u) * (1 - v) + (c2 * (1 - u) + d2 * u) * v);
+      }
+      r.noiseTile = t1; r.noiseTile2 = t2;
+    }
+  }
+
+  // Rebuild the tile-resolution source fields the pixel bake samples from.
+  function buildFields(r) {
+    const w = r.world, f = r.f, W2 = w.W, H2 = w.H;
+    for (let i = 0; i < w.n; i++) {
+      const b = w.biome[i];
+      const c = HD_COLORS[b];
+      f.cr[i] = c ? c[0] : 60; f.cg[i] = c ? c[1] : 70; f.cb[i] = c ? c[2] : 90;
+      f.water[i] = W.isWater(b) ? 1 : 0;
+      f.lava[i] = b === 13 ? 1 : 0;
+      f.tree[i] = w.tree[i];
+    }
+    // elevation gradients (wrap in x, clamp at poles) for the normal map
+    for (let y = 0; y < H2; y++) {
+      const row = y * W2;
+      const up = (y > 0 ? y - 1 : 0) * W2, dn = (y < H2 - 1 ? y + 1 : H2 - 1) * W2;
+      for (let x = 0; x < W2; x++) {
+        const xr = x === W2 - 1 ? 0 : x + 1, xl = x === 0 ? W2 - 1 : x - 1;
+        f.gx[row + x] = w.elev[row + xr] - w.elev[row + xl];
+        f.gy[row + x] = w.elev[dn + x] - w.elev[up + x];
+      }
+    }
+  }
+
+  // Bake a rectangle of output pixels [px0,px0+pw) x [py0,py0+ph).
+  // Row-hoisted, direct-indexed, LUT noise: ~50x faster than naive per-pixel fBm.
+  function bakeRect(r, px0, py0, pw, ph) {
+    const w = r.world, f = r.f;
+    const W2 = w.W, H2 = w.H, Wp = W2 * HD, Hp = H2 * HD;
+    const alb = r.albedo, nrm = r.normal;
+    const nt = r.noiseTile, nt2 = r.noiseTile2;
+    const elev = w.elev, struct = w.struct;
+    const invHD = 1 / HD;
+
+    for (let yy = 0; yy < ph; yy++) {
+      const py = py0 + yy;
+      if (py < 0 || py >= Hp) continue;
+      // sample position in tile space (pixel centers offset by half a tile)
+      let fy = py * invHD - 0.5;
+      if (fy < 0) fy = 0; else if (fy > H2 - 1.001) fy = H2 - 1.001;
+      const y0 = fy | 0, ty = fy - y0;
+      const y1 = y0 + 1 < H2 ? y0 + 1 : H2 - 1;
+      const r0 = y0 * W2, r1 = y1 * W2;
+      const nrow = (py & (NT - 1)) * NT;
+      const nrow2 = ((py >> 2) & (NT - 1)) * NT;
+      const sy = (py * invHD + 0.5) | 0;
+      const srow = (sy < H2 ? sy : H2 - 1) * W2;
+
+      for (let xx = 0; xx < pw; xx++) {
+        let px = px0 + xx;
+        if (px >= Wp) px -= Wp; else if (px < 0) px += Wp;
+        let fx = px * invHD - 0.5;
+        if (fx < 0) fx += W2;
+        const x0 = fx | 0, tx = fx - x0;
+        const x1 = x0 + 1 < W2 ? x0 + 1 : 0;
+
+        const i00 = r0 + x0, i10 = r0 + x1, i01 = r1 + x0, i11 = r1 + x1;
+        const w00 = (1 - tx) * (1 - ty), w10 = tx * (1 - ty), w01 = (1 - tx) * ty, w11 = tx * ty;
+
+        const e = elev[i00] * w00 + elev[i10] * w10 + elev[i01] * w01 + elev[i11] * w11;
+        const water = f.water[i00] * w00 + f.water[i10] * w10 + f.water[i01] * w01 + f.water[i11] * w11;
+        const lava = f.lava[i00] * w00 + f.lava[i10] * w10 + f.lava[i01] * w01 + f.lava[i11] * w11;
+        const tree = f.tree[i00] * w00 + f.tree[i10] * w10 + f.tree[i01] * w01 + f.tree[i11] * w11;
+
+        const nse = nt[nrow + (px & (NT - 1))];
+        const nse2 = nt2[nrow2 + ((px >> 2) & (NT - 1))];
+
+        let rr, gg, bb;
+        if (lava > 0.5) {
+          const gl = 0.75 + nse * 0.5;
+          rr = 255 * gl; gg = 88 * gl; bb = 18 * gl;
+        } else if (water > 0.5) {
+          // ocean: depth-graded blues with a hint of swell
+          let depth = (SEA - e) * 4.2; depth = depth < 0 ? 0 : depth > 1 ? 1 : depth;
+          const inv = 1 - depth;
+          rr = 18 + inv * 44;
+          gg = 62 + inv * 92 + nse * 8;
+          bb = 118 + inv * 92 + nse * 10;
+        } else {
+          rr = f.cr[i00] * w00 + f.cr[i10] * w10 + f.cr[i01] * w01 + f.cr[i11] * w11;
+          gg = f.cg[i00] * w00 + f.cg[i10] * w10 + f.cg[i01] * w01 + f.cg[i11] * w11;
+          bb = f.cb[i00] * w00 + f.cb[i10] * w10 + f.cb[i01] * w01 + f.cb[i11] * w11;
+          const shade = 0.82 + nse2 * 0.36;
+          rr *= shade; gg *= shade; bb *= shade;
+          // forest mottling
+          if (tree > 0.3) {
+            const dark = 1 - tree * 0.085 * (0.6 + nse);
+            rr *= dark; gg *= dark * 1.04; bb *= dark;
+          }
+          let alt = (e - SEA) / (1 - SEA);
+          if (alt < 0) alt = 0; else if (alt > 1) alt = 1;
+          if (alt > 0.55) {
+            let rockT = (alt - 0.55) / 0.2; if (rockT > 1) rockT = 1;
+            rockT *= 0.7;
+            rr += (118 - rr) * rockT; gg += (114 - gg) * rockT; bb += (118 - bb) * rockT;
+          }
+          const snowLine = 0.72 + nse * 0.06;
+          if (alt > snowLine) {
+            let snowT = (alt - snowLine) / 0.12; if (snowT > 1) snowT = 1;
+            rr += (240 - rr) * snowT; gg += (244 - gg) * snowT; bb += (250 - bb) * snowT;
+          }
+          // beaches kiss the waterline
+          if (e < SEA + 0.02) {
+            const bt = ((SEA + 0.02 - e) / 0.02) * 0.6;
+            rr += (214 - rr) * bt; gg += (196 - gg) * bt; bb += (150 - bb) * bt;
+          }
+          const micro = 0.92 + nse * 0.16;
+          rr *= micro; gg *= micro; bb *= micro;
+          // settlements: warm rooftops, plazas, gilded wonders
+          const st = struct[srow + ((px * invHD + 0.5) | 0) % W2];
+          if (st) {
+            const cellN = nt[((py * 3) & (NT - 1)) * NT + ((px * 3) & (NT - 1))];
+            if (cellN > 0.45) {
+              const gold = st === W.S.WONDER;
+              const urban = (st === W.S.TOWN || gold) ? 1 : 0.7;
+              const tr = gold ? 235 : 188, tg = gold ? 205 : 158, tb = gold ? 92 : 128;
+              rr = rr * 0.35 + tr * 0.65 * urban;
+              gg = gg * 0.35 + tg * 0.65 * urban;
+              bb = bb * 0.35 + tb * 0.65 * urban;
+            }
+          }
+        }
+
+        const o = (py * Wp + px) * 4;
+        // Uint8Array wraps on overflow, so clamp: an over-bright snow peak
+        // would otherwise wrap its blue channel to zero and turn yellow
+        alb[o] = rr > 255 ? 255 : rr < 0 ? 0 : rr;
+        alb[o + 1] = gg > 255 ? 255 : gg < 0 ? 0 : gg;
+        alb[o + 2] = bb > 255 ? 255 : bb < 0 ? 0 : bb;
+        alb[o + 3] = 255;
+
+        // normal map from the interpolated elevation gradient (+ land micro-relief)
+        const gx = f.gx[i00] * w00 + f.gx[i10] * w10 + f.gx[i01] * w01 + f.gx[i11] * w11;
+        const gy = f.gy[i00] * w00 + f.gy[i10] * w10 + f.gy[i01] * w01 + f.gy[i11] * w11;
+        const isWater = water > 0.5;
+        const k = isWater ? 2.5 : 26;
+        const mx = isWater ? 0 : (nt[nrow + ((px + 3) & (NT - 1))] - nse) * 0.9;
+        const my = isWater ? 0 : (nt[((py + 3) & (NT - 1)) * NT + (px & (NT - 1))] - nse) * 0.9;
+        const nx = -(gx * k + mx), ny = -(gy * k + my);
+        const nl = Math.sqrt(nx * nx + ny * ny + 1);
+        nrm[o] = (nx / nl * 0.5 + 0.5) * 255;
+        nrm[o + 1] = (ny / nl * 0.5 + 0.5) * 255;
+        nrm[o + 2] = (1 / nl * 0.5 + 0.5) * 255;
+        nrm[o + 3] = 255;
+      }
+    }
+  }
+
   function bakeTerrain(r) {
     const w = r.world;
-    for (let y = 0; y < w.H; y++) for (let x = 0; x < w.W; x++) R2.renderTileAt(w, r.tctx, x, y);
+    const Wp = w.W * HD, Hp = w.H * HD;
+    ensureFields(r);
+    if (!r.albedo || r.albedo.length !== Wp * Hp * 4) {
+      r.albedo = new Uint8Array(Wp * Hp * 4);
+      r.normal = new Uint8Array(Wp * Hp * 4);
+    }
+    buildFields(r);
+    bakeRect(r, 0, 0, Wp, Hp);
     w.dirty = false; w.dirtyTiles.length = 0;
     r.texDirty = true;
     r.heightsDirty = true;
+    r.subRects = null;
   }
+
+  // Refresh the source fields for one tile and the neighbours whose
+  // gradients depend on it — the per-frame path must not touch all 21,600.
+  function updateFieldsAt(r, tx, ty) {
+    const w = r.world, f = r.f, W2 = w.W, H2 = w.H;
+    for (let dy = -1; dy <= 1; dy++) {
+      const y = ty + dy;
+      if (y < 0 || y >= H2) continue;
+      const row = y * W2;
+      const up = (y > 0 ? y - 1 : 0) * W2, dn = (y < H2 - 1 ? y + 1 : H2 - 1) * W2;
+      for (let dx = -1; dx <= 1; dx++) {
+        const x = ((tx + dx) % W2 + W2) % W2;
+        const i = row + x;
+        const b = w.biome[i], c = HD_COLORS[b];
+        f.cr[i] = c ? c[0] : 60; f.cg[i] = c ? c[1] : 70; f.cb[i] = c ? c[2] : 90;
+        f.water[i] = W.isWater(b) ? 1 : 0;
+        f.lava[i] = b === 13 ? 1 : 0;
+        f.tree[i] = w.tree[i];
+        const xr = x === W2 - 1 ? 0 : x + 1, xl = x === 0 ? W2 - 1 : x - 1;
+        f.gx[i] = w.elev[row + xr] - w.elev[row + xl];
+        f.gy[i] = w.elev[dn + x] - w.elev[up + x];
+      }
+    }
+  }
+
   function bakeDirtyTiles(r) {
     const w = r.world, tiles = w.dirtyTiles;
+    const Wp = w.W * HD, Hp = w.H * HD;
+    if (!r.albedo || !r.f) { bakeTerrain(r); return; }
+    r.subRects = r.subRects || [];
     for (let k = 0; k < tiles.length; k++) {
       const i = tiles[k];
-      R2.renderTileAt(w, r.tctx, i % w.W, (i / w.W) | 0);
+      const tx = i % w.W, ty = (i / w.W) | 0;
+      updateFieldsAt(r, tx, ty);
+      // rebake with a one-tile margin so blends and normals stay continuous
+      const x0 = (((tx - 1) * HD) % Wp + Wp) % Wp;
+      const y0 = Math.max(0, (ty - 1) * HD);
+      const wpx = 3 * HD, hpx = Math.min(Hp - y0, 3 * HD);
+      bakeRect(r, x0, y0, wpx, hpx);
+      r.subRects.push([x0, y0, wpx, hpx]);
+      if (r.subRects.length > 40) { r.subRects = null; break; } // large edit: full upload
     }
     tiles.length = 0;
     r.texDirty = true;
@@ -333,7 +592,7 @@ void main(){ gl_FragColor = vCol; }`;
   }
 
   // ---------- GL init ----------
-  const SEG_LON = 192, SEG_LAT = 128;
+  const SEG_LON = 256, SEG_LAT = 170;
   function initGL(r) {
     const gl = r.gl;
     r.progPlanet = compile(gl, VS_PLANET, FS_PLANET);
@@ -379,12 +638,13 @@ void main(){ gl_FragColor = vCol; }`;
       }
     }
 
-    // textures
-    r.texTerra = glTex(gl);
-    r.texData = glTex(gl);
+    // textures (LINEAR: the smooth, cinematic look)
+    r.texTerra = glTex(gl, true);
+    r.texNorm = glTex(gl, true);
+    r.texData = glTex(gl, true);
     r.dataBuf = new Uint8Array(r.world.W * r.world.H * 4);
     // clouds: bake once from fBm noise
-    const cw = 512, ch = 256, cnv = document.createElement('canvas');
+    const cw = 1024, ch = 512, cnv = document.createElement('canvas');
     cnv.width = cw; cnv.height = ch;
     const cctx = cnv.getContext('2d');
     const img = cctx.createImageData(cw, ch);
@@ -392,9 +652,14 @@ void main(){ gl_FragColor = vCol; }`;
     for (let y = 0; y < ch; y++) for (let x = 0; x < cw; x++) {
       // seamless in x by crossfading
       const t = x / cw;
-      const n1 = noise.fbm(x * 0.02, y * 0.02, 5), n2 = noise.fbm((x - cw) * 0.02, y * 0.02, 5);
-      const v = n1 * (1 - t) + n2 * t;
-      const a = PD.clamp((v - 0.52) * 4, 0, 1) * 255;
+      const n1 = noise.fbm(x * 0.012, y * 0.012, 6), n2 = noise.fbm((x - cw) * 0.012, y * 0.012, 6);
+      const w1 = noise.fbm(x * 0.045 + 91, y * 0.045, 4), w2 = noise.fbm((x - cw) * 0.045 + 91, y * 0.045, 4);
+      const v = (n1 * (1 - t) + n2 * t) * 0.7 + (w1 * (1 - t) + w2 * t) * 0.3;
+      // trade-wind banding: dense at the equator and mid-latitudes, clear
+      // over the horse latitudes — weather systems, not a blanket
+      const lat = (y / ch) * Math.PI;
+      const band = 0.42 + 0.58 * Math.pow(Math.abs(Math.sin(lat * 3.0)), 1.5);
+      const a = Math.pow(PD.clamp((v - 0.60) * 5.0, 0, 1), 1.35) * band * 255;
       const o = (y * cw + x) * 4;
       img.data[o] = a; img.data[o + 1] = a; img.data[o + 2] = a; img.data[o + 3] = 255;
     }
@@ -553,8 +818,35 @@ void main(){ gl_FragColor = vCol; }`;
     if (cam.idle > 300) cam.lon += 0.0006;
 
     if (r.texDirty) {
-      gl.bindTexture(gl.TEXTURE_2D, r.texTerra);
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, r.terra);
+      const Wp = world.W * HD, Hp = world.H * HD;
+      const isGL2 = !!gl.texStorage2D;
+      if (r.subRects && isGL2 && r._texInit === world) {
+        gl.pixelStorei(gl.UNPACK_ROW_LENGTH, Wp);
+        for (const [x0, y0, wpx, hpx] of r.subRects) {
+          if (x0 + wpx <= Wp) {
+            gl.pixelStorei(gl.UNPACK_SKIP_PIXELS, x0);
+            gl.pixelStorei(gl.UNPACK_SKIP_ROWS, y0);
+            gl.bindTexture(gl.TEXTURE_2D, r.texTerra);
+            gl.texSubImage2D(gl.TEXTURE_2D, 0, x0, y0, wpx, hpx, gl.RGBA, gl.UNSIGNED_BYTE, r.albedo);
+            gl.bindTexture(gl.TEXTURE_2D, r.texNorm);
+            gl.texSubImage2D(gl.TEXTURE_2D, 0, x0, y0, wpx, hpx, gl.RGBA, gl.UNSIGNED_BYTE, r.normal);
+          } else {
+            // wrapped rect: fall back to full upload this frame
+            r.subRects = null; break;
+          }
+        }
+        gl.pixelStorei(gl.UNPACK_ROW_LENGTH, 0);
+        gl.pixelStorei(gl.UNPACK_SKIP_PIXELS, 0);
+        gl.pixelStorei(gl.UNPACK_SKIP_ROWS, 0);
+      }
+      if (!r.subRects || r._texInit !== world) {
+        gl.bindTexture(gl.TEXTURE_2D, r.texTerra);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, Wp, Hp, 0, gl.RGBA, gl.UNSIGNED_BYTE, r.albedo);
+        gl.bindTexture(gl.TEXTURE_2D, r.texNorm);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, Wp, Hp, 0, gl.RGBA, gl.UNSIGNED_BYTE, r.normal);
+        r._texInit = world;
+      }
+      r.subRects = null;
       r.texDirty = false;
     }
     if (r.heightsDirty) updateHeights(r);
@@ -596,7 +888,7 @@ void main(){ gl_FragColor = vCol; }`;
     bindAttr(gl, pp.a.aUV, r.bufUV, 2);
     bindAttr(gl, pp.a.aH, r.bufH, 1);
     gl.uniformMatrix4fv(pp.u.uMVP, false, vp);
-    gl.uniform1f(pp.u.uDisp, 0.10);
+    gl.uniform1f(pp.u.uDisp, 0.13);
     gl.uniform1f(pp.u.uSea, 0.38);
     gl.uniform3fv(pp.u.uSun, sun);
     gl.uniform3fv(pp.u.uEye, eye);
@@ -606,6 +898,7 @@ void main(){ gl_FragColor = vCol; }`;
     gl.uniform1f(pp.u.uTime, performance.now() * 0.001);
     gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, r.texTerra); gl.uniform1i(pp.u.uTex, 0);
     gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, r.texData); gl.uniform1i(pp.u.uData, 1);
+    gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D, r.texNorm); gl.uniform1i(pp.u.uNorm, 2);
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, r.bufIdx);
     gl.drawElements(gl.TRIANGLES, r.nIdx, r.idxType, 0);
 
@@ -839,6 +1132,27 @@ void main(){ gl_FragColor = vCol; }`;
         f.d += 0.03; f.y += f.s * 1.2; f.x += Math.sin(f.d) * 0.6;
         if (f.y > r.h) { f.y = -5; f.x = Math.random() * r.w; }
         ctx.fillRect(f.x, f.y, 2, 2);
+      }
+    }
+
+    // the sun itself, with a soft flare when it swings into view
+    if (r._vp) {
+      const cyc = (sim.tick % 480) / 480 * Math.PI * 2;
+      const sp = [Math.sin(cyc) * 30, 7, Math.cos(cyc) * 30];
+      const m = r._vp;
+      const cw2 = m[3] * sp[0] + m[7] * sp[1] + m[11] * sp[2] + m[15];
+      if (cw2 > 0) {
+        const sx = ((m[0] * sp[0] + m[4] * sp[1] + m[8] * sp[2] + m[12]) / cw2 * 0.5 + 0.5) * r.w;
+        const sy = (0.5 - (m[1] * sp[0] + m[5] * sp[1] + m[9] * sp[2] + m[13]) / cw2 * 0.5) * r.h;
+        if (sx > -200 && sx < r.w + 200 && sy > -200 && sy < r.h + 200) {
+          const g2 = ctx.createRadialGradient(sx, sy, 0, sx, sy, 130);
+          g2.addColorStop(0, 'rgba(255,250,230,0.9)');
+          g2.addColorStop(0.15, 'rgba(255,235,180,0.45)');
+          g2.addColorStop(0.5, 'rgba(255,210,120,0.12)');
+          g2.addColorStop(1, 'rgba(255,200,100,0)');
+          ctx.fillStyle = g2;
+          ctx.fillRect(sx - 130, sy - 130, 260, 260);
+        }
       }
     }
 
