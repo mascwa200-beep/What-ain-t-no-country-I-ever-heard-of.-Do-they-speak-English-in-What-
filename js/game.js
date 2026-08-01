@@ -39,6 +39,9 @@
     timeline: [],                            // time-travel snapshots
     story: { done: {}, active: 0 },
     stats: { born: 0, died: 0, peakPop: 0 },
+    ach: {},                                 // achievement counters
+    divinity: 0,                             // prestige: permanent faith multiplier
+    armageddon: 0,
     openPanel: null
   };
   global.G = G;
@@ -106,11 +109,60 @@
     const c = G.sim.counts;
     let pop = 0;
     for (const k of Sim.SENTIENT) pop += c[k] || 0;
-    let temples = 0;
-    for (const v of G.sim.villages) temples += v.temples;
-    let f = 0.04 + pop * 0.014 + temples * 0.22;
+    let temples = 0, wonders = 0;
+    for (const v of G.sim.villages) { temples += v.temples; wonders += v.wonders || 0; }
+    let f = 0.04 + pop * 0.014 + temples * 0.22 + wonders * 0.8;
     if (PD.Society) f += PD.Society.faithBonus(G.sim);
-    return f;
+    // Divinity: each transcendence permanently multiplies the flow of faith
+    return f * (1 + G.divinity * 0.25);
+  }
+
+  // ---- Transcendence (prestige): trade a multiverse for permanent power
+  function transcendCost() { return 2000 * Math.pow(3, G.divinity); }
+  function transcend() {
+    const cost = transcendCost();
+    if (G.faithTotal < cost) {
+      flashToast(`Transcendence needs ${Math.floor(cost)} total faith earned (you: ${Math.floor(G.faithTotal)})`);
+      Audio8.sfx('error'); return;
+    }
+    if (!confirm(`TRANSCEND?\n\nYour multiverse dissolves into pure divinity. You begin again — but every future world yields ${25}% more faith, forever, per transcendence.\n\nCurrent Divinity: ${G.divinity} → ${G.divinity + 1}`)) return;
+    G.divinity++;
+    ach('transcends');
+    const d = G.divinity;
+    wipeSave();
+    newMultiverse();
+    G.divinity = d;
+    G.faith = 60 + d * 100; // ascended gods start richer
+    Render.FX.clear();
+    $('#menu-modal').classList.remove('show');
+    flashToast(`DIVINITY ${d}. All faith flows ${25 * d}% faster, forever.`);
+    Audio8.sfx('levelup');
+    save();
+  }
+
+  // ---- Achievements ----
+  const ACHIEVEMENTS = [
+    { id: 'smites', name: 'Thunderer', desc: 'Cast 25 lightning bolts', need: 25 },
+    { id: 'meteors', name: 'Sky-Breaker', desc: 'Call down 10 meteors', need: 10 },
+    { id: 'blessings', name: 'The Gentle Hand', desc: 'Bless 50 times', need: 50 },
+    { id: 'prayers', name: 'The Listener', desc: 'Answer 20 prayers', need: 20 },
+    { id: 'worlds', name: 'Worldsmith', desc: 'Create 3 planets', need: 3 },
+    { id: 'unmade', name: 'The Unmaker', desc: 'Destroy a planet', need: 1 },
+    { id: 'resurrections', name: 'Deathless', desc: 'Resurrect 5 souls', need: 5 },
+    { id: 'heroes', name: 'Mythmaker', desc: 'Empower 5 paragons', need: 5 },
+    { id: 'races', name: 'Genesis Engine', desc: 'Design a custom race', need: 1 },
+    { id: 'floods', name: 'Deluge', desc: 'Flood the world', need: 1 },
+    { id: 'timetravels', name: 'Chronarch', desc: 'Bend time 3 times', need: 3 },
+    { id: 'transcends', name: 'BEYOND', desc: 'Transcend reality itself', need: 1 }
+  ];
+  function ach(id, n) {
+    G.ach[id] = (G.ach[id] || 0) + (n || 1);
+    const a = ACHIEVEMENTS.find(x => x.id === id);
+    if (a && G.ach[id] === a.need) {
+      flashToast(`🏆 Achievement: ${a.name}`);
+      G.faith += 100;
+      Audio8.sfx('levelup');
+    }
   }
 
   // ================= Sim stepping =================
@@ -176,6 +228,22 @@
       }
       if (G.storm.t <= 0) G.storm = null;
     }
+    if (G.armageddon > 0) {
+      G.armageddon--;
+      // meteors hammer random points across the whole round world
+      if (G.armageddon % 10 === 0) {
+        const world = G.world;
+        const mx = Math.random() * world.W, my = 4 + Math.random() * (world.H - 8);
+        PD.FX.explosion(mx, my, Math.random() < 0.3);
+        PD.FX.shock(mx, my, 3, '#ffb060');
+        W.raise(world, Math.floor(mx), Math.floor(my), 2, -0.06);
+        W.ignite(world, Math.floor(mx), Math.floor(my), 2);
+        Sim.damageArea(G.sim, mx, my, 3, 80, null);
+        world.dirtyMini = true;
+        if (Math.random() < 0.4) { Audio8.sfx('meteor'); G.shake = Math.max(G.shake, 6); }
+      }
+      if (G.armageddon <= 0 && PD.Society) PD.Society.hist(G.sim, 'The last meteor falls. What remains, rebuilds.', 'event');
+    }
     if (G.tornado) {
       const t = G.tornado;
       t.t--;
@@ -194,7 +262,7 @@
 
   // ================= Offline progress =================
   function runOffline(elapsedSec) {
-    const cap = 24 * 3600;
+    const cap = (24 + G.divinity * 12) * 3600; // ascended gods idle longer
     elapsedSec = Math.min(elapsedSec, cap);
     if (elapsedSec < 20) return null;
     let steps = Math.floor(elapsedSec * 6);
@@ -238,7 +306,7 @@
         u.id, u.race, +u.x.toFixed(2), +u.y.toFixed(2), Math.round(u.hp),
         u.age | 0, u.village, u.sick | 0, +u.food.toFixed(2),
         Math.round(u.lifespan), u.adultAt | 0, u.name, u.trait, u.prof,
-        Math.round(u.karma * 10) / 10, u.paragon | 0
+        Math.round(u.karma * 10) / 10, u.paragon | 0, u.big || 0
       ])
     };
   }
@@ -275,7 +343,8 @@
         name: a[11] || Sim.personName(a[1], Math.random), trait: a[12] || 0,
         prof: a[13] || 0, karma: a[14] || 0, paragon: a[15] || 0,
         state: 'wander', tx: a[2], ty: a[3], cd: 0, breedCd: 40,
-        raidT: 0, raidX: 0, raidY: 0, flip: 1, bob: Math.random() * 6.28
+        raidT: 0, raidX: 0, raidY: 0, flip: 1, bob: Math.random() * 6.28,
+        big: a[16] || 0
       };
     });
     Sim.recount(sim);
@@ -290,6 +359,7 @@
       v: 2, t: Date.now(),
       faith: G.faith, faithTotal: G.faithTotal, lastRace: G.lastRace,
       speed: G.speed, stats: G.stats, story: G.story,
+      divinity: G.divinity, ach: G.ach,
       view: G.view, floodT: G.floodT,
       cam: G.r ? { x: G.r.cam.x, y: G.r.cam.y, zoom: G.r.cam.zoom } : null,
       cosmos: { nextId: Cosmos.C.nextId, activeId: Cosmos.C.activeId, customRaces: Cosmos.customRaces },
@@ -327,6 +397,8 @@
       G.speed = (typeof d.speed === 'number') ? d.speed : 1;
       G.stats = d.stats || G.stats;
       G.story = d.story || G.story;
+      G.divinity = d.divinity || 0;
+      G.ach = d.ach || {};
       G.floodT = 0; // floods don't survive reload (waters recede in our absence)
       G.view = (d.view && d.view.kind === 'planet' && Cosmos.getPlanet(d.view.id)) ? d.view : { kind: 'planet', id: Cosmos.C.activeId };
       bindView();
@@ -363,7 +435,7 @@
       pd.id = Cosmos.C.nextId++;
       pd.name = snap.planetName + ' ⧗';
       pd.orbit = { r: 60 + Cosmos.C.planets.length * 34, a: Math.random() * 6.28, spd: 0.001 };
-      if (Cosmos.C.planets.length >= 8) { flashToast('The void is full — destroy a world first'); return; }
+      if (Cosmos.C.planets.length >= 10) { flashToast('The void is full — destroy a world first'); return; }
       const p = unpackPlanet(pd);
       Cosmos.C.planets.push(p);
       gotoPlanet(p.id);
@@ -377,6 +449,7 @@
       flashToast('Time rewinds to Year ' + snap.year + '. It never happened.');
     }
     if (PD.Society) PD.Society.hist(G.sim, branch ? 'You forked time itself.' : 'You turned back time itself.', 'legend');
+    ach('timetravels');
   }
 
   // ================= Testament story =================
@@ -570,6 +643,11 @@
         G.faith -= spent; refreshHUD();
         if (p.cat === 'terra') G._usedTerra = true;
         if (p.cat === 'wrath' || p.id === 'flood' || p.id === 'plagues') G._usedWrath = true;
+        if (p.id === 'lightning') ach('smites');
+        else if (p.id === 'meteor') ach('meteors');
+        else if (p.id === 'bless' || p.id === 'miracle') ach('blessings');
+        else if (p.id === 'flood') ach('floods');
+        else if (p.id === 'empower' || p.id === 'titan') ach('heroes');
         if (PD.Society && ['meteor', 'lightning', 'quake', 'plague'].indexOf(p.id) >= 0) PD.Society.reactToMiracle(G.sim, p.id === 'plague' ? 'plague' : p.id);
       }
     }
@@ -773,7 +851,7 @@
   // ================= HUD =================
   function refreshHUD() {
     $('#faith-val').textContent = Math.floor(G.faith);
-    $('#faith-rate').textContent = '+' + faithPerStep().toFixed(1) + '/t';
+    $('#faith-rate').textContent = '+' + faithPerStep().toFixed(1) + '/t' + (G.divinity > 0 ? ' ⍟' + G.divinity : '');
     const c = G.sim.counts;
     const rc = $('#race-counts'); rc.innerHTML = '';
     const shown = Object.keys(Sim.RACES).filter(k => (c[k] || 0) > 0).slice(0, 8);
@@ -1038,6 +1116,17 @@
         <button class="hint-btn" data-ch="${ch.id}">Show hint</button>` : ''}
       </div>`;
     }
+    // deeds of the god (achievements)
+    html += '<div class="panel-subtitle">Deeds</div>';
+    for (const a of ACHIEVEMENTS) {
+      const have = G.ach[a.id] || 0;
+      const done2 = have >= a.need;
+      html += `<div class="deed ${done2 ? 'deed-done' : ''}">${done2 ? '🏆' : '▫'} <b>${a.name}</b> — ${a.desc} <small>(${Math.min(have, a.need)}/${a.need})</small></div>`;
+    }
+    // transcendence status
+    html += `<div class="panel-subtitle">Transcendence</div>
+      <div class="panel-note">Divinity ⍟${G.divinity} · all faith ×${(1 + G.divinity * 0.25).toFixed(2)}.<br>
+      Next transcendence: ${Math.floor(transcendCost())} total faith earned (you: ${Math.floor(G.faithTotal)}). Use ☰ Menu → Transcend.</div>`;
     el.innerHTML = html;
   }
 
@@ -1120,7 +1209,7 @@
       const pid = +b.dataset.pid;
       if (b.classList.contains('pr-answer')) {
         const refund = PD.Society.answerPrayer(G.sim, pid, false);
-        if (refund) { G.faith += refund; G._prayersAnswered = (G._prayersAnswered || 0) + 1; }
+        if (refund) { G.faith += refund; G._prayersAnswered = (G._prayersAnswered || 0) + 1; ach('prayers'); }
         renderPrayers(); refreshHUD();
       } else if (b.classList.contains('pr-refuse')) {
         PD.Society.answerPrayer(G.sim, pid, true);
@@ -1138,7 +1227,7 @@
         if (G.faith < 50) { flashToast('Resurrection needs ✦50'); return; }
         if (G.view.kind !== 'planet') { flashToast('Return to a living world first'); return; }
         const u = PD.Afterlife.resurrect(soul, G.sim, G.r.cam.x, G.r.cam.y);
-        if (u) { G.faith -= 50; G._resurrected = true; flashToast(soul + ' lives again!'); Audio8.sfx('levelup'); }
+        if (u) { G.faith -= 50; G._resurrected = true; ach('resurrections'); flashToast(soul + ' lives again!'); Audio8.sfx('levelup'); }
       } else if (b.classList.contains('soul-asc')) {
         if (G.faith < 30) { flashToast('Ascension needs ✦30'); return; }
         if (PD.Afterlife.judgeSoul(soul, 'ascend')) { G.faith -= 30; flashToast(soul + ' has wings now'); Audio8.sfx('bless'); }
@@ -1178,8 +1267,9 @@
       if (b.classList.contains('cosmos-new')) {
         if (G.faith < 150) { flashToast('Creating a world needs ✦150'); Audio8.sfx('error'); return; }
         const p = Cosmos.createPlanet(b.dataset.type);
-        if (!p) { flashToast('The void holds at most 8 worlds'); return; }
+        if (!p) { flashToast('The void holds at most 10 worlds'); return; }
         G.faith -= 150;
+        ach('worlds');
         if (b.dataset.type !== 'primordial' && b.dataset.type !== 'hellscape') seedInitialLife(p.sim, p.world);
         Sim.recount(p.sim);
         flashToast('Let there be ' + p.name);
@@ -1196,6 +1286,7 @@
         if (G.faith < 100) { flashToast('Unmaking needs ✦100'); return; }
         if (confirm('Unmake this world and every soul on it?')) {
           G.faith -= 100;
+          ach('unmade');
           Cosmos.destroyPlanet(cosmosSel);
           cosmosSel = -1;
           bindView();
@@ -1224,6 +1315,7 @@
       };
       if (Cosmos.registerRace(def)) {
         G.faith -= 150;
+        ach('races');
         addCustomSpawnPower(key);
         setPower('spawn_' + key);
         flashToast(`The ${name} exist now. Go place them.`);
@@ -1286,6 +1378,7 @@
       }
     });
     $('#menu-resume').addEventListener('click', () => $('#menu-modal').classList.remove('show'));
+    $('#menu-transcend').addEventListener('click', transcend);
     $('#menu-save').addEventListener('click', () => { save(); });
     $('#menu-regen-seed').addEventListener('click', () => {
       const s = prompt('Enter a world seed (any text):', G.world.seedStr);

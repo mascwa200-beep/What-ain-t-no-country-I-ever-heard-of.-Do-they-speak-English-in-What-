@@ -12,6 +12,20 @@ at runtime. It works from a plain `file://` double-click, fully offline.
 
 *(Optional)* serve it if you prefer: `python3 -m http.server` → `http://localhost:8000`.
 
+### 📱 Play on your phone (Android / GrapheneOS / iOS)
+
+Grab the **single-file build** — the entire game in one ~270 KB HTML file:
+
+- **[Download PixelDeity.html](../../raw/main/dist/PixelDeity.html)** (right-click / long-press → save)
+- **[Download PixelDeity.zip](../../raw/main/dist/PixelDeity.zip)** (~75 KB)
+
+On a Pixel / GrapheneOS phone: download `PixelDeity.html`, open it from your
+Files app (Vanadium or any browser handles it), rotate to landscape, play.
+It saves locally and never needs a connection. If you serve the repo over
+HTTPS instead, the included PWA manifest + service worker make it
+installable from the browser menu ("Add to Home screen") as a fullscreen
+offline app.
+
 ## 🌍 What it is — the GENESIS edition
 
 You are the One True God of a **round pixel multiverse**:
@@ -52,9 +66,15 @@ You are the One True God of a **round pixel multiverse**:
   **branch a parallel universe** from any recorded moment.
 - **A story, if you want it** — the **Testament tab** unfolds 12 chapters
   (Genesis → the Wired Age → Eternity) with hints hidden behind a button.
-- **Idle to the bone** — faith from worshippers, temples, faiths, and
-  answered prayers; autosave every 20s; true offline progression with an
+- **Idle to the bone** — faith from worshippers, temples, faiths, wonders,
+  and answered prayers; autosave every 20s; true offline progression with an
   away report; nothing ever ends.
+- **OVERPOWERED endgame** — an Omnipotence power tier (black holes, raptures,
+  armageddons, titans, instant necropolises); golden **Wonders** that pour
+  faith; cosmic **omens** (blood moons that empower every monster, auroras,
+  eclipses, golden ages, krakens, monster hordes); 12 **achievements**; and
+  **Transcendence** — a prestige reset that permanently multiplies all faith
+  gain, forever, every time.
 
 ## ⚡ Divine powers
 
@@ -64,10 +84,11 @@ You are the One True God of a **round pixel multiverse**:
 | **Life** | Spawn any people or beast · Found instant Settlement · your custom races |
 | **Terraform** | Raise/Lower Land · Grow Forest/Grass · Desertify · Raise Peaks |
 | **Blessings** | Bless · Rain |
-| **Wrath** | Lightning · Ignite · Meteor · Plague · Earthquake · Freeze · Raise Dead · Thunderstorm · Tornado |
+| **Wrath** | Lightning · Ignite · Meteor · Plague · Earthquake · Freeze · Raise Dead · Thunderstorm · Tornado · Volcano |
 | **Godhead** | Divine Voice · Empower Hero (Paragons) · Miracle · Calm the Core · Guide Evolution |
 | **Dominion** | Install Leader · Force Peace · Incite War · Revolution |
 | **Testament** | Great Flood · Ten Plagues · Anoint Prophet · Commandments · Confusion of Tongues |
+| **Omnipotence** | Midas Touch · Black Hole · Heaven's Host · Hell's Legion · Armageddon · Necropolis · Polymorph · Fountain of Youth · Fertility Rite · Rapture · Divine Aegis · Titanize |
 
 Plus panel-driven powers: create/destroy/rename planets (Cosmos), answer or
 refuse prayers, resurrect/ascend/condemn souls (the Beyond), rewind or branch

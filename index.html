@@ -4,6 +4,10 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <meta name="theme-color" content="#0a0e1a">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="manifest" href="manifest.webmanifest">
 <title>PIXEL DEITY — an 8-bit god simulator</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' fill='%230a0e1a'/><rect x='6' y='2' width='4' height='4' fill='%23f0d040'/><rect x='4' y='6' width='8' height='6' fill='%235aa03c'/></svg>">
 <link rel="stylesheet" href="styles.css">
@@ -198,6 +202,7 @@
         <button id="menu-resume" class="menu-btn">▶ Resume</button>
         <button id="menu-save" class="menu-btn">💾 Save multiverse</button>
         <button id="menu-regen-seed" class="menu-btn">🌱 New multiverse from seed…</button>
+        <button id="menu-transcend" class="menu-btn" style="border-color:#6a5a1a;color:var(--gold)">⍟ TRANSCEND (prestige)</button>
         <button id="menu-new" class="menu-btn danger">✦ New random multiverse</button>
       </div>
       <div class="menu-help">
@@ -223,5 +228,12 @@
 <script src="js/cosmos.js"></script>
 <script src="js/powers.js"></script>
 <script src="js/game.js"></script>
+<script>
+// PWA: installable + offline-cached when served over http(s).
+// Harmless no-op when opened straight from a file.
+if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+  try { navigator.serviceWorker.register('sw.js'); } catch (e) {}
+}
+</script>
 </body>
 </html>

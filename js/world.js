@@ -44,7 +44,7 @@
   };
 
   // Struct ids
-  const S = { NONE: 0, HOUSE: 1, TOWN: 2, FARM: 3, ROAD: 4, RUIN: 5, TOWER: 6, TEMPLE: 7 };
+  const S = { NONE: 0, HOUSE: 1, TOWN: 2, FARM: 3, ROAD: 4, RUIN: 5, TOWER: 6, TEMPLE: 7, WONDER: 8 };
 
   // Worlds are ROUND: x wraps east-west (cylindrical planet). Only the poles
   // (y) are hard bounds. Every tile access goes through idx(), which wraps.

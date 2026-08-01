@@ -454,6 +454,237 @@
         if (G.faith < this.cost) { snd('error'); return 0; }
         G.tornado = { x: wx, y: wy, vx: (Math.random() - 0.5) * 0.3, vy: (Math.random() - 0.5) * 0.2, t: 350 };
         snd('quake'); return this.cost;
+      } },
+    { id: 'volcano', name: 'Volcano', icon: '🌋', cat: 'wrath', cost: 45, radius: 4, cont: false,
+      color: 'rgba(220,74,16,0.95)',
+      desc: 'Punch a mountain of fire through the crust. Lava, ash, and a very bad day.',
+      apply(G, wx, wy) {
+        if (G.faith < this.cost) { snd('error'); return 0; }
+        const x = Math.floor(wx), y = Math.floor(wy), world = G.world;
+        W.raise(world, x, y, 3, 0.5);
+        W.paintBiome(world, x, y, 1, B.LAVA, 0, 0);
+        W.paintBiome(world, x, y, 3, B.ASH, 0.05, 0);
+        // lava splatters
+        for (let k = 0; k < 6; k++) {
+          const a = Math.random() * 6.283, d = 2 + Math.random() * 4;
+          const lx = Math.floor(x + Math.cos(a) * d), ly = Math.floor(y + Math.sin(a) * d);
+          if (W.inBounds(world, lx, ly)) { W.paintBiome(world, lx, ly, 0, B.LAVA, 0, 0); W.ignite(world, lx, ly, 1); }
+        }
+        W.ignite(world, x, y, 4);
+        Sim.damageArea(G.sim, wx, wy, 5, 70, null);
+        FX.explosion(wx, wy, true); FX.shock(wx, wy, 6, '#e04a10');
+        world.dirtyMini = true; world.dirtyGlobe = true;
+        G.shake = 18; G.flash = 0.4;
+        if (PD.Society) PD.Society.hist(G.sim, 'The ground births a volcano. The sky turns to cinders.', 'war');
+        snd('meteor'); return this.cost;
+      } },
+    { id: 'spawn_kraken', name: 'Kraken', icon: '🐙', cat: 'life', cost: 40, radius: 2, cont: false,
+      color: 'rgba(90,138,160,0.95)', race: 'kraken',
+      desc: 'Wake something vast beneath the waves. The sea is yours; remind them.',
+      apply(G, wx, wy) {
+        if (G.faith < this.cost) { snd('error'); return 0; }
+        const u = Sim.spawnUnit(G.sim, 'kraken', wx, wy);
+        if (!u) { snd('error'); return 0; }
+        FX.shock(wx, wy, 5, '#5a8aa0'); FX.puff(wx, wy, '#1a3a5a');
+        if (PD.Society) PD.Society.hist(G.sim, 'THE KRAKEN WAKES at your command.', 'war');
+        snd('quake'); return this.cost;
+      } },
+
+    // ---- Omnipotence: the overpowered end of the toolbox ----
+    { id: 'midas', name: 'Midas Touch', icon: '👑', cat: 'omni', cost: 55, radius: 5, cont: false,
+      color: 'rgba(240,208,64,0.95)',
+      desc: 'Turn the land itself to gold. Absurd fertility; nearby towns feast for a generation.',
+      apply(G, wx, wy) {
+        if (G.faith < this.cost) { snd('error'); return 0; }
+        W.paintBiome(G.world, Math.floor(wx), Math.floor(wy), this.radius, B.GOLDMEAD, 1, 0);
+        for (const v of G.sim.villages) if (W.wdist(G.world, v.x, v.y, wx, wy) < this.radius + 4) v.food += 150;
+        FX.shock(wx, wy, this.radius, '#f0d040');
+        G.world.dirtyMini = true; G.world.dirtyGlobe = true;
+        snd('levelup'); return this.cost;
+      } },
+    { id: 'blackhole', name: 'Black Hole', icon: '🕳️', cat: 'omni', cost: 90, radius: 5, cont: false,
+      color: 'rgba(120,80,200,0.95)',
+      desc: 'Open a hungry singularity. Everything nearby is pulled in; the land itself is swallowed.',
+      apply(G, wx, wy) {
+        if (G.faith < this.cost) { snd('error'); return 0; }
+        const R = this.radius, world = G.world;
+        // drag every nearby creature into the maw
+        Sim.forNeighbors(G.sim, wx, wy, R + 4, (u) => {
+          const d = W.wdist(world, u.x, u.y, wx, wy);
+          if (d < R + 4) {
+            u.x = W.wrapX(world, u.x + W.wrapDX(world, u.x, wx) * 0.7);
+            u.y = u.y + (wy - u.y) * 0.7;
+            if (d < 2 && !Sim.shielded(G.sim, u)) { u.hp = -1; Sim.killUnit(G.sim, u, 'void'); }
+          }
+        });
+        // the terrain collapses into deep void
+        for (let dy = -R; dy <= R; dy++) for (let dx = -R; dx <= R; dx++) {
+          if (dx * dx + dy * dy > R * R) continue;
+          const x = Math.floor(wx) + dx, y = Math.floor(wy) + dy;
+          if (!W.inBounds(world, x, y)) continue;
+          const i = W.idx(world, x, y);
+          world.elev[i] = Math.max(0, world.elev[i] - (1 - Math.sqrt(dx * dx + dy * dy) / R) * 0.5);
+          W.reclassTile(world, x, y);
+        }
+        for (let k = 0; k < 30; k++) { const a = Math.random() * 6.283, d = 1 + Math.random() * R; FX.spawn(wx + Math.cos(a) * d, wy + Math.sin(a) * d, -Math.cos(a) * 0.2, -Math.sin(a) * 0.2, 24, '#7850c8', 2); }
+        FX.shock(wx, wy, R, '#7850c8'); FX.shock(wx, wy, R * 0.5, '#2a1a4a');
+        world.dirtyMini = true; world.dirtyGlobe = true; G.shake = 14;
+        if (PD.Society) PD.Society.hist(G.sim, 'A hole opened in the world. It is not spoken of.', 'fall');
+        snd('quake'); return this.cost;
+      } },
+    { id: 'host', name: 'Heaven\'s Host', icon: '👼', cat: 'omni', cost: 70, radius: 3, cont: false,
+      color: 'rgba(248,240,208,0.95)',
+      desc: 'Summon a host of angels to purge monsters and heal the faithful.',
+      apply(G, wx, wy) {
+        if (G.faith < this.cost) { snd('error'); return 0; }
+        let n = 0;
+        for (let k = 0; k < 6; k++) {
+          const u = Sim.spawnUnit(G.sim, 'angel', wx + (Math.random() - 0.5) * 4, wy + (Math.random() - 0.5) * 4);
+          if (u) { u.lifespan = u.age + 1800; n++; FX.puff(u.x, u.y, '#f8f0d0'); }
+        }
+        if (!n) { snd('error'); return 0; }
+        FX.shock(wx, wy, 5, '#fff8d0');
+        if (PD.Society) PD.Society.hist(G.sim, 'The sky opens. A host of angels descends in terrible glory.', 'legend');
+        snd('bless'); return this.cost;
+      } },
+    { id: 'legion', name: 'Hell\'s Legion', icon: '👿', cat: 'omni', cost: 70, radius: 3, cont: false,
+      color: 'rgba(192,80,48,0.95)',
+      desc: 'Tear a rift to the Ashen Hell and let a legion of demons through. What could go wrong.',
+      apply(G, wx, wy) {
+        if (G.faith < this.cost) { snd('error'); return 0; }
+        let n = 0;
+        for (let k = 0; k < 6; k++) {
+          const u = Sim.spawnUnit(G.sim, 'demon', wx + (Math.random() - 0.5) * 4, wy + (Math.random() - 0.5) * 4);
+          if (u) { u.lifespan = u.age + 1800; n++; FX.puff(u.x, u.y, '#c05030'); }
+        }
+        if (!n) { snd('error'); return 0; }
+        W.ignite(G.world, Math.floor(wx), Math.floor(wy), 2);
+        FX.shock(wx, wy, 5, '#c05030');
+        if (PD.Society) PD.Society.hist(G.sim, 'A rift screams open. Demons pour into the world.', 'war');
+        snd('plague'); return this.cost;
+      } },
+    { id: 'armageddon', name: 'Armageddon', icon: '💥', cat: 'omni', cost: 250, radius: 0, cont: false,
+      color: 'rgba(255,80,40,0.95)',
+      desc: 'The sky falls. Meteors rain across the ENTIRE world for a full season. The end of days.',
+      apply(G, wx, wy) {
+        if (G.faith < this.cost) { snd('error'); return 0; }
+        if (G.armageddon > 0) { snd('error'); return 0; }
+        G.armageddon = 240;
+        if (PD.Society) { PD.Society.hist(G.sim, 'ARMAGEDDON. The heavens themselves fall upon the world.', 'fall'); PD.Society.reactToMiracle(G.sim, 'meteor'); }
+        G.flash = 0.8; snd('meteor'); return this.cost;
+      } },
+    { id: 'zombify', name: 'Necropolis', icon: '🧟', cat: 'omni', cost: 80, radius: 7, cont: false,
+      color: 'rgba(150,120,160,0.95)',
+      desc: 'Every mortal in the circle dies and rises again. Instant undead apocalypse, locally sourced.',
+      apply(G, wx, wy) {
+        if (G.faith < this.cost) { snd('error'); return 0; }
+        let n = 0;
+        Sim.forNeighbors(G.sim, wx, wy, this.radius, (u) => {
+          const R = Sim.RACES[u.race];
+          if (R.sentient && !Sim.shielded(G.sim, u)) { Sim.killUnit(G.sim, u, 'undead'); n++; }
+        });
+        FX.shock(wx, wy, this.radius, '#9678a0');
+        if (n && PD.Society) PD.Society.hist(G.sim, `${n} souls fell and rose again in a single breath.`, 'fall');
+        snd('plague'); return n ? this.cost : (snd('error'), 0);
+      } },
+    { id: 'polymorph', name: 'Polymorph', icon: '🐰', cat: 'omni', cost: 30, radius: 4, cont: false,
+      color: 'rgba(230,216,176,0.95)',
+      desc: 'Everyone in the circle is now a small fluffy critter. This solves most problems.',
+      apply(G, wx, wy) {
+        if (G.faith < this.cost) { snd('error'); return 0; }
+        let n = 0;
+        Sim.forNeighbors(G.sim, wx, wy, this.radius, (u) => {
+          const R = Sim.RACES[u.race];
+          if (u.race !== 'critter' && !R.ghost && !Sim.shielded(G.sim, u)) {
+            u.race = 'critter'; u.maxHp = Sim.RACES.critter.hp; u.hp = u.maxHp;
+            u.paragon = 0; u.big = 0; u.village = -1; n++;
+            FX.puff(u.x, u.y, '#e6d8b0');
+          }
+        });
+        if (!n) { snd('error'); return 0; }
+        if (PD.Society) PD.Society.hist(G.sim, `${n} souls are suddenly, profoundly, rabbits.`, 'event');
+        snd('spawn'); return this.cost;
+      } },
+    { id: 'youth', name: 'Fountain of Youth', icon: '⛲', cat: 'omni', cost: 40, radius: 5, cont: false,
+      color: 'rgba(140,220,240,0.95)',
+      desc: 'Wind back every lifespan in the circle to its dawn. Death, postponed indefinitely.',
+      apply(G, wx, wy) {
+        if (G.faith < this.cost) { snd('error'); return 0; }
+        let n = 0;
+        Sim.forNeighbors(G.sim, wx, wy, this.radius, (u) => {
+          u.age = Math.min(u.age, u.adultAt + 5); u.hp = u.maxHp; u.sick = 0; n++;
+        });
+        if (!n) { snd('error'); return 0; }
+        FX.shock(wx, wy, this.radius, '#8cdcf0');
+        snd('bless'); return this.cost;
+      } },
+    { id: 'fertility', name: 'Fertility Rite', icon: '💞', cat: 'omni', cost: 35, radius: 5, cont: false,
+      color: 'rgba(240,160,200,0.95)',
+      desc: 'A baby boom, divinely mandated. Villages in the circle burst with newborns.',
+      apply(G, wx, wy) {
+        if (G.faith < this.cost) { snd('error'); return 0; }
+        let n = 0;
+        for (const v of G.sim.villages) {
+          if (W.wdist(G.world, v.x, v.y, wx, wy) > this.radius + 3) continue;
+          for (let k = 0; k < 4; k++) {
+            const u = Sim.spawnUnit(G.sim, v.race, v.x + (Math.random() - 0.5) * 2, v.y + (Math.random() - 0.5) * 2, { village: v.id });
+            if (u) { n++; FX.spark(u.x, u.y, '#f0a0c8'); }
+          }
+          v.food += 20; // the god provides for the new mouths
+        }
+        if (!n) { snd('error'); return 0; }
+        snd('levelup'); return this.cost;
+      } },
+    { id: 'rapture', name: 'Rapture', icon: '🌅', cat: 'omni', cost: 60, radius: 6, cont: false,
+      color: 'rgba(255,240,180,0.95)',
+      desc: 'Call the worthy home. Every good soul in the circle ascends bodily to Elysium.',
+      apply(G, wx, wy) {
+        if (G.faith < this.cost) { snd('error'); return 0; }
+        let n = 0;
+        Sim.forNeighbors(G.sim, wx, wy, this.radius, (u) => {
+          const R = Sim.RACES[u.race];
+          if (R.sentient && u.karma >= 2) {
+            u.karma += 20; // guarantee the highest heaven
+            Sim.killUnit(G.sim, u, 'rapture'); n++;
+            for (let k = 0; k < 6; k++) FX.spawn(u.x, u.y, 0, -0.15 - Math.random() * 0.1, 30, '#fff2a0', 2);
+          }
+        });
+        if (!n) { snd('error'); return 0; }
+        FX.shock(wx, wy, this.radius, '#fff2a0');
+        if (PD.Society) PD.Society.hist(G.sim, `${n} righteous souls rise bodily into the light. The rest watch, and wonder.`, 'faith');
+        snd('levelup'); return this.cost;
+      } },
+    { id: 'aegis', name: 'Divine Aegis', icon: '🛡️', cat: 'omni', cost: 50, radius: 0, cont: false,
+      color: 'rgba(255,230,128,0.95)',
+      desc: 'Shield a town in unbreakable golden light. Nothing can harm its people for a long while.',
+      apply(G, wx, wy) {
+        if (G.faith < this.cost) { snd('error'); return 0; }
+        let bv = null, bd = 10;
+        for (const v of G.sim.villages) { const d = W.wdist(G.world, v.x, v.y, wx, wy); if (d < bd) { bd = d; bv = v; } }
+        if (!bv) { snd('error'); return 0; }
+        bv.shieldT = 900;
+        FX.shock(bv.x, bv.y, bv.radius + 2, '#ffe680');
+        if (PD.Society) PD.Society.hist(G.sim, `${bv.name} glows with divine aegis. Untouchable.`, 'faith');
+        snd('bless'); return this.cost;
+      } },
+    { id: 'titan', name: 'Titanize', icon: '🗽', cat: 'omni', cost: 100, radius: 0, cont: false,
+      color: 'rgba(216,176,144,0.95)',
+      desc: 'Swell a mortal into a walking colossus — a paragon grown to the size of a hill.',
+      apply(G, wx, wy) {
+        if (G.faith < this.cost) { snd('error'); return 0; }
+        let best = null, bd = 3;
+        for (const u of G.sim.units) {
+          if (u.dead) continue;
+          const d = W.wdist(G.world, u.x + 0.5, u.y + 0.5, wx, wy);
+          if (d < bd && Sim.RACES[u.race].sentient) { bd = d; best = u; }
+        }
+        if (!best) { snd('error'); return 0; }
+        PD.Society.empower(G.sim, best, 3);
+        best.big = 2.2;
+        best.maxHp *= 3; best.hp = best.maxHp;
+        FX.shock(best.x, best.y, 6, '#d8b090'); G.shake = 10;
+        if (PD.Society) PD.Society.hist(G.sim, `${best.name} GROWS. And grows. And grows. A titan walks the earth.`, 'legend');
+        snd('quake'); return this.cost;
       } }
   ];
 
@@ -505,7 +736,8 @@
     { id: 'wrath', name: 'Wrath' },
     { id: 'godhead', name: 'Godhead' },
     { id: 'politic', name: 'Dominion' },
-    { id: 'bible', name: 'Testament' }
+    { id: 'bible', name: 'Testament' },
+    { id: 'omni', name: 'Omnipotence' }
   ];
 
   global.PD.Powers = { POWERS, BY_ID, CATEGORIES };

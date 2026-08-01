@@ -35,7 +35,7 @@
   }
 
   function createPlanet(type, seedStr, name) {
-    if (C.planets.length >= 8) return null; // the void holds only so much
+    if (C.planets.length >= 10) return null; // the void holds only so much
     const t = PLANET_TYPES[type] || PLANET_TYPES.verdant;
     seedStr = seedStr || ('' + Date.now() + (Math.random() * 1e6 | 0));
     const rng = PD.makeRNG(PD.hashSeed(seedStr));

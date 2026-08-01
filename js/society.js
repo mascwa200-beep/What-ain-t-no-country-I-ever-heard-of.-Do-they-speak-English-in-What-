@@ -386,12 +386,109 @@
     return alive.length ? alive[(sim.rng() * alive.length) | 0] : 'human';
   }
 
+  // ---- Wonders: great works of golden stone ---------------------------
+  const WONDER_NAMES = ['Great Pyramid', 'Colossus', 'Sky Spire', 'Hanging Gardens', 'Sun Gate', 'Eternal Flame', 'World Tree Shrine', 'Grand Lighthouse'];
+  function buildWonders(sim) {
+    const world = sim.world;
+    for (const v of sim.villages) {
+      if (v.level < 4 || v.wonders >= 2 || sim.rng() > 0.06) continue;
+      const n = nationOf(sim, v.id);
+      if (!n || n.era < 3 || v.food < 60) continue;
+      // find an owned empty tile
+      for (let tries = 0; tries < 12; tries++) {
+        const ang = sim.rng() * 6.283, dr = 1 + sim.rng() * v.radius;
+        const x = Math.round(v.x + Math.cos(ang) * dr), y = Math.round(v.y + Math.sin(ang) * dr);
+        if (!W.inBounds(world, x, y)) continue;
+        const i = W.idx(world, x, y);
+        if (world.owner[i] === v.id && world.struct[i] === 0 && W.isLand(world.biome[i])) {
+          world.struct[i] = W.S.WONDER; world.structHp[i] = 200;
+          W.markTile(world, i);
+          v.wonders = (v.wonders || 0) + 1;
+          v.food -= 50;
+          const wname = WONDER_NAMES[(sim.rng() * WONDER_NAMES.length) | 0] + ' of ' + v.name;
+          hist(sim, `${v.name} completes the ${wname}! Faith pours from its gates.`, 'era');
+          PD.Sim.logEvent(sim, `${v.name} raises a WONDER: the ${wname}.`, 'grow');
+          if (sim.soc.internetOn) post(sim, null, v.race, `the new ${wname} is INSANE. tourism era begins now`);
+          break;
+        }
+      }
+    }
+  }
+
+  // ---- trade: nations share food among their villages ------------------
+  function tradeStep(sim) {
+    const soc = ensure(sim);
+    for (const n of soc.nations) {
+      if (n.villages.length < 2) continue;
+      let total = 0, vs = [];
+      for (const id of n.villages) { const v = PD.Sim.villageById(sim, id); if (v) { total += v.food; vs.push(v); } }
+      if (vs.length < 2) continue;
+      const mean = total / vs.length;
+      for (const v of vs) v.food += (mean - v.food) * 0.1; // caravans move 10% toward the mean
+    }
+  }
+
+  // ---- cosmic omens: rare events that keep eternity interesting --------
+  function rollOmen(sim) {
+    const soc = ensure(sim);
+    const roll = sim.rng();
+    const world = sim.world;
+    if (roll < 0.14) {
+      sim.bloodMoonT = 480;
+      hist(sim, 'A BLOOD MOON rises. Monsters howl with borrowed strength.', 'war');
+      PD.Sim.logEvent(sim, 'A blood moon rises…', 'war');
+      if (soc.internetOn) post(sim, null, SENTIENT_RACE(sim), 'moon looking VERY red tonight. locking my door');
+    } else if (roll < 0.28) {
+      hist(sim, 'An aurora crowns the sky. The faithful weep; faith surges.', 'faith');
+      if (PD.Game) PD.Game.faith = Math.min(9999999, PD.Game.faith + 60);
+      PD.Sim.logEvent(sim, 'An aurora blesses the night. +60 ✦', 'found');
+    } else if (roll < 0.4) {
+      hist(sim, 'An eclipse swallows the sun. The world holds its breath.', 'event');
+      for (const f of soc.faiths) f.fervor = PD.clamp(f.fervor + 0.1, 0, 1);
+    } else if (roll < 0.52) {
+      hist(sim, 'A GOLDEN AGE dawns — harvests overflow and songs are long.', 'era');
+      for (const v of sim.villages) { v.food += 30; v.prosperity = PD.clamp(v.prosperity + 0.2, 0, 1); }
+      PD.Sim.logEvent(sim, 'A golden age dawns!', 'grow');
+    } else if (roll < 0.64) {
+      // meteorite: a small strike somewhere no one asked for
+      const x = (sim.rng() * world.W) | 0, y = (sim.rng() * world.H) | 0;
+      W.ignite(world, x, y, 2);
+      PD.Sim.damageArea(sim, x, y, 3, 60, null);
+      if (PD.FX) PD.FX.explosion(x, y, false);
+      hist(sim, 'A meteorite falls from the void, unbidden.', 'war');
+    } else if (roll < 0.78) {
+      // monster horde at a random shore
+      const s = W.nearestLand(world, (sim.rng() * world.W) | 0, (sim.rng() * world.H) | 0, 12);
+      if (s) {
+        const kind = sim.rng() < 0.5 ? 'goblin' : 'troll';
+        const nmax = kind === 'goblin' ? 8 : 3;
+        for (let k = 0; k < nmax; k++) PD.Sim.spawnUnit(sim, kind, s.x + sim.rng() * 3, s.y + sim.rng() * 3);
+        hist(sim, `A ${kind} horde pours out of the wilds!`, 'war');
+        PD.Sim.logEvent(sim, `A ${kind} horde appears!`, 'war');
+      }
+    } else if (roll < 0.86 && sim.counts.merfolk > 0 && (sim.counts.kraken || 0) < 1) {
+      const sx = (sim.rng() * world.W) | 0, sy = (sim.rng() * world.H) | 0;
+      const u = PD.Sim.spawnUnit(sim, 'kraken', sx, sy);
+      if (u) { hist(sim, 'Something vast stirs beneath the waves. THE KRAKEN WAKES.', 'war'); PD.Sim.logEvent(sim, 'The Kraken wakes!', 'war'); }
+    } else {
+      // a wandering prophet strengthens the largest faith
+      if (soc.faiths.length) {
+        const f = soc.faiths[0];
+        f.fervor = PD.clamp(f.fervor + 0.2, 0, 1);
+        hist(sim, `A wandering preacher revives the ${f.name}.`, 'faith');
+      }
+    }
+  }
+
   // ---- main step -------------------------------------------------------
   function step(sim) {
     ensure(sim);
     if (sim.tick % 60 === 0) updateNations(sim);
     if (sim.tick % 90 === 0) updateFaiths(sim);
     if (sim.tick % 45 === 0) generatePrayers(sim);
+    if (sim.tick % 80 === 0) tradeStep(sim);
+    if (sim.tick % 150 === 0) buildWonders(sim);
+    if (sim.tick % 400 === 0 && sim.tick > 400 && sim.rng() < 0.30 && !sim.isPlane) rollOmen(sim);
     updateHeroes(sim);
     if (sim.soc.internetOn && sim.tick % 240 === 0 && sim.rng() < 0.6) {
       post(sim, null, SENTIENT_RACE(sim), POST_FLAVOR[(sim.rng() * POST_FLAVOR.length) | 0](sim));
