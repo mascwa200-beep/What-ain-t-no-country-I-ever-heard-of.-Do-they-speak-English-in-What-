@@ -109,16 +109,16 @@ public class MainActivity extends Activity {
         }
 
         @JavascriptInterface
-        public void setItem(String key, String value) {
-            // write-then-rename so a mid-write kill can't corrupt the save
+        public boolean setItem(String key, String value) {
+            // write-then-rename so a mid-write kill can't corrupt the save;
+            // returns success so the game can surface failed saves
             File tmp = new File(dir, fileFor(key).getName() + ".tmp");
             try (FileWriter w = new FileWriter(tmp)) {
                 w.write(value);
             } catch (IOException e) {
-                return;
+                return false;
             }
-            //noinspection ResultOfMethodCallIgnored
-            tmp.renameTo(fileFor(key));
+            return tmp.renameTo(fileFor(key));
         }
 
         @JavascriptInterface

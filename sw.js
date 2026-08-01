@@ -1,9 +1,9 @@
 /* Pixel Deity service worker — cache-first so the god works with no signal. */
-const CACHE = 'pixeldeity-v3';
+const CACHE = 'pixeldeity-v4';
 const ASSETS = [
   './', './index.html', './styles.css', './manifest.webmanifest',
   './js/util.js', './js/codec.js', './js/world.js', './js/sim.js',
-  './js/render.js', './js/society.js', './js/afterlife.js',
+  './js/render.js', './js/render3d.js', './js/society.js', './js/afterlife.js',
   './js/cosmos.js', './js/powers.js', './js/game.js'
 ];
 

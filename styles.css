@@ -18,8 +18,11 @@ body{
 
 #game{
   position:absolute;inset:0;width:100%;height:100%;display:block;
-  image-rendering:pixelated;image-rendering:crisp-edges;
   cursor:crosshair;background:#05070f;touch-action:none;
+}
+#overlay{
+  position:absolute;inset:0;width:100%;height:100%;display:block;
+  pointer-events:none;z-index:5;image-rendering:pixelated;
 }
 
 /* ---------- pixel-ish font utility ---------- */

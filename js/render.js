@@ -624,8 +624,13 @@
     r.cam.x = world.W / 2; r.cam.y = world.H / 2;
   }
 
-  global.PD.Render = {
-    createRenderer, draw, renderTerrain, worldToScreen, screenToWorld,
+  // Exported as Render2D: the 3D engine (render3d.js) replaces PD.Render for
+  // on-screen drawing but reuses this module's pixel-art terrain baking,
+  // sprites, and color helpers as its texture source.
+  const API = {
+    createRenderer, draw, renderTerrain, renderTileAt, worldToScreen, screenToWorld,
     screenToWorldRaw, setWorld, TILE, FX, hexToRgb
   };
+  global.PD.Render2D = API;
+  global.PD.Render = API; // overridden by render3d.js when it loads
 })(window);

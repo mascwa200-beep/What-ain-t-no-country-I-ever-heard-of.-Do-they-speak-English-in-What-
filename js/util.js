@@ -183,7 +183,10 @@
     if (bridge && typeof bridge.getItem === 'function') {
       return {
         getItem(k) { try { return bridge.getItem(k); } catch (e) { return null; } },
-        setItem(k, v) { try { bridge.setItem(k, String(v)); } catch (e) { throw e; } },
+        setItem(k, v) {
+          const ok = bridge.setItem(k, String(v));
+          if (ok === false) throw new Error('save write failed');
+        },
         removeItem(k) { try { bridge.removeItem(k); } catch (e) {} }
       };
     }

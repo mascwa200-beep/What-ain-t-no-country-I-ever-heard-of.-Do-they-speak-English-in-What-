@@ -1,8 +1,10 @@
-# ✦ PIXEL DEITY — an 8-bit god simulator
+# ✦ PIXEL DEITY — an 8-bit god simulator on REAL 3D PLANETS
 
-A complete, offline-first idle god game in the spirit of *WorldBox*, rendered in
-chunky 2D pixel art and playable forever. No build step, no server, no
-dependencies — open `index.html` and you are a god.
+A complete, offline-first idle god game — *WorldBox* souls on *Solar Smash*
+bodies. Your pixel civilizations live on genuine 3D planets floating in
+space: spin them, zoom from orbit to street level, and strike anywhere on
+the sphere. Custom WebGL engine, zero dependencies, no build step — open
+`index.html` and you are a god.
 
 ## ▶ Play
 
@@ -40,12 +42,20 @@ install over the top without losing saves). minSdk 26, targetSdk 34.
   worker make it installable from the browser menu, fullscreen and offline
 - **Desktop:** open `index.html`. That's it.
 
-## 🌍 What it is — the GENESIS edition
+## 🌍 What it is — the GENESIS edition, now fully 3D
 
-You are the One True God of a **round pixel multiverse**:
+You are the One True God of a **3D pixel multiverse**:
 
-- **Round worlds** — planets wrap east-west (walk far enough and come home);
-  the Cosmos screen shows them as **spinning pixel globes** orbiting your sun.
+- **Real 3D planets (Solar Smash style)** — a custom WebGL engine wraps the
+  8-bit world around a displaced sphere: pixel mountains with real relief, a
+  sweeping day/night terminator, **city lights glowing on the night side**,
+  wildfires visible from orbit, sun-glint oceans, drifting cloud layers, an
+  atmosphere that matches the world (blue for the living, red for hell,
+  gold for heaven), a starfield, and particle debris that falls back under
+  **spherical gravity**. Meteors streak in from orbit; lightning stabs down
+  from the sky; shockwaves race across the curve of the world; doomed cores
+  bleed magma through the crust as the countdown runs out. The heavens and
+  hells render as their own orbs.
 - **16 peoples + your own** — Humans, Elves, Orcs, Dwarves, Gnomes, Halflings,
   Goblins, Tieflings, Dragonborn, Lizardfolk, Merfolk, Fairies, Giants… plus
   vampires, werewolves, trolls, dragons, angels, demons — or design a custom

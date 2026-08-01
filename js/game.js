@@ -361,7 +361,7 @@
       speed: G.speed, stats: G.stats, story: G.story,
       divinity: G.divinity, ach: G.ach,
       view: G.view, floodT: G.floodT,
-      cam: G.r ? { x: G.r.cam.x, y: G.r.cam.y, zoom: G.r.cam.zoom } : null,
+      cam: G.r ? { lon: G.r.cam.lon, lat: G.r.cam.lat, dist: G.r.cam.dist } : null,
       cosmos: { nextId: Cosmos.C.nextId, activeId: Cosmos.C.activeId, customRaces: Cosmos.customRaces },
       planets: Cosmos.C.planets.map(packPlanet),
       afterlife: PD.Afterlife.serialize()
@@ -376,13 +376,18 @@
     } catch (e) { console.warn('save failed', e); flashToast('Save failed (storage full?)'); return false; }
   }
 
+  function backupBrokenSave(raw) {
+    // a save we can't read must never be clobbered by the next autosave
+    try { PD.store.setItem(SAVE_KEY + '_backup', raw); } catch (e) {}
+  }
+
   function load() {
     let raw;
     try { raw = PD.store.getItem(SAVE_KEY); } catch (e) { return false; }
     if (!raw) return false;
     let d;
-    try { d = JSON.parse(raw); } catch (e) { return false; }
-    if (!d || d.v !== 2 || !d.planets || !d.planets.length) return false;
+    try { d = JSON.parse(raw); } catch (e) { backupBrokenSave(raw); return false; }
+    if (!d || d.v !== 2 || !d.planets || !d.planets.length) { backupBrokenSave(raw); return false; }
     try {
       // custom races must exist before units referencing them are unpacked
       for (const cr of (d.cosmos && d.cosmos.customRaces) || []) Cosmos.registerRace(cr);
@@ -402,7 +407,7 @@
       G.floodT = 0; // floods don't survive reload (waters recede in our absence)
       G.view = (d.view && d.view.kind === 'planet' && Cosmos.getPlanet(d.view.id)) ? d.view : { kind: 'planet', id: Cosmos.C.activeId };
       bindView();
-      if (d.cam && G.r) { G.r.cam.x = d.cam.x; G.r.cam.y = d.cam.y; G.r.cam.zoom = d.cam.zoom; }
+      if (d.cam && d.cam.lon != null && G.r) { G.r.cam.lon = d.cam.lon; G.r.cam.lat = d.cam.lat; G.r.cam.dist = d.cam.dist; }
       if (G.speed !== 0) {
         const off = runOffline((Date.now() - (d.t || Date.now())) / 1000);
         if (off) showOffline(off);
@@ -410,6 +415,7 @@
       return true;
     } catch (e) {
       console.warn('load failed', e);
+      backupBrokenSave(raw);
       newMultiverse();
       return false;
     }
@@ -541,11 +547,12 @@
     if (G.shake > 0) G.shake = Math.max(0, G.shake - dt / 30);
 
     const sc = G.shake;
-    if (sc > 0) { G.r.ctx.save(); G.r.ctx.translate((Math.random() - 0.5) * sc, (Math.random() - 0.5) * sc); }
+    const jitter = sc > 0 ? `translate(${((Math.random() - 0.5) * sc).toFixed(1)}px,${((Math.random() - 0.5) * sc).toFixed(1)}px)` : '';
+    G.r.canvas.style.transform = jitter;
+    if (G.r.overlay) G.r.overlay.style.transform = jitter;
     Render.draw(G.r, G.sim, G.ui);
     drawOverlays();
-    if (sc > 0) G.r.ctx.restore();
-    if (G.flash > 0) { const c = G.r.ctx; c.fillStyle = `rgba(255,255,255,${G.flash * 0.5})`; c.fillRect(0, 0, G.r.w, G.r.h); }
+    if (G.flash > 0 && G.r.octx) { const c = G.r.octx; c.fillStyle = `rgba(255,255,255,${G.flash * 0.5})`; c.fillRect(0, 0, G.r.w, G.r.h); }
 
     G.hudTimer = (G.hudTimer || 0) + dt;
     if (G.hudTimer > 250) {
@@ -566,20 +573,20 @@
   }
 
   function drawOverlays() {
-    // tornado funnel
+    if (!G.r.octx) return;
+    // tornado funnel: a rising spiral of dust in true 3D
     if (G.tornado) {
-      const ctx = G.r.ctx, s = Render.worldToScreen(G.r, G.tornado.x, G.tornado.y);
-      const cz = G.r.cam.zoom;
-      for (let k = 0; k < 5; k++) {
-        const w2 = (1 + k * 0.8) * cz, off = Math.sin(G.lastT * 0.01 + k) * cz * 0.4;
-        ctx.fillStyle = `rgba(180,188,200,${0.5 - k * 0.08})`;
-        ctx.fillRect(s.x - w2 / 2 + off, s.y - k * cz * 0.9, w2, cz * 0.9);
+      const t = G.tornado;
+      for (let k = 0; k < 3; k++) {
+        const a = G.lastT * 0.02 + k * 2.1;
+        PD.FX.spawn(t.x + Math.cos(a) * (0.5 + k * 0.5), t.y + Math.sin(a) * (0.5 + k * 0.5),
+          Math.cos(a + 1.57) * 0.3, Math.sin(a + 1.57) * 0.3, 14, '#b8bcc4', 1.6, -0.004);
       }
     }
     // doomed core countdown
     const p = G.view.kind === 'planet' ? Cosmos.active() : null;
     if (p && p.meta.doom != null) {
-      const ctx = G.r.ctx;
+      const ctx = G.r.octx;
       ctx.fillStyle = 'rgba(0,0,0,0.6)';
       ctx.fillRect(G.r.w / 2 - 130, 58, 260, 26);
       ctx.fillStyle = p.meta.doom < 900 ? '#ff5030' : '#f0a040';
@@ -589,7 +596,7 @@
     }
     // primordial progress
     if (p && p.meta.evo != null) {
-      const ctx = G.r.ctx;
+      const ctx = G.r.octx;
       ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(G.r.w / 2 - 130, 58, 260, 26);
       ctx.fillStyle = '#8cdcc8'; ctx.font = 'bold 11px monospace'; ctx.textAlign = 'center';
       ctx.fillText(`🧬 ${Cosmos.EVO_STAGES[p.meta.evo]} ${(p.meta.evoProg || 0).toFixed(0)}%`, G.r.w / 2, 75);
@@ -609,18 +616,21 @@
   // ================= Camera / input =================
   let keys = {};
   function handleKeyPan(dt) {
-    const cam = G.r.cam; const spd = (14 / cam.zoom) * (dt / 16);
-    if (keys['w'] || keys['arrowup']) cam.y -= spd;
-    if (keys['s'] || keys['arrowdown']) cam.y += spd;
-    if (keys['a'] || keys['arrowleft']) cam.x -= spd;
-    if (keys['d'] || keys['arrowright']) cam.x += spd;
-    clampCam();
+    const cam = G.r.cam;
+    const spd = 0.022 * (dt / 16) * Math.max(0.35, (cam.dist - 1) / 1.6);
+    let moved = false;
+    if (keys['w'] || keys['arrowup']) { cam.lat += spd; moved = true; }
+    if (keys['s'] || keys['arrowdown']) { cam.lat -= spd; moved = true; }
+    if (keys['a'] || keys['arrowleft']) { cam.lon -= spd; moved = true; }
+    if (keys['d'] || keys['arrowright']) { cam.lon += spd; moved = true; }
+    if (moved) { cam.idle = 0; clampCam(); }
   }
   function clampCam() {
     const cam = G.r.cam;
-    cam.zoom = PD.clamp(cam.zoom, cam.min, cam.max);
-    cam.x = W.wrapX(G.world, cam.x); // roundworld: x never clamps, only wraps
-    cam.y = PD.clamp(cam.y, 0, G.world.H);
+    cam.dist = PD.clamp(cam.dist, cam.min, cam.max);
+    cam.lat = PD.clamp(cam.lat, -1.45, 1.45);
+    const T = Math.PI * 2;
+    cam.lon = ((cam.lon % T) + T) % T;
   }
 
   function bindInput() {
@@ -637,7 +647,7 @@
       const wc = Render.screenToWorld(G.r, sx, sy);
       G.ui.mouseW = wc;
       const p = G.power;
-      if (!p) return;
+      if (!p || !wc) return; // clicked past the planet's limb into space
       const spent = p.apply(G, wc.x, wc.y);
       if (spent > 0) {
         G.faith -= spent; refreshHUD();
@@ -656,8 +666,11 @@
       return m && x >= m.mx && x <= m.mx + m.MW && y >= m.my && y <= m.my + m.MH;
     }
     function jumpMinimap(x, y) {
-      const m = G.r._mini;
-      G.r.cam.x = (x - m.mx) / m.scale; G.r.cam.y = (y - m.my) / m.scale; clampCam();
+      const m = G.r._mini, cam = G.r.cam, world = G.world;
+      const tx = (x - m.mx) / m.scale, ty = (y - m.my) / m.scale;
+      cam.lon = (tx / world.W) * Math.PI * 2;
+      cam.lat = Math.PI / 2 - (ty / world.H) * Math.PI;
+      cam.idle = 0; clampCam();
     }
 
     cv.addEventListener('mousedown', (e) => {
@@ -675,7 +688,10 @@
       const l = { x: e.clientX - rect.left, y: e.clientY - rect.top };
       G.ui.mouseW = Render.screenToWorld(G.r, l.x, l.y);
       const dx = l.x - lastX, dy = l.y - lastY; moved += Math.abs(dx) + Math.abs(dy);
-      if (panning) { G.r.cam.x -= dx / G.r.cam.zoom; G.r.cam.y -= dy / G.r.cam.zoom; clampCam(); }
+      if (panning) {
+        const cam = G.r.cam, k = 0.0035 * Math.max(0.35, (cam.dist - 1) / 1.6);
+        cam.lon -= dx * k; cam.lat += dy * k; cam.idle = 0; clampCam();
+      }
       else if (dragging && G.power && G.power.cont) applyPower(l.x, l.y);
       lastX = l.x; lastY = l.y;
     });
@@ -687,13 +703,9 @@
 
     cv.addEventListener('wheel', (e) => {
       e.preventDefault();
-      const l = localXY(e);
-      const before = Render.screenToWorldRaw(G.r, l.x, l.y);
-      const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
-      G.r.cam.zoom = PD.clamp(G.r.cam.zoom * factor, G.r.cam.min, G.r.cam.max);
-      const after = Render.screenToWorldRaw(G.r, l.x, l.y);
-      G.r.cam.x += before.x - after.x; G.r.cam.y += before.y - after.y;
-      clampCam();
+      const cam = G.r.cam;
+      cam.dist *= e.deltaY < 0 ? (1 / 1.12) : 1.12;
+      cam.idle = 0; clampCam();
     }, { passive: false });
 
     // touch
@@ -714,16 +726,17 @@
     cv.addEventListener('touchmove', (e) => {
       if (e.touches.length >= 2) {
         const nd = touchDist(e);
-        const mid = touchMid(e, cv);
-        const before = Render.screenToWorldRaw(G.r, mid.x, mid.y);
-        G.r.cam.zoom = PD.clamp(G.r.cam.zoom * (nd / (pinchD || nd)), G.r.cam.min, G.r.cam.max);
-        const after = Render.screenToWorldRaw(G.r, mid.x, mid.y);
-        G.r.cam.x += before.x - after.x; G.r.cam.y += before.y - after.y;
+        const cam = G.r.cam;
+        cam.dist *= (pinchD || nd) / nd;
+        cam.idle = 0;
         pinchD = nd; clampCam();
       } else {
         const l = localXY(e); const dx = l.x - lastX, dy = l.y - lastY; moved += Math.abs(dx) + Math.abs(dy);
         G.ui.mouseW = Render.screenToWorld(G.r, l.x, l.y);
-        if (touchPanning) { G.r.cam.x -= dx / G.r.cam.zoom; G.r.cam.y -= dy / G.r.cam.zoom; clampCam(); }
+        if (touchPanning) {
+          const cam = G.r.cam, k = 0.0035 * Math.max(0.35, (cam.dist - 1) / 1.6);
+          cam.lon -= dx * k; cam.lat += dy * k; cam.idle = 0; clampCam();
+        }
         else if (dragging && G.power && G.power.cont) applyPower(l.x, l.y);
         lastX = l.x; lastY = l.y;
       }
@@ -772,7 +785,7 @@
   }
   function touchDist(e) { const a = e.touches[0], b = e.touches[1]; return Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY); }
   function touchMid(e, cv) { const r = cv.getBoundingClientRect(); const a = e.touches[0], b = e.touches[1]; return { x: (a.clientX + b.clientX) / 2 - r.left, y: (a.clientY + b.clientY) / 2 - r.top }; }
-  function zoomBy(f) { G.r.cam.zoom = PD.clamp(G.r.cam.zoom * f, G.r.cam.min, G.r.cam.max); }
+  function zoomBy(f) { const cam = G.r.cam; cam.dist /= f; cam.idle = 0; clampCam(); }
 
   // ================= Speed / pause =================
   function setSpeed(s) {
@@ -1226,7 +1239,8 @@
       if (b.classList.contains('soul-res')) {
         if (G.faith < 50) { flashToast('Resurrection needs ✦50'); return; }
         if (G.view.kind !== 'planet') { flashToast('Return to a living world first'); return; }
-        const u = PD.Afterlife.resurrect(soul, G.sim, G.r.cam.x, G.r.cam.y);
+        const ct = Render.centerTile(G.r);
+        const u = PD.Afterlife.resurrect(soul, G.sim, ct.x, ct.y);
         if (u) { G.faith -= 50; G._resurrected = true; ach('resurrections'); flashToast(soul + ' lives again!'); Audio8.sfx('levelup'); }
       } else if (b.classList.contains('soul-asc')) {
         if (G.faith < 30) { flashToast('Ascension needs ✦30'); return; }
