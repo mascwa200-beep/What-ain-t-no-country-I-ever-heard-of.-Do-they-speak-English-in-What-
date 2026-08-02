@@ -456,7 +456,8 @@
       // world.mode, so without these a save taken in the Deep or in Nothing
       // reloads as a black empty sphere with the Genesis powers hidden.
       speedIdx: G.speedIdx, creationStage: G.creationStage, dissolve: G.dissolve,
-      omniscient: !!G.omniscient, sabbath: !!G.sabbath, preSabbathIdx: G._preSabbathIdx,
+      omniscient: !!G.omniscient, omniAll: !!G.omniAll,
+      sabbath: !!G.sabbath, preSabbathIdx: G._preSabbathIdx,
       cam: G.r ? { lon: G.r.cam.lon, lat: G.r.cam.lat, dist: G.r.cam.dist } : null,
       cosmos: { nextId: Cosmos.C.nextId, activeId: Cosmos.C.activeId, customRaces: Cosmos.customRaces },
       planets: Cosmos.C.planets.map(packPlanet),
@@ -503,6 +504,7 @@
       G.creationStage = (d.creationStage != null) ? d.creationStage : null;
       G.dissolve = d.dissolve || 0;
       G.omniscient = !!d.omniscient;
+      G.omniAll = !!d.omniAll && G.omniscient;
       G.sabbath = !!d.sabbath;
       G._preSabbathIdx = d.preSabbathIdx;
       // Builds before this one never stored creationStage, so their saves can
@@ -1162,7 +1164,22 @@
       if (G.acc > STEP_MS * 4) G.acc = STEP_MS * 4;
     } else if (G.speed < 0) {
       stepRewind(dt);
-    }
+    } else if (G.sabbath) {
+      // Sabbath is not the pause key, and this is the difference. The world
+      // holds still — nothing ages, nothing burns, nothing is born — but the
+      // faith you are owed keeps arriving. A plain pause stops the clock and
+      // the income with it; this stops only the clock. Without this, ✦25 bought
+      // exactly what the spacebar gives away.
+      G.sabbathAcc = (G.sabbathAcc || 0) + dt;
+      let n = 0;
+      while (G.sabbathAcc >= STEP_MS && n < 8) {
+        G.sabbathAcc -= STEP_MS; n++;
+        const gain = faithPerStep();
+        G.faith = Math.min(9999999, G.faith + gain);
+        G.faithTotal += gain;
+      }
+      if (G.sabbathAcc > STEP_MS * 4) G.sabbathAcc = STEP_MS * 4;
+    } else if (G.sabbathAcc) { G.sabbathAcc = 0; }
 
     if (G.weatherT > 0) { G.weatherT -= dt / STEP_MS; if (G.weatherT <= 0) { G.weather = 'clear'; G.r.weather = 'clear'; } }
     autoWeather();
@@ -1700,6 +1717,24 @@
   }
   function highlightPower(id) {
     document.querySelectorAll('.tool').forEach(b => b.classList.toggle('active', b.dataset.id === id));
+    refreshToggleState();
+  }
+  // Sabbath and Omniscience flip a flag and nothing ever said so. A second
+  // press silently refunded nothing; a third charged again. Now the button
+  // that is holding a state looks like it, and the HUD says which.
+  const TOGGLE_POWERS = { sabbath: 'sabbath', omniscience: 'omniscient' };
+  function refreshToggleState() {
+    document.querySelectorAll('.tool').forEach(b => {
+      const flag = TOGGLE_POWERS[b.dataset.id];
+      b.classList.toggle('tool-on', !!flag && !!G[flag]);
+    });
+    const el = $('#toggle-chips');
+    if (!el) return;
+    const chips = [];
+    if (G.sabbath) chips.push('<span class="tgl-chip">⏸️ SABBATH</span>');
+    if (G.omniscient) chips.push('<span class="tgl-chip">👁 ' + (G.omniAll ? 'UNBLINKING' : 'OMNISCIENT') + '</span>');
+    el.innerHTML = chips.join('');
+    el.style.display = chips.length ? '' : 'none';
   }
   function updatePowerInfo(p) {
     if (!p) return;
@@ -1811,6 +1846,7 @@
       log.innerHTML = G.sim.log.slice(0, 12).map(e => `<div class="log-line log-${e.kind}">${e.msg}</div>`).join('');
     }
     updateTabBadges();
+    refreshToggleState();
   }
   function updateTabBadges() {
     const soc = G.sim.soc;
@@ -1982,6 +2018,39 @@
     }
   }
 
+  // How close a nation is to its next era. `need` is the same expression the
+  // sim uses (society.js) — neither n.science nor the threshold appeared
+  // anywhere in the game, so "why won't they advance" had no answer, while a
+  // Testament chapter hung on reaching the Modern age.
+  function eraNeed(era) { return 40 * Math.pow(1.9, era); }
+  function nationProgress(n) {
+    const ERAS = PD.Society.ERAS;
+    if (n.era >= ERAS.length - 1) return '<div class="nat-era">Space Age — nothing further to learn.</div>';
+    const need = eraNeed(n.era);
+    const pct = PD.clamp((n.science || 0) / need, 0, 1);
+    return `<div class="nat-era">
+      <span>→ ${ERAS[n.era + 1]}</span>
+      <span class="bar"><span class="bar-fill" style="width:${(pct * 100).toFixed(0)}%;background:var(--accent)"></span></span>
+      <small>${Math.floor(n.science || 0)}/${Math.floor(need)}</small></div>`;
+  }
+  // The drifting opinions that actually decide who declares war (they snap at
+  // -70). Omniscience promised "every nation's true intent" and rendered none
+  // of it; this is that promise, kept, and shown only while the eye is open.
+  function nationIntent(n, soc) {
+    if (!G.omniscient || soc.nations.length < 2) return '';
+    const rows = [];
+    for (const m of soc.nations) {
+      if (m.id === n.id) continue;
+      const r = n.relations ? n.relations[m.id] : null;
+      if (r == null) continue;
+      const mood = r < -70 ? 'murderous' : r < -35 ? 'hostile' : r < -10 ? 'cold'
+                 : r < 15 ? 'wary' : r < 50 ? 'warm' : 'devoted';
+      const col = r < -35 ? '#ff8a6a' : r < 15 ? '#9aa6c8' : '#7fe0a0';
+      rows.push(`<span style="color:${col}">${m.name}: ${mood} (${Math.round(r)})</span>`);
+    }
+    return rows.length ? `<div class="nat-intent">👁 ${rows.join(' · ')}</div>` : '';
+  }
+
   // ---- History panel ----
   function renderHistory() {
     const el = $('#history-list');
@@ -1992,13 +2061,18 @@
     // nations summary
     const ns = $('#nations-list');
     if (soc.nations.length) {
+      const nameOf = (id) => { const m = soc.nations.find(x => x.id === id); return m ? m.name : 'someone'; };
       ns.innerHTML = '<div class="panel-subtitle">Nations</div>' + soc.nations.map(n => {
         const R = Sim.RACES[n.race];
+        // "AT WAR" without saying with whom was the whole report on the one
+        // thing the player might want to intervene in
+        const war = n.warWith.length
+          ? ' · <span class="nat-war">⚔ at war with ' + n.warWith.map(nameOf).join(', ') + '</span>' : '';
         return `<div class="nation-line">${R ? R.emoji : '?'} <b>${n.name}</b> · ${PD.Society.ERAS[n.era]} · ${PD.Society.GOVERNMENTS[n.gov]}<br>
           <small>${n.leaderName} the ${n.leaderTrait} · pop ${n.pop || 0}${
             n.scholars ? ' · 📚 ' + n.scholars + ' scholar' + (n.scholars === 1 ? '' : 's')
                        : ' · <span style="color:#8a7a5a">no scholars</span>'
-          }${n.warWith.length ? ' · ⚔ AT WAR' : ''}</small></div>`;
+          }${war}</small>${nationProgress(n)}${nationIntent(n, soc)}</div>`;
       }).join('');
     } else ns.innerHTML = '';
     // legends

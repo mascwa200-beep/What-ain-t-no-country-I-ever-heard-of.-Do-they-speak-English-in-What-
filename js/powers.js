@@ -775,6 +775,8 @@
       apply(G) {
         if (!G.omniscient && G.faith < this.cost) { snd('error'); return 0; }
         G.omniscient = !G.omniscient;
+        // the greater form's reach does not outlive the eye that carries it
+        if (!G.omniscient) G.omniAll = false;
         if (PD.Society) PD.Society.hist(G.sim, G.omniscient ? 'The eye opens. Nothing is hidden.' : 'The eye closes.', 'faith');
         snd(G.omniscient ? 'bless' : 'click');
         return G.omniscient ? this.cost : 0;
@@ -791,7 +793,12 @@
         // scrub every trace: chronicle, legends, feed, and the afterlife
         if (PD.Society) {
           const soc = PD.Society.ensure(G.sim);
-          const strip = (arr, key) => { for (let i = arr.length - 1; i >= 0; i--) if ((arr[i][key] || '').indexOf(name) >= 0) arr.splice(i, 1); };
+          // Whole names only. Names are GIVEN+GIVEN2 concatenations, so a
+          // plain indexOf made 'Ala' a match inside 'Alan' — erasing one soul
+          // silently deleted the chronicle, legends and posts of every
+          // stranger whose name happened to contain theirs.
+          const re = new RegExp('(^|[^A-Za-z])' + name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?![A-Za-z])');
+          const strip = (arr, key) => { for (let i = arr.length - 1; i >= 0; i--) if (re.test(arr[i][key] || '')) arr.splice(i, 1); };
           strip(soc.history, 'text'); strip(soc.legends, 'deed'); strip(soc.feed, 'author'); strip(soc.feed, 'text');
         }
         if (PD.Afterlife) PD.Afterlife.erase && PD.Afterlife.erase(name);
@@ -983,14 +990,32 @@
                     desc: 'A hundred thousand years, spent at once.' },
     judgment:     { name: 'THE FINAL ACCOUNTING', cost: 800, rMul: 1, reps: 3,
                     desc: 'Every ledger, opened, and every one read aloud.' },
-    omniscience:  { name: 'THE UNBLINKING EYE', cost: 190, rMul: 1, reps: 3,
-                    desc: 'Nothing is hidden. Nothing was ever hidden.' },
+    omniscience:  { name: 'THE UNBLINKING EYE', cost: 190, rMul: 1,
+                    toggle: true, flag: 'omniscient',
+                    desc: 'Nothing is hidden. Nothing was ever hidden.',
+                    // the lesser eye only reads what you lean close to; this
+                    // one reads the whole world at any remove, and the
+                    // nations' private opinions of each other with it
+                    after(G) { G.omniAll = true; } },
     unmake:       { name: 'ERASURE',            cost: 340, rMul: 1, reps: 3,
                     desc: 'Not killed. Never having been.' },
     breath:       { name: 'THE FIRST BREATH',   cost: 520, rMul: 1, reps: 4,
                     desc: 'The lungs of the world fill again.' },
-    sabbath:      { name: 'THE LONG SABBATH',   cost: 110, rMul: 1, reps: 3,
-                    desc: 'Rest, imposed. The world will thank you later.' },
+    sabbath:      { name: 'THE LONG SABBATH',   cost: 110, rMul: 1,
+                    toggle: true, flag: 'sabbath',
+                    desc: 'Rest, imposed. The world will thank you later.',
+                    // rest that repairs: every fire goes out, every larder
+                    // fills, every town breathes easier while nothing moves
+                    after(G) {
+                      const sim = G.sim; if (!sim) return;
+                      const w = sim.world;
+                      if (w && w.fire) w.fire.fill(0);
+                      for (const v of sim.villages) {
+                        v.food += 40;
+                        v.prosperity = PD.clamp((v.prosperity || 0) + 0.25, 0, 1);
+                      }
+                      if (PD.Society) PD.Society.hist(sim, 'The long rest. Fires die, granaries fill, and nothing stirs.', 'faith');
+                    } },
 
     // ---- politics: the thumb on the scale, pressed harder ----
     crown:        { name: 'THE DYNASTY',        cost: 95,  rMul: 1, reps: 5,
@@ -1054,14 +1079,22 @@
     p.cost = 0;
     p.radius = Math.max(1, Math.round(baseRadius * (a.rMul || 1)));
     const spread = Math.max(1.2, baseRadius * 1.25);
-    const reps = a.reps || 5;
+    // A toggle repeated is a toggle undone. Sabbath and Omniscience flip a
+    // flag, so firing them `reps` times landed exactly where one press would
+    // — for four times the faith. Toggles fire once, and only to turn ON.
+    const reps = a.toggle ? 1 : (a.reps || 5);
+    const alreadyOn = a.toggle && a.flag && !!G[a.flag];
     try {
-      for (let i = 0; i < reps; i++) {
-        // first at the point itself, the rest in a ring around it
-        const ang = (i / Math.max(1, reps - 1)) * 6.2832;
-        const d = i === 0 ? 0 : spread * (0.6 + (i % 3) * 0.32);
-        p.apply(G, wx + Math.cos(ang) * d, wy + Math.sin(ang) * d);
+      if (!alreadyOn) {
+        for (let i = 0; i < reps; i++) {
+          // first at the point itself, the rest in a ring around it
+          const ang = (i / Math.max(1, reps - 1)) * 6.2832;
+          const d = i === 0 ? 0 : spread * (0.6 + (i % 3) * 0.32);
+          p.apply(G, wx + Math.cos(ang) * d, wy + Math.sin(ang) * d);
+        }
       }
+      // the escalation proper — what makes the greater form greater
+      if (typeof a.after === 'function') a.after(G, wx, wy);
     } finally {
       p.cost = baseCost;
       p.radius = baseRadius;

@@ -193,6 +193,55 @@ perrs += aerrs + arestore;
 if (refused < adone) { console.error('SOME GREATER FORMS FIRED WITHOUT PAYING'); perrs++; }
 console.log('genesis hooks fired:', genesisCalls, '| sabbath toggles:', sabbathCalls, '| unmaking undos:', undoCalls);
 
+// ---- toggles must toggle ONCE ----
+// Sabbath and Omniscience flip a flag. Their greater forms carried reps:3,
+// so invokeAwe fired apply() three times and the flag landed exactly where a
+// single press would have put it — for four times the faith. A toggle
+// repeated is a toggle undone, and no unit test caught it because every other
+// greater form is idempotent-ish under repetition.
+{
+  for (const id of ['sabbath', 'omniscience']) {
+    const p = PD.Powers.BY_ID[id];
+    const a = PD.Powers.aweOf(id);
+    const flag = a && a.flag;
+    if (!p || !a || !flag) { console.error('TOGGLE ERR', id, 'no awe entry or no flag'); perrs++; continue; }
+    // from OFF, the greater form must leave it ON
+    fakeG[flag] = false; fakeG.faith = 1e6;
+    PD.Powers.invokeAwe(fakeG, p, 90, 60);
+    if (fakeG[flag] !== true) { console.error('TOGGLE ERR', id, 'greater form left it off'); perrs++; }
+    // from ON, it must still be ON — never silently switch the player off
+    fakeG.faith = 1e6;
+    PD.Powers.invokeAwe(fakeG, p, 90, 60);
+    if (fakeG[flag] !== true) { console.error('TOGGLE ERR', id, 'greater form turned it back off'); perrs++; }
+    fakeG[flag] = false;
+  }
+  fakeG.omniAll = false;
+  console.log('toggle greater forms land ON and stay ON: ok');
+}
+
+// ---- Unmake From History must erase one soul, not everyone who shares a
+// fragment of their name. Names are GIVEN+GIVEN2 concatenations, so indexOf
+// made 'Ala' a match inside 'Alan'. ----
+{
+  const soc = PD.Society.ensure(p1.sim);
+  const histLen = soc.history.length, legLen = soc.legends.length, feedLen = soc.feed.length;
+  soc.history.push({ t: 0, text: 'Alan built a wall.', kind: 'event' });
+  soc.history.push({ t: 0, text: 'Ala the quiet died.', kind: 'event' });
+  soc.history.push({ t: 0, text: 'Alanna sang.', kind: 'event' });
+  const victim = { name: 'Ala', x: 90, y: 60, dead: false, race: 'human', karma: 0 };
+  p1.sim.units.push(victim);
+  fakeG.faith = 1e6;
+  PD.Powers.BY_ID.unmake.apply(fakeG, 90.2, 60.2);
+  const left = soc.history.slice(histLen).map(h => h.text);
+  const survived = left.filter(t => /Alan/.test(t)).length;
+  const erased = left.filter(t => /^Ala the/.test(t)).length;
+  if (survived !== 2) { console.error('UNMAKE ERR: strangers erased — expected 2 Alan lines, found', survived, left); perrs++; }
+  if (erased !== 0) { console.error('UNMAKE ERR: the target survived'); perrs++; }
+  console.log('unmake erases whole names only: Alan/Alanna lines left =', survived, '(expect 2), target lines left =', erased, '(expect 0)');
+  soc.history.length = histLen; soc.legends.length = legLen; soc.feed.length = feedLen;
+  p1.sim.units.pop();
+}
+
 // ---- serialization of the whole thing (like game.js does) ----
 // minimal replication of packPlanet/unpackPlanet correctness via codec
 const w1 = p1.world;

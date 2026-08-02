@@ -35,6 +35,9 @@
       <div class="stat" id="time-stat" title="How fast history is moving"><span id="time-scale">Normal · 20 s/yr</span></div>
       <div class="stat" id="vill-stat"><span id="vill-val">🏙 0</span></div>
       <div id="race-counts" class="race-counts"></div>
+      <!-- standing toggles (Sabbath, Omniscience). Empty and hidden until one
+           is on, so it costs no room in the bar the rest of the time. -->
+      <div id="toggle-chips" style="display:none"></div>
     </div>
     <div class="hud-right">
       <div class="speeds" id="time-dial"><!-- built by buildTimeDial() --></div>
@@ -128,15 +131,18 @@
       <label class="gen-label">Hardiness <input type="range" id="gen-hp" min="12" max="90" value="30"></label>
       <label class="gen-label">Swiftness <input type="range" id="gen-spd" min="6" max="16" value="10"></label>
       <label class="gen-label">Lifespan <input type="range" id="gen-life" min="1000" max="6000" value="2600" step="100"></label>
+      <!-- Eight identical boxes used to give "Tail" the same weight as
+           "Raiders", which is a permanent, irreversible war with every other
+           people on the planet. Each one now says what it costs you. -->
       <div class="gen-flags">
-        <label><input type="checkbox" class="gen-flag" value="flies"> Wings</label>
-        <label><input type="checkbox" class="gen-flag" value="aquatic"> Gills</label>
-        <label><input type="checkbox" class="gen-flag" value="raider"> Raiders</label>
-        <label><input type="checkbox" class="gen-flag" value="healer"> Healers</label>
-        <label><input type="checkbox" class="gen-flag" value="horns"> Horns</label>
-        <label><input type="checkbox" class="gen-flag" value="tail"> Tail</label>
-        <label><input type="checkbox" class="gen-flag" value="nocturnal"> Nocturnal</label>
-        <label><input type="checkbox" class="gen-flag" value="tinker"> Tinkerers</label>
+        <label title="Cross any terrain, and fly above it."><input type="checkbox" class="gen-flag" value="flies"> Wings <small>go anywhere</small></label>
+        <label title="Move through water and land alike; only lava stops them."><input type="checkbox" class="gen-flag" value="aquatic"> Gills <small>sea &amp; shore</small></label>
+        <label class="gen-warn" title="PERMANENT. Hostile on sight to every other sentient race, forever. There is no undoing this."><input type="checkbox" class="gen-flag" value="raider"> Raiders <small>⚠ war with all</small></label>
+        <label title="Tend the sick around them every few ticks."><input type="checkbox" class="gen-flag" value="healer"> Healers <small>cure the sick</small></label>
+        <label title="Strike 35% harder, and burn a shade warmer on the globe."><input type="checkbox" class="gen-flag" value="horns"> Horns <small>+35% damage</small></label>
+        <label title="Carry themselves 30% faster."><input type="checkbox" class="gen-flag" value="tail"> Tail <small>+30% speed</small></label>
+        <label title="Fight at 1.6x by night and 0.7x by day."><input type="checkbox" class="gen-flag" value="nocturnal"> Nocturnal <small>strong at night</small></label>
+        <label title="Their nations research 60% faster — the strongest choice here."><input type="checkbox" class="gen-flag" value="tinker"> Tinkerers <small>+60% science</small></label>
       </div>
       <button id="genesis-create" class="big-btn" style="width:100%">🧬 CREATE (✦150)</button>
       <p class="panel-note">Tip: create a <b>Primordial</b> planet in the Cosmos and guide evolution from ooze to empire.</p>

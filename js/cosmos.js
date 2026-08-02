@@ -207,6 +207,17 @@
   }
 
   // ---- Genesis Lab: custom races ---------------------------------------
+  // push a #rrggbb toward the red end without blowing out — horned peoples
+  // read hotter on the globe, which is the only channel a point sprite has
+  function warmer(hex) {
+    const m = /^#?([0-9a-f]{6})$/i.exec(String(hex || ''));
+    if (!m) return hex;
+    const v = parseInt(m[1], 16);
+    const r = PD.clamp(((v >> 16) & 255) + 40, 0, 255);
+    const g = PD.clamp(((v >> 8) & 255) - 12, 0, 255);
+    const b = PD.clamp((v & 255) - 20, 0, 255);
+    return '#' + ((1 << 24) | (r << 16) | (g << 8) | b).toString(16).slice(1);
+  }
   const customRaces = [];
   function registerRace(def) {
     // def: {key,name,one,emoji,col,col2,aggr,breed,dmg,hp,spd,lifespan,flags:{}}
@@ -218,6 +229,14 @@
       likes: def.likes || [W.B.GRASS, W.B.FOREST], sentient: true, custom: true
     };
     for (const f of (def.flags || [])) R[f] = true;
+    // Horns, Tail and Garb were read only by render.js, which render3d.js
+    // overwrites on load — three of the eight Lab options were sold at ✦150
+    // and did nothing at all. The 3D renderer draws each creature as one point
+    // sprite, so give them meaning it can actually express: horns hit harder
+    // and burn warmer, a tail carries you faster, and the garb colour is what
+    // a paragon of this people wears when you raise one.
+    if (R.horns) { R.dmg = Math.round(R.dmg * 1.35); R.col = warmer(R.col); }
+    if (R.tail) R.spd = Math.round(R.spd * 1.3);
     PD.Sim.RACES[def.key] = R;
     if (PD.Sim.SENTIENT.indexOf(def.key) < 0) PD.Sim.SENTIENT.push(def.key);
     customRaces.push(Object.assign({ key: def.key }, def));

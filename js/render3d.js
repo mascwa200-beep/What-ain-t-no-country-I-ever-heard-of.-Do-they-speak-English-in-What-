@@ -1578,7 +1578,10 @@ void main(){
       if (!R) continue;
       tileToSphere(r.world, u.x, u.y, _upos, 0.014 + (R.flies ? 0.015 : 0));
       r._uP[n * 3] = _upos[0]; r._uP[n * 3 + 1] = _upos[1]; r._uP[n * 3 + 2] = _upos[2];
-      const c = R2.hexToRgb(u.paragon ? '#ffd700' : R.col);
+      // A paragon wears their people's garb. col2 was read by nothing in the
+      // shipping renderer, so the Genesis Lab's Garb picker had no effect at
+      // all; a champion is the one place a second colour has room to show.
+      const c = R2.hexToRgb(u.paragon ? (R.col2 || '#ffd700') : R.col);
       r._uC[n * 4] = c[0] / 255; r._uC[n * 4 + 1] = c[1] / 255; r._uC[n * 4 + 2] = c[2] / 255;
       r._uC[n * 4 + 3] = R.ghost ? 0.5 : 1;
       let sz = 0.09 * zoomSize;
@@ -1714,13 +1717,16 @@ void main(){
     if (!ctx) return;
     ctx.clearRect(0, 0, r.w, r.h);
 
-    // omniscience: every soul named and weighed
-    if (global.G && global.G.omniscient && r.cam.dist < 4.2) {
+    // omniscience: every soul named and weighed. The lesser eye needs you
+    // close and reads only ninety; THE UNBLINKING EYE has no such manners.
+    const omniAll = !!(global.G && global.G.omniAll);
+    if (global.G && global.G.omniscient && (omniAll || r.cam.dist < 4.2)) {
+      const cap = omniAll ? 600 : 90;
       ctx.font = '9px ui-monospace, monospace';
       ctx.textAlign = 'center';
       let shown = 0;
       for (const u of sim.units) {
-        if (u.dead || shown > 90) continue;
+        if (u.dead || shown > cap) continue;
         const s2 = worldToScreen(r, u.x, u.y);
         if (!s2) continue;
         shown++;

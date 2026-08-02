@@ -203,6 +203,15 @@ body{
 .stat.faith .stat-ico{font-size:var(--t-lg);}
 .stat.faith small{color:#b09a40;font-size:var(--t-xs);font-weight:400;}
 .race-counts,#race-counts{display:flex;gap:var(--s1);flex-wrap:nowrap;flex:0 0 auto;}
+/* standing toggles, shown in the HUD only while one is held */
+#toggle-chips{display:flex;gap:var(--s1);align-items:center;}
+.tgl-chip{
+  font-family:var(--f-ui);font-size:var(--t-xs);font-weight:800;
+  letter-spacing:.1em;
+  color:var(--accent);background:rgba(20,40,70,0.55);
+  border:1px solid var(--accent);border-radius:var(--r-sm);
+  padding:var(--s1) var(--s2);white-space:nowrap;
+}
 .race-chip{
   font-family:var(--f-mono);font-size:var(--t-sm);font-weight:600;
   font-variant-numeric:tabular-nums;
@@ -336,6 +345,17 @@ body{
   background:linear-gradient(180deg,rgba(70,56,16,0.7),rgba(28,22,6,0.7));
   box-shadow:0 0 0 1px var(--gold) inset,0 0 14px rgba(240,200,110,0.3);
 }
+/* a power holding a state, as opposed to a power merely selected: Sabbath and
+   Omniscience are toggles, and nothing used to show that they were on */
+.tool.tool-on{
+  border-color:var(--accent);
+  box-shadow:0 0 0 1px var(--accent) inset,0 0 12px rgba(120,200,255,0.28);
+}
+.tool.tool-on::after{
+  content:'';position:absolute;top:2px;left:2px;width:5px;height:5px;
+  border-radius:50%;background:var(--accent);
+  box-shadow:0 0 6px var(--accent);
+}
 .tool-ico{font-size:clamp(15px,3.2vh,19px);line-height:1;}
 .tool-name{
   font-family:var(--f-ui);font-size:var(--t-xs);font-weight:700;
@@ -458,6 +478,19 @@ body{
 .hist-nation{color:var(--good);}
 .nation-line{font-size:var(--t-sm);line-height:1.5;padding:6px 0;border-bottom:1px dotted rgba(60,70,110,0.35);}
 .nation-line small{color:var(--dim);}
+.nat-war{color:#ff8a6a;}
+/* progress to the next era — the quantity the whole tech tree turns on */
+.nat-era{
+  display:flex;align-items:center;gap:var(--s2);margin-top:3px;
+  font-size:var(--t-xs);color:var(--dim);
+}
+.nat-era .bar{flex:1;min-width:40px;height:5px;}
+.nat-era small{font-family:var(--f-mono);white-space:nowrap;}
+/* what the nations privately think of each other — omniscience only */
+.nat-intent{
+  font-size:var(--t-xs);line-height:1.5;margin-top:3px;
+  padding-left:var(--s2);border-left:1px solid var(--accent);
+}
 .legend-line{font-size:var(--t-sm);color:#ffd070;padding:3px 0;}
 
 /* prayers */
@@ -569,8 +602,11 @@ body{
 .gen-label small{color:#5a648a;font-size:var(--t-xs);}
 .gen-cols{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
 .gen-flags{display:grid;grid-template-columns:1fr 1fr;gap:4px;margin:10px 0;font-size:var(--t-sm);color:var(--dim);}
-.gen-flags label{cursor:pointer;}
+.gen-flags label{cursor:pointer;display:block;line-height:1.3;}
 .gen-flags input{accent-color:var(--gold);}
+.gen-flags small{display:block;padding-left:18px;font-size:var(--t-xs);color:#5a668c;}
+/* the one irreversible choice on the panel, marked as one */
+.gen-flags label.gen-warn small{color:#d8896a;}
 
 /* ---------- Inspect panel ---------- */
 /* The one panel outside the (correct) .panel-scroll system: it had no bottom,
