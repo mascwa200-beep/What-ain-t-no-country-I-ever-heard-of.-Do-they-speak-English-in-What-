@@ -119,6 +119,10 @@
         PD.Society.hist(sim, `${parent.name} seals their child into a rocket as the core fails. It rises on a pillar of fire toward ${dest.name}.`, 'legend');
         PD.Society.hist(dest.sim, `A tiny rocket falls from the sky. Inside: a child of doomed ${p.name}. They seem… unusual.`, 'legend');
       }
+      // hist() reaches one planet's History panel. This is the thing the
+      // intro card leads with; it should reach you wherever you are looking.
+      if (PD.Game && PD.Game.announce)
+        PD.Game.announce(`🚀 A rocket leaves dying ${p.name}, bound for ${dest.name}.`, 'legend', 'levelup');
       if (PD.FX && dest.id === C.activeId) PD.FX.explosion(spot.x, spot.y, false);
     }
   }
@@ -131,6 +135,8 @@
     if (u.age > u.adultAt && !u.paragon) {
       PD.Society.empower(sim, u, 3);
       PD.Society.hist(sim, `${u.name}, the child from the stars, discovers what they can do.`, 'legend');
+      if (PD.Game && PD.Game.announce)
+        PD.Game.announce(`✨ ${u.name}, the child from the stars, comes into their power.`, 'legend', 'levelup');
       sim._starchild = null;
     }
   }
@@ -153,6 +159,9 @@
     if (PD.Society) PD.Society.hist(sim, `${p.name} HAS SHATTERED. ${p.name} is no more. The Beyond weeps with new souls.`, 'fall');
     if (p.id === C.activeId && global.G) { global.G.flash = 1; global.G.shake = 30; }
     if (PD.Audio8) PD.Audio8.sfx('meteor');
+    // a world can end while you are looking at another one
+    if (PD.Game && PD.Game.announce)
+      PD.Game.announce(`☄ ${p.name} HAS SHATTERED. It is no more.`, 'fall');
   }
 
   // "Stabilize Core" — the god's mercy (called by a power)
@@ -207,6 +216,17 @@
   }
 
   // ---- Genesis Lab: custom races ---------------------------------------
+  // push a #rrggbb toward the red end without blowing out — horned peoples
+  // read hotter on the globe, which is the only channel a point sprite has
+  function warmer(hex) {
+    const m = /^#?([0-9a-f]{6})$/i.exec(String(hex || ''));
+    if (!m) return hex;
+    const v = parseInt(m[1], 16);
+    const r = PD.clamp(((v >> 16) & 255) + 40, 0, 255);
+    const g = PD.clamp(((v >> 8) & 255) - 12, 0, 255);
+    const b = PD.clamp((v & 255) - 20, 0, 255);
+    return '#' + ((1 << 24) | (r << 16) | (g << 8) | b).toString(16).slice(1);
+  }
   const customRaces = [];
   function registerRace(def) {
     // def: {key,name,one,emoji,col,col2,aggr,breed,dmg,hp,spd,lifespan,flags:{}}
@@ -218,6 +238,14 @@
       likes: def.likes || [W.B.GRASS, W.B.FOREST], sentient: true, custom: true
     };
     for (const f of (def.flags || [])) R[f] = true;
+    // Horns, Tail and Garb were read only by render.js, which render3d.js
+    // overwrites on load — three of the eight Lab options were sold at ✦150
+    // and did nothing at all. The 3D renderer draws each creature as one point
+    // sprite, so give them meaning it can actually express: horns hit harder
+    // and burn warmer, a tail carries you faster, and the garb colour is what
+    // a paragon of this people wears when you raise one.
+    if (R.horns) { R.dmg = Math.round(R.dmg * 1.35); R.col = warmer(R.col); }
+    if (R.tail) R.spd = Math.round(R.spd * 1.3);
     PD.Sim.RACES[def.key] = R;
     if (PD.Sim.SENTIENT.indexOf(def.key) < 0) PD.Sim.SENTIENT.push(def.key);
     customRaces.push(Object.assign({ key: def.key }, def));

@@ -314,7 +314,9 @@
       if (v && v.pop < 5 && sim.rng() < 0.4) { makePrayer(sim, u, 'child'); continue; }
       if (u.karma > 3 && sim.rng() < 0.1) makePrayer(sim, u, 'thanks');
     }
-    // stale prayers fade (unanswered prayers cost a little faith income)
+    // Stale prayers fade. (This used to claim unanswered prayers cost a little
+    // faith income. Nothing has ever charged for one — ignoring your people is
+    // free, and the comment was the only place that said otherwise.)
     // abs(): under reversed time sim.tick < p.t, which would make every
     // prayer immortal and the divine inbox grow without bound
     soc.prayers = soc.prayers.filter(p => Math.abs(sim.tick - p.t) < 1600);

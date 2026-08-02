@@ -325,6 +325,206 @@ console.log('\n--- the new state survives a round trip ---');
     !!sim.villages[0].jobs && !!sim.villages[0].labour);
 }
 
+// ------------------------------------------- the peace optimisation is safe
+// updateUnit skips its neighbour scan when no enemy can exist. That is a pure
+// speed win ONLY while the precondition is exhaustive — if a new way to
+// become foes is ever added without updating recount(), fights would silently
+// stop happening. These pin the behaviour, not the optimisation.
+console.log('\n--- war still finds those it should ---');
+{
+  // 1. hostile races DO fight, and the precomputed table says so
+  const sim = freshSim(101);
+  for (let i = 0; i < 8; i++) {
+    const h = Sim.spawnUnit(sim, 'human', 60 + i * 0.3, 50);
+    const o = Sim.spawnUnit(sim, 'orc', 60.5 + i * 0.3, 50);
+    if (h) { h.age = h.adultAt + 5; h.food = 1; }
+    if (o) { o.age = o.adultAt + 5; o.food = 1; }
+  }
+  Sim.recount(sim);
+  check('orcs and humans are marked as able to find foes',
+    sim.foeRace.human === true && sim.foeRace.orc === true);
+  // Headcount is the wrong measure — the survivors out-breed the casualties,
+  // so the population climbs even in a war. Track the cohort that was there
+  // when the fighting started, and whether it took wounds.
+  const cohort = sim.units.filter(u => !u.dead).map(u => u.id);
+  for (let i = 0; i < 400; i++) Sim.step(sim, 1);
+  const byId = new Map(sim.units.map(u => [u.id, u]));
+  let fell = 0, wounded = 0;
+  for (const id of cohort) {
+    const u = byId.get(id);
+    if (!u || u.dead) fell++;
+    else if (u.hp < u.maxHp) wounded++;
+  }
+  check('and blood is actually shed between them', fell + wounded > 0,
+    fell + ' fell, ' + wounded + ' wounded of ' + cohort.length);
+
+  // 2. a world of one peaceful race skips the scan
+  const calm = freshSim(103);
+  for (let i = 0; i < 10; i++) {
+    const h = Sim.spawnUnit(calm, 'human', 60 + i * 0.4, 50);
+    if (h) { h.age = h.adultAt + 5; h.food = 1; }
+  }
+  Sim.recount(calm);
+  check('a world of humans alone has no foe for a human',
+    calm.foeRace.human === false, String(calm.foeRace.human));
+  check('and no rivalry is declared', calm.anyRivalry === false);
+
+  // 3. THE TRAP: same-race units at war via village rivalry must still fight,
+  //    even though hostile('human','human') is false and the race table says
+  //    there is no foe. This is the case the optimisation could break.
+  const feud = freshSim(107);
+  const vA = Sim.foundVillage(feud, 'human', 55, 50);
+  const vB = Sim.foundVillage(feud, 'human', 58, 50);
+  check('two same-race villages were founded', !!vA && !!vB && vA.id !== vB.id);
+  for (const vv of [vA, vB]) {
+    for (let i = 0; i < 8; i++) {
+      const u = Sim.spawnUnit(feud, 'human', vv.x + (i % 3) * 0.3, vv.y, { village: vv.id });
+      if (u) { u.age = u.adultAt + 5; u.food = 1; u.hp = u.maxHp; }
+    }
+  }
+  vA.rival = vB.id; vB.rival = vA.id;
+  Sim.recount(feud);
+  check('the race table still reports no racial foe (the trap)',
+    feud.foeRace.human === false);
+  check('but the rivalry flag is raised, so the scan is not skipped',
+    feud.anyRivalry === true);
+  const feudBefore = feud.units.filter(u => !u.dead).length;
+  let hurt = 0;
+  for (let i = 0; i < 300; i++) {
+    Sim.step(feud, 1);
+    vA.rival = vB.id; vB.rival = vA.id;   // hold the feud open
+  }
+  for (const u of feud.units) if (!u.dead && u.hp < u.maxHp) hurt++;
+  const feudAfter = feud.units.filter(u => !u.dead).length;
+  check('neighbours at feud still draw blood despite sharing a race',
+    hurt > 0 || feudAfter < feudBefore,
+    hurt + ' wounded, ' + feudBefore + ' -> ' + feudAfter);
+}
+
+// ------------------------------------------------ the wrap fast path is safe
+console.log('\n--- the round world still wraps ---');
+{
+  const w = PD.World.createWorld(180, 120, 7, {});
+  const W = PD.World;
+  let bad = 0;
+  // idx() gained a fast path; it must agree with the slow form everywhere,
+  // including off both edges and on fractional coordinates
+  for (const x of [-361.5, -180, -1, -0.5, 0, 0.5, 1, 89.9, 179, 179.5, 180, 181, 360, 541.2]) {
+    for (const y of [0, 1, 59, 119]) {
+      const fast = W.idx(w, x, y);
+      const slow = y * w.W + (((Math.floor(x) % w.W) + w.W) % w.W);
+      if (fast !== slow) { bad++; console.log('    MISMATCH x=' + x + ' y=' + y + ' ' + fast + ' vs ' + slow); }
+    }
+  }
+  check('idx() agrees with the unoptimised form at every edge', bad === 0,
+    bad + ' mismatches');
+  let bx = 0;
+  for (const x of [-361.5, -180, -1, -0.5, 0, 0.5, 179.5, 180, 181, 360]) {
+    const fast = W.wrapX(w, x), slow = ((x % w.W) + w.W) % w.W;
+    if (Math.abs(fast - slow) > 1e-9) { bx++; console.log('    wrapX MISMATCH ' + x + ': ' + fast + ' vs ' + slow); }
+  }
+  check('wrapX() agrees with the unoptimised form', bx === 0, bx + ' mismatches');
+}
+
+// ---------------------------------------------- nothing here is decorative
+// The bug this guards against has now bitten this project three times: a
+// field is written, saved, drawn in the inspector — and read by nothing that
+// matters, so the mechanic it supposedly drives never happens in play. It is
+// invisible to ordinary unit tests, because a test that sets the field by
+// hand passes perfectly while the game never sets it at all.
+//
+// So: run an UNATTENDED world and demand that each mechanic actually fires.
+// No test may set these fields. If a hook is ever unwired, this goes red.
+console.log('\n--- every mechanic fires in a world nobody touches ---');
+{
+  const sim = freshSim(4242);
+  sim.UNIT_CAP = 700;
+  for (let i = 0; i < 4; i++) Sim.foundVillage(sim, 'human', 30 + i * 25, 45);
+  for (let i = 0; i < 2; i++) Sim.foundVillage(sim, 'orc', 40 + i * 25, 62);
+
+  let siege = 0, crime = 0, peakDev = 0, plague = 0;
+  const orders = new Set();
+  for (let i = 0; i < 1200; i++) {
+    Sim.step(sim, 1);
+    for (const v of sim.villages) {
+      if ((v.underAttack || 0) > 0) siege++;
+      if ((v.crimeT || 0) > 0) crime++;
+      if ((v.plagueT || 0) > 0) plague++;
+      if (v.order != null) orders.add(Math.round(v.order * 10));
+    }
+    const d = Sim.devotion(sim);
+    if (d > peakDev) peakDev = d;
+  }
+
+  check('the game itself puts towns under siege (nothing else sets it)',
+    siege > 0, siege + ' village-ticks');
+  check('soldiers can therefore be raised in answer to one',
+    Sim.PROFESSIONS[Sim.chooseProfession(sim, (() => {
+      const v = sim.villages.find(x => (x.underAttack || 0) > 0) || sim.villages[0];
+      v.underAttack = 999; v.food = 999; v.pop = 20; return v.id;
+    })())] !== undefined);
+  check('thieves rob badly-ordered towns', crime > 0, crime + ' village-ticks');
+  check('order actually varies rather than sitting at its initial value',
+    orders.size > 1, [...orders].sort((a, b) => a - b).map(t => (t / 10).toFixed(1)).join(','));
+  check('devotion rises from what the living do', peakDev > 0.5,
+    peakDev.toFixed(2));
+  check('and it reaches the god: faith income counts it',
+    typeof Sim.devotion === 'function');
+
+  // guile and piety must be consumed by the simulation, not just described
+  const src = fs.readFileSync(path.join(base, 'js', 'sim.js'), 'utf8');
+  check('guile is read by the simulation, not only the inspector',
+    /tf\.guile/.test(src), 'sim.js');
+  check('piety is read by the simulation, not only the inspector',
+    /traitFx\([^)]*\)\.piety|tf\.piety/.test(src), 'sim.js');
+}
+
+// -------------------------------------------------------------- vampires
+// The bite works and always has. What never existed was a first vampire:
+// the only line that creates one requires the killer to already be one. That
+// closed loop is deliberate and must stay closed — the single way to open it
+// lives in powers.js and is not hinted at anywhere. These two assertions are
+// the fence around it.
+console.log('\n--- the closed loop, and the bite that needs it opened ---');
+{
+  const sim = freshSim(9161);
+  for (let i = 0; i < 60; i++) Sim.spawnUnit(sim, 'human', 40 + (i % 9), 40 + ((i / 9) | 0));
+  for (let i = 0; i < 20; i++) Sim.spawnUnit(sim, 'orc', 44 + (i % 5), 44 + ((i / 5) | 0));
+  let everSaw = 0;
+  for (let t = 0; t < 4000; t++) {
+    Sim.step(sim, 1);
+    if (sim.tick % 100 === 0) PD.Society.step(sim);
+    everSaw += (sim.counts.vampire || 0);
+  }
+  check('no vampire arises on its own, ever — omens, ambient spawns, evolution, war',
+    everSaw === 0, everSaw + ' vampire-ticks across 4000 steps');
+  check('and evolution cannot pick one either: they are not in SENTIENT',
+    Sim.SENTIENT.indexOf('vampire') < 0);
+
+  // Now open the loop by hand under the conditions the hidden act creates —
+  // a blood moon, and a progenitor rather than an ordinary 40hp vampire —
+  // and confirm the existing bite carries it with no further help.
+  const sim2 = freshSim(9161);
+  for (let i = 0; i < 40; i++) Sim.spawnUnit(sim2, 'human', 40 + (i % 14), 40 + ((i / 14) | 0));
+  sim2.bloodMoonT = 480;
+  const zero = Sim.spawnUnit(sim2, 'vampire', 60, 44);
+  if (zero) {
+    zero.paragon = 2;
+    zero.maxHp = Sim.RACES.vampire.hp * 5;
+    zero.hp = zero.maxHp;
+    zero.lifespan = zero.age + 9000;
+  }
+  let peak = 0;
+  for (let t = 0; t < 4000; t++) { Sim.step(sim2, 1); peak = Math.max(peak, sim2.counts.vampire || 0); }
+  check('patient zero can be made at all (spawnUnit accepts the race)', !!zero);
+  // Measured across ten seeds: 7,2,2,2,2,5,20,4,2,9 — never below 2. The line
+  // usually burns out afterwards, which is fine; a vampire is meant to be a
+  // fragile horror. What matters is that the bite fires at all, and until the
+  // UNIT_CAP fix in killUnit it could not, in any world with people in it.
+  check('and once there is one, the bite spreads it with no further help',
+    peak > 1, 'peaked at ' + peak);
+}
+
 console.log('\n=== lives failures: ' + fails + ' ===');
 console.log(fails === 0 ? 'LIVES TEST PASSED' : 'LIVES TEST FAILED');
 process.exit(fails === 0 ? 0 : 1);

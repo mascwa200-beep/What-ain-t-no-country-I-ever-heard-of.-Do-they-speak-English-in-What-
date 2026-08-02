@@ -178,6 +178,8 @@
     if (!v) return (sim.rng() * PROFESSIONS.length) | 0;
     if (v.food < 12 + v.pop * 0.5 && sim.rng() < 0.65) return P_FARMER;
     if (v.underAttack > 0 && sim.rng() < 0.55) return P_SOLDIER;
+    // thieves are answered the same way a siege is: with soldiers
+    if ((v.crimeT || 0) > 0 && sim.rng() < 0.4) return P_SOLDIER;
     if ((v.plagueT || 0) > 0 && sim.rng() < 0.5) return P_HEALER;
     if (v.temples > 0 && (v.jobs ? v.jobs[P_PRIEST] : 0) < v.temples * 2 && sim.rng() < 0.4) return P_PRIEST;
     if (v.pop < 8 && sim.rng() < 0.4) return sim.rng() < 0.6 ? P_FARMER : P_BUILDER;
@@ -206,7 +208,7 @@
       isNight: false,
       log: [],
       grid: null,
-      UNIT_CAP: 1100
+      UNIT_CAP: 1400
     };
   }
 
@@ -440,8 +442,25 @@
     if (!R.monster && !R.ghost) {
       if (v && v.food > 0) {
         // the greedy take more than their share, and the village feels it
-        const take = 0.018 * (0.75 + tf.greed * 0.45);
+        let take = 0.018 * (0.75 + tf.greed * 0.45);
         u.food = PD.clamp(u.food + 0.02 * (0.8 + tf.greed * 0.3), 0, 1);
+
+        // ---- crime ----
+        // `order` was computed every tick, drawn in the inspector, and read
+        // by nothing; `guile` was given to all sixteen traits and consumed by
+        // nothing. They answer each other: where no one keeps the peace, the
+        // sly help themselves from the store. Soldiers and hunters raise
+        // order, so a town can police itself — and a town that cannot will
+        // quietly bleed grain.
+        const order = v.order != null ? v.order : 0.5;
+        if (tf.guile > 1.2 && order < 0.75 && sim.rng() < (0.75 - order) * 0.05 * tf.guile) {
+          const stolen = 0.6 + sim.rng() * 1.4;
+          take += stolen;
+          u.food = PD.clamp(u.food + 0.25, 0, 1);
+          u.karma -= 0.05;
+          if (v.crimeT === undefined) v.crimeT = 0;
+          v.crimeT = 90;                 // the town notices it is being robbed
+        }
         v.food -= take;
       } else {
         // wild units forage from the land they stand on
@@ -462,7 +481,21 @@
     // village rivalry makes same-species-tolerant races fight each other
     const rivalId = v && v.rival >= 0 ? v.rival : -1;
     let enemy = null, enemyD = 99;
-    forNeighbors(sim, u.x, u.y, 3.2, (o) => {
+
+    // A peaceful world was still paying for war. This scan ran for every
+    // unit every tick, and in a world of one race at peace it could not
+    // possibly find anything: `hostile()` is a pure function of the race
+    // pair, so if nothing alive is hostile to this race, and no village
+    // anywhere has declared a rival, there is no enemy to find. Both facts
+    // are computed once per tick in recount(). Skipping is exactly
+    // equivalent to scanning and finding nothing.
+    // `!== false` not `=== true`: an absent table (first tick, fresh load)
+    // or an unknown race must fall through to scanning, never to skipping.
+    const ff = sim.foeRace;
+    const canHaveFoe = !ff || ff[u.race] !== false ||
+                       (sim.anyRivalry && u.village >= 0);
+    if (!canHaveFoe) { enemy = null; }
+    else forNeighbors(sim, u.x, u.y, 3.2, (o) => {
       if (o === u) return;
       let isFoe = hostile(u.race, o.race);
       if (!isFoe && rivalId >= 0 && o.village === rivalId) isFoe = true;
@@ -615,14 +648,27 @@
   function killUnit(sim, u, byRace, killer) {
     if (u.dead) return;
     u.dead = true;
+    // a citizen cut down is a siege as far as the town is concerned
+    if (u.village >= 0 && byRace !== 'starve' && byRace !== 'age') {
+      const hv = villageById(sim, u.village);
+      if (hv) hv.underAttack = Math.max(hv.underAttack || 0, 240);
+    }
     if (PD.FX) PD.FX.blood(u.x, u.y);
     const R = RACES[u.race];
-    // dark conversions: the plague-dead rise, vampire victims turn
+    // Dark conversions: the plague-dead rise, vampire victims turn.
+    //
+    // These used to be gated on `units.length < UNIT_CAP`. A populated world
+    // sits AT the cap within a few hundred ticks, so in practice neither
+    // conversion could ever fire — the undead never rose and the bite never
+    // spread, in any world with people in it. A conversion is a REPLACEMENT:
+    // the body it needs just died on this line. It never should have competed
+    // for headroom with the living. The raise queue compacts the dead before
+    // spawning (see step()), so this cannot exceed the cap either.
     if (!R.monster) {
-      if ((byRace === 'undead' || byRace === 'plague') && sim.rng() < 0.28 && sim.units.length < sim.UNIT_CAP) {
+      if ((byRace === 'undead' || byRace === 'plague') && sim.rng() < 0.28) {
         sim._raise = sim._raise || [];
         sim._raise.push({ x: u.x, y: u.y, as: 'undead' });
-      } else if (byRace === 'vampire' && R.sentient && sim.rng() < 0.35 && sim.units.length < sim.UNIT_CAP) {
+      } else if (byRace === 'vampire' && R.sentient && sim.rng() < 0.35) {
         sim._raise = sim._raise || [];
         sim._raise.push({ x: u.x, y: u.y, as: 'vampire' });
       }
@@ -729,9 +775,12 @@
     // O(1) per sufferer instead of a full unit scan per village per tick.
     v.underAttack = Math.max(0, (v.underAttack || 0) - 1);
     v.plagueT = v.sickCount > 0 ? 60 : Math.max(0, (v.plagueT || 0) - 1);
+    v.crimeT = Math.max(0, (v.crimeT || 0) - 1);
 
-    // faith reaching the god is the work of priests and temples together —
-    // the Society layer reads v.labour.faith when it tallies devotion
+    // faith reaching the god is the work of priests and temples together.
+    // (This comment used to claim the Society layer read v.labour.faith when
+    // it tallied devotion. It did not — nothing read it at all. It is now
+    // summed by Sim.devotion() and paid into faithPerStep.)
 
     // ---- growth: birth a citizen (logistic toward capacity) ----
     if (v.pop < v.cap && v.food > 8 + v.pop * 0.6 && sim.units.length < sim.UNIT_CAP) {
@@ -824,6 +873,12 @@
             u.raidT = 300;
             u.raidX = rival.x + (sim.rng() * 4 - 2);
             u.raidY = rival.y + (sim.rng() * 4 - 2);
+            // The town being marched on now KNOWS it. Without this,
+            // v.underAttack only ever counted down from zero and the
+            // "a besieged town raises soldiers" rule never once fired in
+            // play — it was reachable only from a test that set the field
+            // by hand.
+            rival.underAttack = 400;
             sent++;
           }
         }
@@ -832,6 +887,14 @@
   }
 
   // ---- Global recount & cleanup ---------------------------------------
+  // Total devotion rising from the world: the sum of what every settlement's
+  // people actually do. faithPerStep() consumes this.
+  function devotion(sim) {
+    let d = 0;
+    for (const v of sim.villages) if (v.labour) d += v.labour.faith;
+    return d;
+  }
+
   function recount(sim) {
     for (const k in RACES) sim.counts[k] = 0;
     for (const k in sim.counts) sim.counts[k] = 0;
@@ -861,7 +924,13 @@
             const L = v.labour;
             if (fx.food) L.food += fx.food * w;
             if (fx.build) L.build += fx.build * w;
-            if (fx.faith) L.faith += fx.faith * w;
+            // Piety was defined for all sixteen traits and read by nothing
+            // but the inspector's description text. A devout priest is worth
+            // more than a lazy one, and every soul prays a little: the base
+            // term means a village of the devout is more faithful than a
+            // village of the cruel, whatever their trades.
+            const piety = traitFx(u).piety;
+            L.faith += (fx.faith || 0) * w * piety + 0.0045 * piety * w;
             if (fx.science) L.science += fx.science * w;
             if (fx.care) L.care += fx.care * w;
             if (fx.order) L.order += fx.order * w;
@@ -872,6 +941,34 @@
         } else u.village = -1;
       }
     }
+
+    // ---- who could possibly fight whom, this tick ----
+    // Consulted by every unit's combat scan (see updateUnit). `hostile()` is
+    // a pure function of the race pair, so this is a full precomputation:
+    // foeRace[r] is true iff some race hostile to r is currently alive.
+    if (!sim.foeRace) sim.foeRace = {};
+    const live = [];
+    for (const k in sim.counts) if (sim.counts[k] > 0) live.push(k);
+    for (const r in RACES) {
+      let any = false;
+      for (let i = 0; i < live.length; i++) {
+        if (hostile(r, live[i])) { any = true; break; }
+      }
+      sim.foeRace[r] = any;
+    }
+    // runtime-registered races are not in RACES at module scope
+    for (let i = 0; i < live.length; i++) {
+      const r = live[i];
+      if (sim.foeRace[r] !== undefined) continue;
+      let any = false;
+      for (let j = 0; j < live.length; j++) {
+        if (hostile(r, live[j])) { any = true; break; }
+      }
+      sim.foeRace[r] = any;
+    }
+    // and whether any settlement has declared on another
+    sim.anyRivalry = false;
+    for (const vv of sim.villages) if (vv.rival >= 0) { sim.anyRivalry = true; break; }
   }
 
   // ---- Main step -------------------------------------------------------
@@ -892,6 +989,10 @@
 
     // process raises (undead rising, vampire spawn)
     if (sim._raise && sim._raise.length) {
+      // spawnUnit refuses at the cap, and a full world is the normal state —
+      // so drop the corpses first. Every unit in this queue died to make room
+      // for the thing replacing it; without this the raise silently no-ops.
+      if (sim.units.length >= sim.UNIT_CAP) sim.units = sim.units.filter(u => !u.dead);
       for (const r of sim._raise) {
         const u = spawnUnit(sim, r.as || 'undead', r.x, r.y);
         if (u && PD.FX) PD.FX.puff(r.x, r.y, r.as === 'vampire' ? '#5a1030' : '#6a2a6a');
@@ -1049,7 +1150,7 @@
     RACES, SENTIENT, hostile, createSim, spawnUnit, foundVillage,
     step, recount, villageById, logEvent, killUnit,
     damageArea, blessArea, infectArea, buildGrid, forNeighbors,
-    villageName, personName, TRAITS, PROFESSIONS, TRAIT_FX, PROF_FX, traitFx, profFx,
+    villageName, personName, TRAITS, PROFESSIONS, TRAIT_FX, PROF_FX, traitFx, profFx, devotion,
     chooseProfession, walkable, shielded
   };
 })(window);

@@ -151,7 +151,218 @@ for (const p of PD.Powers.POWERS){
   catch(e){ perrs++; console.error('POWER ERR', p.id, e.message); }
 }
 console.log('powers tested:', PD.Powers.POWERS.length, 'errors:', perrs);
+
+// ---- THE SECOND WORD: every greater form must survive being invoked ----
+// invokeAwe() temporarily swaps a power's cost and radius so the ordinary
+// apply() can be reused at scale. If it ever fails to put them back, the
+// power is permanently mutated for the rest of the session — free, or with
+// a giant radius. That is the failure mode worth pinning.
+let aerrs = 0, adone = 0, arestore = 0;
+for (const p of PD.Powers.POWERS) {
+  const a = PD.Powers.aweOf(p.id);
+  if (!a) continue;
+  const c0 = p.cost, r0 = p.radius;
+  fakeG.power = Object.assign({}, p);
+  fakeG.faith = 1e6;
+  try {
+    const spent = PD.Powers.invokeAwe(fakeG, p, 90, 60);
+    if (typeof spent !== 'number') throw new Error('non-numeric return');
+    if (spent !== a.cost) throw new Error('spent ' + spent + ' != declared ' + a.cost);
+    adone++;
+  } catch (e) {
+    aerrs++; console.error('AWE ERR', p.id, e.message);
+  }
+  if (p.cost !== c0 || p.radius !== r0) {
+    arestore++;
+    console.error('AWE LEAK', p.id, 'cost', c0, '->', p.cost, 'radius', r0, '->', p.radius);
+  }
+}
+console.log('greater forms invoked:', adone, 'errors:', aerrs, 'cost/radius leaks:', arestore);
+
+// a greater form must be refused, not half-applied, when faith is short
+let refused = 0;
+for (const p of PD.Powers.POWERS) {
+  const a = PD.Powers.aweOf(p.id);
+  if (!a || a.cost <= 0) continue;
+  fakeG.faith = a.cost - 1;
+  fakeG.power = Object.assign({}, p);
+  if (PD.Powers.invokeAwe(fakeG, p, 90, 60) === 0) refused++;
+}
+console.log('greater forms correctly refused when faith is short:', refused);
+perrs += aerrs + arestore;
+if (refused < adone) { console.error('SOME GREATER FORMS FIRED WITHOUT PAYING'); perrs++; }
 console.log('genesis hooks fired:', genesisCalls, '| sabbath toggles:', sabbathCalls, '| unmaking undos:', undoCalls);
+
+// ---- every people must have a way into the world ----
+// Nine of the thirteen sentient races had no spawn power. The only other
+// route was evolution stage 4 picking one of thirteen at random, behind a
+// Primordial planet and five advances — so Fairies and Giants were a lottery
+// most players would never win, while the intro card promised sixteen
+// peoples. Custom races are excluded: they get their power at registration.
+{
+  const spawnable = new Set();
+  for (const p of PD.Powers.POWERS) if (p.race) spawnable.add(p.race);
+  const unreachable = PD.Sim.SENTIENT.filter(k => !spawnable.has(k) && !PD.Sim.RACES[k].custom);
+  console.log('sentient races:', PD.Sim.SENTIENT.length, '| with a spawn power:',
+    PD.Sim.SENTIENT.filter(k => spawnable.has(k)).length,
+    '| unreachable:', unreachable.join(', ') || '(none)');
+  if (unreachable.length) {
+    console.error('REACH ERR: no power can create ' + unreachable.join(', '));
+    perrs++;
+  }
+  // and each one must actually place a living unit, not merely not throw
+  let placed = 0, failed = [];
+  for (const p of PD.Powers.POWERS) {
+    if (!p.race || !PD.Sim.RACES[p.race] || !PD.Sim.RACES[p.race].sentient) continue;
+    const before = pp.sim.units.filter(u => !u.dead && u.race === p.race).length;
+    fakeG.world = pp.world; fakeG.sim = pp.sim; fakeG.faith = 1e6;
+    const spot = PD.World.nearestLand(pp.world, 90, 60, 25);
+    if (spot) p.apply(fakeG, spot.x, spot.y);
+    const after = pp.sim.units.filter(u => !u.dead && u.race === p.race).length;
+    if (after > before) placed++; else failed.push(p.race);
+  }
+  fakeG.world = p1.world; fakeG.sim = p1.sim;
+  console.log('spawn powers that placed a living soul:', placed, failed.length ? '| failed: ' + failed.join(', ') : '');
+  if (failed.length) { console.error('REACH ERR: these powers placed nobody: ' + failed.join(', ')); perrs++; }
+}
+
+// ---- toggles must toggle ONCE ----
+// Sabbath and Omniscience flip a flag. Their greater forms carried reps:3,
+// so invokeAwe fired apply() three times and the flag landed exactly where a
+// single press would have put it — for four times the faith. A toggle
+// repeated is a toggle undone, and no unit test caught it because every other
+// greater form is idempotent-ish under repetition.
+{
+  for (const id of ['sabbath', 'omniscience']) {
+    const p = PD.Powers.BY_ID[id];
+    const a = PD.Powers.aweOf(id);
+    const flag = a && a.flag;
+    if (!p || !a || !flag) { console.error('TOGGLE ERR', id, 'no awe entry or no flag'); perrs++; continue; }
+    // from OFF, the greater form must leave it ON
+    fakeG[flag] = false; fakeG.faith = 1e6;
+    PD.Powers.invokeAwe(fakeG, p, 90, 60);
+    if (fakeG[flag] !== true) { console.error('TOGGLE ERR', id, 'greater form left it off'); perrs++; }
+    // from ON, it must still be ON — never silently switch the player off
+    fakeG.faith = 1e6;
+    PD.Powers.invokeAwe(fakeG, p, 90, 60);
+    if (fakeG[flag] !== true) { console.error('TOGGLE ERR', id, 'greater form turned it back off'); perrs++; }
+    fakeG[flag] = false;
+  }
+  fakeG.omniAll = false;
+  console.log('toggle greater forms land ON and stay ON: ok');
+}
+
+// ---- Unmake From History must erase one soul, not everyone who shares a
+// fragment of their name. Names are GIVEN+GIVEN2 concatenations, so indexOf
+// made 'Ala' a match inside 'Alan'. ----
+{
+  // On its OWN planet. unmake targets the NEAREST living unit, and by this
+  // point p1.sim is full of souls the 66-greater-form loop scattered around
+  // (90,60) with Math.random() jitter — so which one got erased was never
+  // deterministic. It picked the planted victim locally and someone else on
+  // CI, and the test reported that the target survived. The claim under test
+  // is the name matcher, so give it a world where the target is unambiguous.
+  const unP = Cosmos.createPlanet('verdant', 'unmake-seed');
+  const soc = PD.Society.ensure(unP.sim);
+  soc.history.push({ t: 0, text: 'Alan built a wall.', kind: 'event' });
+  soc.history.push({ t: 0, text: 'Ala the quiet died.', kind: 'event' });
+  soc.history.push({ t: 0, text: 'Alanna sang.', kind: 'event' });
+  const spot = PD.World.nearestLand(unP.world, 90, 60, 25) || { x: 90, y: 60 };
+  const victim = PD.Sim.spawnUnit(unP.sim, 'human', spot.x, spot.y);
+  const unG = Object.assign({}, fakeG, {
+    world: unP.world, sim: unP.sim, faith: 1e6, view: { kind: 'planet', id: unP.id }
+  });
+  let targeted = null;
+  if (victim) {
+    victim.name = 'Ala';
+    // the only living soul on this world, so it is the one unmake will find
+    targeted = unP.sim.units.filter(u => !u.dead).length;
+    PD.Powers.BY_ID.unmake.apply(unG, victim.x + 0.1, victim.y + 0.1);
+  }
+  const left = soc.history.map(h => h.text);
+  const survived = left.filter(t => /Alan/.test(t)).length;
+  const erased = left.filter(t => /^Ala the/.test(t)).length;
+  if (!victim) { console.error('UNMAKE ERR: could not place a victim'); perrs++; }
+  if (survived !== 2) { console.error('UNMAKE ERR: strangers erased — expected 2 Alan lines, found', survived, left); perrs++; }
+  if (erased !== 0) { console.error('UNMAKE ERR: the target survived (living souls on that world: ' + targeted + ')'); perrs++; }
+  console.log('unmake erases whole names only: Alan/Alanna lines left =', survived,
+    '(expect 2), target lines left =', erased, '(expect 0), living souls on that world:', targeted);
+}
+
+// ---- the hidden act ----
+// Breath of Life empties limbo. Under a blood moon, one of them comes back
+// wrong — and that is the only way a first vampire has ever been able to
+// exist. Nothing in the UI says so, so this is the only thing that will
+// notice if it stops working.
+{
+  // A dedicated planet: p1 has run 6000 steps and sits AT its unit cap, and
+  // resurrect() cannot place anyone into a full world — the power refuses
+  // before the egg is ever reached. That is real behaviour, not a bug here,
+  // but it means this assertion needs a world with room in it.
+  const eggP = Cosmos.createPlanet('verdant', 'egg-seed');
+  const sim = eggP.sim;
+  const deeds = [];
+  const eggG = Object.assign({}, fakeG, {
+    world: eggP.world, sim: eggP.sim, faith: 1e6,
+    view: { kind: 'planet', id: eggP.id },
+    deed: (id) => deeds.push(id)
+  });
+  const vampCount = () => sim.counts.vampire || 0;
+
+  const stock = () => {
+    // Put souls in the Grayfields so Breath of Life has something to do.
+    // karma must be negative: the Grayfields band is -8..0 and a fresh unit
+    // sits at exactly 0, which routes to the Meadows by a hair.
+    for (let i = 0; i < 6; i++) {
+      const u = PD.Sim.spawnUnit(sim, 'human', 90 + (i % 3), 60 + ((i / 3) | 0));
+      if (u) { u.karma = -2; PD.Sim.killUnit(sim, u, 'starve'); }
+    }
+    PD.Sim.step(sim, 1);
+  };
+
+  // (a) no blood moon: an ordinary miracle, and no vampire
+  stock();
+  sim.bloodMoonT = 0;
+  const before = vampCount();
+  eggG.faith = 1e6;
+  PD.Powers.BY_ID.breath.apply(eggG, 90, 60);
+  PD.Sim.step(sim, 1);
+  const plain = vampCount() - before;
+  console.log('breath of life without a blood moon — vampires created:', plain, '(expect 0)');
+  if (plain !== 0) { console.error('EGG ERR: a vampire appeared with no blood moon'); perrs++; }
+
+  // (b) under a blood moon: exactly one, and the deed fires
+  stock();
+  sim.bloodMoonT = 400;
+  eggG.faith = 1e6;
+  PD.Powers.BY_ID.breath.apply(eggG, 90, 60);
+  PD.Sim.step(sim, 1);
+  const made = vampCount();
+  // >= 1, not == 1: the progenitor can already have bitten someone inside the
+  // single step below, so this legitimately reads 1 or 2 run to run
+  console.log('breath of life UNDER a blood moon — vampires now:', made, '(expect >=1)',
+    '| deeds:', deeds.join(',') || '(none)');
+  if (made < 1) { console.error('EGG ERR: no patient zero under a blood moon'); perrs++; }
+  if (deeds.indexOf('firstthirst') < 0) { console.error('EGG ERR: the hidden deed did not fire'); perrs++; }
+
+  // (c) it happens once. A second casting must not mint a second progenitor.
+  //
+  // Do NOT measure this as a delta on the vampire count. That count also
+  // falls when a vampire dies, so a broken guard that adds one while another
+  // is killed nets to zero and the test passes while the bug ships. Observed
+  // in practice: this line printed -1 on some runs. Ask the question the
+  // claim actually makes — did the act fire a second time — which only
+  // firstOfTheThirst can answer, and it does, through the deed.
+  stock();
+  sim.bloodMoonT = 400;
+  eggG.faith = 1e6;
+  PD.Powers.BY_ID.breath.apply(eggG, 90, 60);
+  PD.Sim.step(sim, 1);
+  const fired = deeds.filter(d => d === 'firstthirst').length;
+  console.log('times the hidden act has fired after three castings:', fired, '(expect 1)');
+  if (fired !== 1) { console.error('EGG ERR: patient zero was made ' + fired + ' times'); perrs++; }
+
+}
 
 // ---- serialization of the whole thing (like game.js does) ----
 // minimal replication of packPlanet/unpackPlanet correctness via codec

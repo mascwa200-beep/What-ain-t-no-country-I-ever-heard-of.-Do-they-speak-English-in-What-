@@ -141,9 +141,35 @@
     let temples = 0, wonders = 0;
     for (const v of G.sim.villages) { temples += v.temples; wonders += v.wonders || 0; }
     let f = 0.04 + pop * 0.014 + temples * 0.22 + wonders * 0.8;
+    // What the living actually do. Priests, temples and the piety of every
+    // ordinary soul are summed by the labour census; before this, faith was
+    // a function of headcount and buildings alone, and a world of devout
+    // priests paid a god exactly what a world of cruel merchants did.
+    if (Sim.devotion) f += Sim.devotion(G.sim) * 0.22;
     if (PD.Society) f += PD.Society.faithBonus(G.sim);
     // Divinity: each transcendence permanently multiplies the flow of faith
     return f * (1 + G.divinity * 0.25);
+  }
+  // The same sum, itemised. The HUD showed one aggregate number, so nothing
+  // in the game revealed that a wonder is worth 3.6 temples — which makes
+  // pushing a village to level 4 the highest-leverage act available, and a
+  // complete secret. Kept beside faithPerStep so the two cannot drift.
+  function faithBreakdown() {
+    const c = G.sim.counts;
+    let pop = 0;
+    for (const k of Sim.SENTIENT) pop += c[k] || 0;
+    let temples = 0, wonders = 0;
+    for (const v of G.sim.villages) { temples += v.temples; wonders += v.wonders || 0; }
+    const rows = [
+      ['base', 0.04, ''],
+      ['worshippers', pop * 0.014, pop + ' × 0.014'],
+      ['temples', temples * 0.22, temples + ' × 0.22'],
+      ['wonders', wonders * 0.8, wonders + ' × 0.80'],
+      ['devotion', Sim.devotion ? Sim.devotion(G.sim) * 0.22 : 0, 'their piety, summed'],
+      ['religion', PD.Society ? PD.Society.faithBonus(G.sim) : 0, 'organized faith']
+    ];
+    const sub = rows.reduce((s, r) => s + r[1], 0);
+    return { rows, sub, mult: 1 + G.divinity * 0.25, total: sub * (1 + G.divinity * 0.25) };
   }
 
   // ---- Transcendence (prestige): trade a multiverse for permanent power
@@ -158,8 +184,13 @@
       if (!m) { resolve(opts.input != null ? global.prompt(opts.body, opts.input) : global.confirm(opts.body)); return; }
       const input = $('#ask-input'), okBtn = $('#ask-ok'), cancel = $('#ask-cancel');
       $('#ask-title').textContent = opts.title || 'Are you certain?';
-      $('#ask-body').textContent = opts.body || '';
+      // opts.html is markup we author here; opts.body is still escaped, because
+      // some call sites interpolate a player-supplied planet or race name
+      if (opts.html != null) $('#ask-body').innerHTML = opts.html;
+      else $('#ask-body').textContent = opts.body || '';
       okBtn.textContent = opts.ok || 'Confirm';
+      // an informational dialog has nothing to cancel — pass cancel:null
+      cancel.style.display = (opts.cancel === null) ? 'none' : '';
       cancel.textContent = opts.cancel || 'Cancel';
       m.classList.toggle('has-input', opts.input != null);
       m.classList.toggle('danger', !!opts.danger);
@@ -226,7 +257,10 @@
     { id: 'races', name: 'Genesis Engine', desc: 'Design a custom race', need: 1 },
     { id: 'floods', name: 'Deluge', desc: 'Flood the world', need: 1 },
     { id: 'timetravels', name: 'Chronarch', desc: 'Bend time 3 times', need: 3 },
-    { id: 'transcends', name: 'BEYOND', desc: 'Transcend reality itself', need: 1 }
+    { id: 'transcends', name: 'BEYOND', desc: 'Transcend reality itself', need: 1 },
+    // Not listed until it is done. There is no hint for this one anywhere in
+    // the game, and there should not be.
+    { id: 'firstthirst', name: 'PATIENT ZERO', desc: 'There had never been a first one', need: 1, hidden: true }
   ];
   function ach(id, n) {
     G.ach[id] = (G.ach[id] || 0) + (n || 1);
@@ -451,7 +485,8 @@
       // world.mode, so without these a save taken in the Deep or in Nothing
       // reloads as a black empty sphere with the Genesis powers hidden.
       speedIdx: G.speedIdx, creationStage: G.creationStage, dissolve: G.dissolve,
-      omniscient: !!G.omniscient, sabbath: !!G.sabbath, preSabbathIdx: G._preSabbathIdx,
+      omniscient: !!G.omniscient, omniAll: !!G.omniAll,
+      sabbath: !!G.sabbath, preSabbathIdx: G._preSabbathIdx,
       cam: G.r ? { lon: G.r.cam.lon, lat: G.r.cam.lat, dist: G.r.cam.dist } : null,
       cosmos: { nextId: Cosmos.C.nextId, activeId: Cosmos.C.activeId, customRaces: Cosmos.customRaces },
       planets: Cosmos.C.planets.map(packPlanet),
@@ -498,6 +533,7 @@
       G.creationStage = (d.creationStage != null) ? d.creationStage : null;
       G.dissolve = d.dissolve || 0;
       G.omniscient = !!d.omniscient;
+      G.omniAll = !!d.omniAll && G.omniscient;
       G.sabbath = !!d.sabbath;
       G._preSabbathIdx = d.preSabbathIdx;
       // Builds before this one never stored creationStage, so their saves can
@@ -533,9 +569,15 @@
       G.view = (d.view && d.view.kind === 'planet' && Cosmos.getPlanet(d.view.id)) ? d.view : { kind: 'planet', id: Cosmos.C.activeId };
       bindView();
       if (d.cam && d.cam.lon != null && G.r) { G.r.cam.lon = d.cam.lon; G.r.cam.lat = d.cam.lat; G.r.cam.dist = d.cam.dist; }
+      // Quitting while paused used to mean no offline progress at all, and
+      // nothing said so — you came back to a world that had not moved and no
+      // explanation. Time you deliberately stopped stays stopped, but say it.
       if (G.speed !== 0) {
         const off = runOffline((Date.now() - (d.t || Date.now())) / 1000);
         if (off) showOffline(off);
+      } else {
+        const away = (Date.now() - (d.t || Date.now())) / 1000;
+        if (away > 120) setTimeout(() => flashToast('You left with time paused, so nothing moved while you were gone.'), 900);
       }
       return true;
     } catch (e) {
@@ -1008,6 +1050,25 @@
     return 0;
   };
 
+  // Powers record deeds through this. Note G.ach is the counter map, so the
+  // recorder cannot share that name.
+  G.deed = ach;
+
+  // Something happened on a world you are not looking at.
+  //
+  // The rocket, the starchild and the shattering — the set-piece the intro
+  // card leads with — reported only through Society.hist(), which writes into
+  // ONE planet's History panel. If you were gazing elsewhere, an entire world
+  // could burn and you would never learn of it. This reaches you wherever you
+  // are: the chronicle of the world you are watching, plus a toast.
+  G.announce = function (text, kind, sfx) {
+    try {
+      if (G.sim) Sim.logEvent(G.sim, text, kind || 'event');
+      flashToast(text);
+      if (sfx) Audio8.sfx(sfx);
+    } catch (e) {}
+  };
+
   // Sabbath: the world holds still, but the god does not.
   G.setSabbath = function (on) {
     if (on) { G._preSabbathIdx = G.speedIdx; setSpeedIdx(IDX_PAUSE, true); }
@@ -1015,19 +1076,32 @@
   };
 
   // ================= Testament story =================
+  // Every world-shaped check used to read G.sim — the world you happen to be
+  // GAZING at. Build a Modern-era civilisation on planet A, go look at planet
+  // B, and chapter XII could never complete no matter how long you waited.
+  // The chapters are about your works, not about your current view, so they
+  // ask every planet.
+  function anyWorld(fn) {
+    try { if (fn(G.sim)) return true; } catch (e) {}
+    for (const p of Cosmos.C.planets) {
+      if (!p.sim || p.sim === G.sim) continue;
+      try { if (fn(p.sim)) return true; } catch (e) {}
+    }
+    return false;
+  }
   const CHAPTERS = [
     { id: 'genesis', title: 'I. The Shaping', text: 'In the beginning you hovered over the face of the waters. Shape the land. Raise mountains, plant forests.', hint: 'Use Raise Land or Grow Forest anywhere.', check: () => G._usedTerra },
-    { id: 'life', title: 'II. Breath of Life', text: 'Breathe life into the dust. Let peoples walk your world.', hint: 'Spawn any sentient race from the Life tab.', check: () => { let n = 0; for (const k of Sim.SENTIENT) n += G.sim.counts[k] || 0; return n >= 10; } },
-    { id: 'watch', title: 'III. The Watchers', text: 'They build without your hand. Watch a village become a town.', hint: 'Wait, or feed a village with Bless/Miracle. A village must reach level 2.', check: () => G.sim.villages.some(v => v.level >= 2) },
+    { id: 'life', title: 'II. Breath of Life', text: 'Breathe life into the dust. Let peoples walk your world.', hint: 'Spawn any sentient race from the Life tab.', check: () => anyWorld(s => { let n = 0; for (const k of Sim.SENTIENT) n += s.counts[k] || 0; return n >= 10; }) },
+    { id: 'watch', title: 'III. The Watchers', text: 'They build without your hand. Watch a village become a town.', hint: 'Wait, or feed a village with Bless/Miracle. A village must reach level 2.', check: () => anyWorld(s => s.villages.some(v => v.level >= 2)) },
     { id: 'prayer', title: 'IV. The First Prayer', text: 'They are starting to look up. Answer them.', hint: 'Open the Prayers tab (🙏) and answer 3 prayers.', check: () => (G._prayersAnswered || 0) >= 3 },
-    { id: 'faith', title: 'V. Organized Faith', text: 'Let them build a church around the answering.', hint: 'A faith forms on its own once temples exist — or use Anoint Prophet.', check: () => PD.Society && PD.Society.ensure(G.sim).faiths.length > 0 },
-    { id: 'law', title: 'VI. The Law', text: 'Faith without law is a fire without a hearth. Hand down commandments.', hint: 'Use the Commandments power (Testament tab).', check: () => PD.Society && PD.Society.ensure(G.sim).faiths.some(f => f.commandments > 0) },
+    { id: 'faith', title: 'V. Organized Faith', text: 'Let them build a church around the answering.', hint: 'A faith forms on its own once temples exist — or use Anoint Prophet.', check: () => !!PD.Society && anyWorld(s => PD.Society.ensure(s).faiths.length > 0) },
+    { id: 'law', title: 'VI. The Law', text: 'Faith without law is a fire without a hearth. Hand down commandments.', hint: 'Use the Commandments power — the Testament group in the power sidebar, not the 📖 tab.', check: () => !!PD.Society && anyWorld(s => PD.Society.ensure(s).faiths.some(f => f.commandments > 0)) },
     { id: 'wrath', title: 'VII. Wrath', text: 'They must know both sides of you. Show them judgement.', hint: 'Use Lightning, Meteor, Plague, or the Great Flood.', check: () => G._usedWrath },
-    { id: 'hero', title: 'VIII. The Chosen', text: 'Raise up a mortal as your champion against the dark.', hint: 'Use Empower Hero (Godhead tab) on any citizen.', check: () => PD.Society && PD.Society.ensure(G.sim).heroes.length > 0 },
+    { id: 'hero', title: 'VIII. The Chosen', text: 'Raise up a mortal as your champion against the dark.', hint: 'Use Empower Hero — the Godhead group in the power sidebar — on any citizen.', check: () => !!PD.Society && anyWorld(s => PD.Society.ensure(s).heroes.length > 0) },
     { id: 'beyond', title: 'IX. The Beyond', text: 'Where do they go when they die? Walk your own heavens and hells.', hint: 'Open the Souls tab (👻) and Visit any plane.', check: () => G._visitedPlane },
     { id: 'return', title: 'X. Resurrection', text: 'Death answers to you. Bring one back.', hint: 'In the Souls tab, resurrect any soul.', check: () => G._resurrected },
     { id: 'cosmos', title: 'XI. Many Worlds', text: 'One world is a garden. Many is a cosmos. Create a second planet.', hint: 'Open the Cosmos tab (🪐) and create a planet.', check: () => Cosmos.C.planets.length >= 2 },
-    { id: 'modern', title: 'XII. The Wired Age', text: 'Let a nation grow until it wires itself together and posts about you.', hint: 'A nation must reach the Modern era. Prosperous big nations advance faster.', check: () => PD.Society && PD.Society.ensure(G.sim).internetOn },
+    { id: 'modern', title: 'XII. The Wired Age', text: 'Let a nation grow until it wires itself together and posts about you.', hint: 'A nation must reach the Modern era. Prosperous big nations advance faster.', check: () => !!PD.Society && anyWorld(s => PD.Society.ensure(s).internetOn) },
     // The dial goes the other way too — and nothing in the game said so.
     { id: 'turnback', title: 'XIII. Turn Back', text: 'Time has only ever run one way for them. It has never had to, for you. Take an hour of history back.', hint: 'The time dial runs left of the pause bar: ◀ ⧏ ⧏⧏ ⧏⧏⧏. Press R, or tap any arrow left of ❚❚.', check: () => G._reversed },
     { id: 'before', title: 'XIV. Before the Beginning', text: 'Keep going. Past the first city, past the first breath, past the first morning — to the night that had no evening before it.', hint: 'Hold the leftmost notch (⧏⧏⧏ · Unmaking) once the record runs out. The works undo, the land unshapes, the deep goes dark. Press U at any point to take it all back.', check: () => G._sawNothing },
@@ -1051,6 +1125,9 @@
 
   // ================= Selection =================
   G.selectAt = function (wx, wy) {
+    // the inspector and the open panel share a column; asking to inspect
+    // something is asking for that column
+    if (G.openPanel) closePanel();
     let best = null, bd = 2.2;
     for (const u of G.sim.units) {
       if (u.dead) continue;
@@ -1098,12 +1175,50 @@
     if (p.react && PD.Society) PD.Society.reactToMiracle(G.sim, p.react);
   }
 
+  // The ring that closes while a god gathers their will. Drawn on the
+  // overlay canvas so it costs nothing in the WebGL pass.
+  function drawChargeRing() {
+    const c = G.charge;
+    if (!c || c.t <= 0 || !G.r.octx) return;
+    const ctx = G.r.octx;
+    const k = Math.min(1, c.t / 850);
+    const x = c.sx, y = c.sy;
+    const R = 34 + k * 10;
+    ctx.save();
+    // the gathering arc
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = c.ready ? 'rgba(255,233,168,0.95)' : 'rgba(240,201,106,' + (0.35 + k * 0.5) + ')';
+    ctx.beginPath();
+    ctx.arc(x, y, R, -Math.PI / 2, -Math.PI / 2 + k * 6.2832);
+    ctx.stroke();
+    // a faint full circle behind it, so the arc reads as filling something
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = 'rgba(160,195,255,0.22)';
+    ctx.beginPath(); ctx.arc(x, y, R, 0, 6.2832); ctx.stroke();
+    if (c.ready) {
+      // at full, name the thing you are about to do
+      const a = G.power && Powers.aweOf ? Powers.aweOf(G.power.id) : null;
+      if (a) {
+        ctx.font = '600 11px ui-monospace, monospace';
+        ctx.textAlign = 'center';
+        ctx.fillStyle = 'rgba(255,233,168,0.95)';
+        ctx.fillText(a.name, x, y - R - 10);
+      }
+      ctx.strokeStyle = 'rgba(255,255,255,0.75)';
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(x, y, R + 6 + Math.sin(G.now / 90) * 2, 0, 6.2832); ctx.stroke();
+    }
+    ctx.restore();
+  }
+
   // ================= Game loop =================
   function loop(t) {
     if (!G.running) return;
     const dt = Math.min(100, t - G.lastT);
     G.lastT = t;
+    G.now = t;                       // the charge clock, and applyPower's throttle
     handleKeyPan(dt);
+    if (typeof G._chargeTick === 'function') G._chargeTick(dt);
 
     if (!G.paused && G.speed > 0) {
       G.acc += dt * G.speed;
@@ -1119,7 +1234,22 @@
       if (G.acc > STEP_MS * 4) G.acc = STEP_MS * 4;
     } else if (G.speed < 0) {
       stepRewind(dt);
-    }
+    } else if (G.sabbath) {
+      // Sabbath is not the pause key, and this is the difference. The world
+      // holds still — nothing ages, nothing burns, nothing is born — but the
+      // faith you are owed keeps arriving. A plain pause stops the clock and
+      // the income with it; this stops only the clock. Without this, ✦25 bought
+      // exactly what the spacebar gives away.
+      G.sabbathAcc = (G.sabbathAcc || 0) + dt;
+      let n = 0;
+      while (G.sabbathAcc >= STEP_MS && n < 8) {
+        G.sabbathAcc -= STEP_MS; n++;
+        const gain = faithPerStep();
+        G.faith = Math.min(9999999, G.faith + gain);
+        G.faithTotal += gain;
+      }
+      if (G.sabbathAcc > STEP_MS * 4) G.sabbathAcc = STEP_MS * 4;
+    } else if (G.sabbathAcc) { G.sabbathAcc = 0; }
 
     if (G.weatherT > 0) { G.weatherT -= dt / STEP_MS; if (G.weatherT <= 0) { G.weather = 'clear'; G.r.weather = 'clear'; } }
     autoWeather();
@@ -1133,6 +1263,7 @@
     // pointer and desync picking against getBoundingClientRect.
     Render.draw(G.r, G.sim, G.ui);
     drawOverlays();
+    drawChargeRing();
     if (G.flash > 0 && G.r.octx) { const c = G.r.octx; c.fillStyle = `rgba(255,255,255,${G.flash * 0.5})`; c.fillRect(0, 0, G.r.w, G.r.h); }
 
     G.hudTimer = (G.hudTimer || 0) + dt;
@@ -1260,15 +1391,106 @@
       const cy = (e.touches ? e.touches[0].clientY : e.clientY) - rect.top;
       return { x: cx, y: cy };
     }
+    // Continuous brushes used to apply once per pointer-move event, so a
+    // 144Hz device painted 2.4x faster than a 60Hz one for the same gesture.
+    // Throttled to a fixed rate, the brush behaves the same everywhere and
+    // its price is predictable.
+    const CONT_HZ = 12;
+    let lastCont = 0, contDebt = 0;
+
+    // ---- THE SECOND WORD ----
+    // Hold the press. A ring closes over CHARGE_MS. Release with it full and
+    // the power's greater form fires instead of the ordinary one. On a brush
+    // the charge only builds while you stay put, so ordinary painting is
+    // untouched — you have to deliberately lean on it.
+    const CHARGE_MS = 850;
+    G.charge = { t: 0, on: false, sx: 0, sy: 0, ready: false };
+
+    G._chargeTick = chargeTick;
+
+    function chargeBegin(sx, sy) {
+      const p = G.power;
+      if (!p || !Powers.aweOf || !Powers.aweOf(p.id)) { G.charge.on = false; return; }
+      G.charge.on = true; G.charge.t = 0; G.charge.ready = false;
+      G.charge.sx = sx; G.charge.sy = sy;
+    }
+    function chargeMove(sx, sy) {
+      if (!G.charge.on) return;
+      // a brush that is being dragged is painting, not gathering
+      const dx = sx - G.charge.sx, dy = sy - G.charge.sy;
+      if (dx * dx + dy * dy > 26 * 26) { G.charge.on = false; G.charge.t = 0; }
+    }
+    // called from the frame loop so charge is time-based, not event-based
+    function chargeTick(dtMs) {
+      if (!G.charge.on) { if (G.charge.t > 0) G.charge.t = Math.max(0, G.charge.t - dtMs * 3); return; }
+      G.charge.t = Math.min(CHARGE_MS, G.charge.t + dtMs);
+      const nowReady = G.charge.t >= CHARGE_MS;
+      if (nowReady && !G.charge.ready) { G.charge.ready = true; Audio8.sfx('select'); }
+    }
+    // returns true if the greater form consumed the release
+    function chargeRelease(sx, sy) {
+      const wasReady = G.charge.on && G.charge.ready;
+      G.charge.on = false;
+      if (!wasReady) { G.charge.t = 0; return false; }
+      G.charge.t = 0; G.charge.ready = false;
+      const p = G.power;
+      const a = p && Powers.aweOf ? Powers.aweOf(p.id) : null;
+      if (!a) return false;
+      const wc = Render.screenToWorld(G.r, sx, sy);
+      if (!wc) return false;
+      if (G.faith < a.cost) {
+        flashToast('The ' + a.name + ' asks ✦' + a.cost);
+        Audio8.sfx('error');
+        return true;                    // consumed: do not also fire the small form
+      }
+      if (Powers.soundAt) Powers.soundAt(wc.x, wc.y, G.world.W, G.world.H);
+      const spent = Powers.invokeAwe(G, p, wc.x, wc.y);
+      if (Powers.soundAt) Powers.soundAt(null);
+      if (spent > 0) {
+        onPowerUsed(p, spent);
+        flashToast(a.name);
+        G.flash = Math.max(G.flash || 0, 0.45);
+        G.shake = Math.max(G.shake || 0, 0.5);
+        if (PD.Society) PD.Society.hist && PD.Society.hist(G.sim, 'The god spoke twice: ' + a.name, 'legend');
+      }
+      return true;
+    }
+
     function applyPower(sx, sy) {
       const wc = Render.screenToWorld(G.r, sx, sy);
       G.ui.mouseW = wc;
       const p = G.power;
       if (!p || !wc) return; // clicked past the planet's limb into space
+
+      if (p.cont) {
+        const now = (G.now || Date.now());
+        if (now - lastCont < 1000 / CONT_HZ) return;
+        lastCont = now;
+      }
+
       if (Powers.soundAt) Powers.soundAt(wc.x, wc.y, G.world.W, G.world.H);
       const spent = p.apply(G, wc.x, wc.y);
       if (Powers.soundAt) Powers.soundAt(null);
-      if (spent > 0) onPowerUsed(p);
+
+      // THE BUG: this called onPowerUsed(p) with no second argument, so
+      // `spent` inside it was undefined, `spent != null` was false, and the
+      // deduction never ran. Every power invoked by clicking the world has
+      // been free for the entire life of this project — faith gated you the
+      // first time and was never actually spent. The two inspector buttons
+      // (smite/bless a specific soul) passed it correctly, which is why the
+      // economy looked like it worked.
+      if (spent > 0) {
+        if (p.cont) {
+          // a brush is priced per SECOND of painting, not per event, so the
+          // throttle rate above cannot change what a gesture costs
+          contDebt += spent / CONT_HZ;
+          const whole = Math.floor(contDebt);
+          if (whole > 0) { contDebt -= whole; onPowerUsed(p, whole); }
+          else onPowerUsed(p, 0);
+        } else {
+          onPowerUsed(p, spent);
+        }
+      }
     }
     function onMinimap(x, y) {
       const m = G.r._mini;
@@ -1289,7 +1511,7 @@
       if (onMinimap(l.x, l.y)) { jumpMinimap(l.x, l.y); e.preventDefault(); return; }
       const p = G.power;
       if (e.button === 2 || e.button === 1 || (p && p.pan)) { panning = true; }
-      else { dragging = true; applyPower(l.x, l.y); }
+      else { dragging = true; applyPower(l.x, l.y); chargeBegin(l.x, l.y); }
       e.preventDefault();
     });
     global.addEventListener('mousemove', (e) => {
@@ -1302,9 +1524,11 @@
         cam.lon -= dx * k; cam.lat += dy * k; cam.idle = 0; clampCam();
       }
       else if (dragging && G.power && G.power.cont) applyPower(l.x, l.y);
+        chargeMove(l.x, l.y);
       lastX = l.x; lastY = l.y;
     });
     global.addEventListener('mouseup', () => {
+      chargeRelease(lastX, lastY);
       if (panning && moved < 5 && G.power && G.power.id === 'inspect') applyPower(lastX, lastY);
       dragging = false; panning = false;
     });
@@ -1328,7 +1552,7 @@
         if (onMinimap(l.x, l.y)) { jumpMinimap(l.x, l.y); e.preventDefault(); return; }
         const p = G.power;
         if (p && p.pan) touchPanning = true;
-        else { dragging = true; applyPower(l.x, l.y); }
+        else { dragging = true; applyPower(l.x, l.y); chargeBegin(l.x, l.y); }
       }
       e.preventDefault();
     }, { passive: false });
@@ -1347,11 +1571,13 @@
           cam.lon -= dx * k; cam.lat += dy * k; cam.idle = 0; clampCam();
         }
         else if (dragging && G.power && G.power.cont) applyPower(l.x, l.y);
+        chargeMove(l.x, l.y);
         lastX = l.x; lastY = l.y;
       }
       e.preventDefault();
     }, { passive: false });
     cv.addEventListener('touchend', () => {
+      chargeRelease(lastX, lastY);
       if (touchPanning && moved < 8 && G.power && G.power.id === 'inspect') applyPower(lastX, lastY);
       dragging = false; touchPanning = false;
     });
@@ -1561,12 +1787,42 @@
   }
   function highlightPower(id) {
     document.querySelectorAll('.tool').forEach(b => b.classList.toggle('active', b.dataset.id === id));
+    refreshToggleState();
+  }
+  // Sabbath and Omniscience flip a flag and nothing ever said so. A second
+  // press silently refunded nothing; a third charged again. Now the button
+  // that is holding a state looks like it, and the HUD says which.
+  const TOGGLE_POWERS = { sabbath: 'sabbath', omniscience: 'omniscient' };
+  function refreshToggleState() {
+    document.querySelectorAll('.tool').forEach(b => {
+      const flag = TOGGLE_POWERS[b.dataset.id];
+      b.classList.toggle('tool-on', !!flag && !!G[flag]);
+    });
+    const el = $('#toggle-chips');
+    if (!el) return;
+    const chips = [];
+    if (G.sabbath) chips.push('<span class="tgl-chip">⏸️ SABBATH</span>');
+    if (G.omniscient) chips.push('<span class="tgl-chip">👁 ' + (G.omniAll ? 'UNBLINKING' : 'OMNISCIENT') + '</span>');
+    el.innerHTML = chips.join('');
+    el.style.display = chips.length ? '' : 'none';
   }
   function updatePowerInfo(p) {
     if (!p) return;
     $('#power-name').textContent = p.icon + ' ' + p.name;
     $('#power-desc').textContent = p.desc;
-    $('#power-cost').textContent = p.cost > 0 ? ('Cost: ✦' + p.cost + (p.cont ? ' / touch' : '')) : 'Free';
+    // brushes are priced per second of painting now, not per touch event
+    $('#power-cost').textContent = p.cost > 0
+      ? ('Cost: ✦' + p.cost + (p.cont ? ' / sec' : ''))
+      : 'Free';
+    // the greater form, named, so holding is discoverable rather than secret
+    const awe = Powers.aweOf ? Powers.aweOf(p.id) : null;
+    const ae = $('#power-awe');
+    if (ae) {
+      ae.innerHTML = awe
+        ? `<b>${awe.name}</b> · ✦${awe.cost}<br><i>${awe.desc}</i><br><span>hold to gather</span>`
+        : '';
+      ae.style.display = awe ? 'block' : 'none';
+    }
   }
 
   // register a spawn power for a custom race and rebuild the toolbar
@@ -1660,6 +1916,7 @@
       log.innerHTML = G.sim.log.slice(0, 12).map(e => `<div class="log-line log-${e.kind}">${e.msg}</div>`).join('');
     }
     updateTabBadges();
+    refreshToggleState();
   }
   function updateTabBadges() {
     const soc = G.sim.soc;
@@ -1706,13 +1963,22 @@
         <div class="ins-row"><span>People</span><b>${R.name}</b></div>
         ${n ? `<div class="ins-row"><span>Nation</span><b>${n.name}</b></div>
         <div class="ins-row"><span>Rule</span><b>${PD.Society.GOVERNMENTS[n.gov]} · ${n.leaderName}</b></div>
-        <div class="ins-row"><span>Era</span><b>${PD.Society.ERAS[n.era]}</b></div>` : ''}
+        <div class="ins-row"><span>Era</span><b>${PD.Society.ERAS[n.era]}</b></div>
+        ${nationProgress(n)}
+        <div class="ins-row"><span>Scholars</span><b>${
+          n.scholars ? n.scholars + ' 📚' : '<span style="color:#8a7a5a">none — this age will not pass</span>'
+        }</b></div>` : ''}
         ${faith ? `<div class="ins-row"><span>Faith</span><b>${faith.name}</b></div>` : ''}
-        <div class="ins-row"><span>Population</span><b>${v.pop}</b></div>
+        <div class="ins-row"><span>Population</span><b>${v.pop}${
+          v.cap ? ` <small class="ins-cap${v.pop >= v.cap ? ' ins-capped' : ''}">/ ${v.cap} land</small>` : ''
+        }</b></div>
         <div class="ins-row"><span>Tier</span><b>${['Hamlet', 'Village', 'Town', 'City', 'Metropolis'][Math.min(4, v.level - 1)]} (lvl ${v.level})</b></div>
         <div class="ins-bar"><span>Prosperity</span>${bar(v.prosperity, '#f0c040')}</div>
         <div class="ins-row"><span>Food store</span><b>${Math.floor(v.food)}</b></div>
+        <div class="ins-row"><span>Wealth</span><b>${Math.floor(v.wealth || 0)}</b></div>
         <div class="ins-row"><span>Temples</span><b>${v.temples} ⛪</b></div>
+        ${v.wonders ? `<div class="ins-row"><span>Wonders</span><b>${v.wonders} 🏛</b></div>` : ''}
+        ${scholarGate(v)}
         ${describeTrades(v)}
         ${v.rival >= 0 ? `<div class="ins-row war"><span>At war with</span><b>${villName(v.rival) || '?'}</b></div>` : ''}
         <button class="ins-smite" id="smite-btn">⚡ Smite this town</button>`;
@@ -1755,6 +2021,22 @@
       if (spent > 0) onPowerUsed(pw || { cat: 'god' }, spent);
     }
   }
+  // Scholars are the entire tech tree, and the three things that gate them
+  // were all invisible: wealth was computed every tick and displayed nowhere,
+  // prosperity saturates so nobody reads it as a gate, and the population
+  // floor was never stated. "This age will not pass" was the whole diagnosis.
+  // These thresholds mirror chooseProfession() in sim.js.
+  function scholarGate(v) {
+    const has = v.jobs && Sim.PROFESSIONS ? (v.jobs[Sim.PROFESSIONS.indexOf('scholar')] || 0) : 0;
+    if (has > 0) return '';
+    const miss = [];
+    if (v.pop <= 12) miss.push(`${v.pop}/13 people`);
+    if ((v.wealth || 0) <= 18) miss.push(`${Math.floor(v.wealth || 0)}/19 wealth`);
+    if (v.prosperity <= 0.75) miss.push(`${(v.prosperity * 100) | 0}/76% prosperity`);
+    if (!miss.length) return '<div class="ins-note">Ready for a scholar — one will take up the study soon.</div>';
+    return `<div class="ins-note ins-gate">No scholars, and so no discoveries. Wants: ${miss.join(', ')}.</div>`;
+  }
+
   // A town's roster of trades — who is actually here, and what that buys it.
   function describeTrades(v) {
     if (!v.jobs || !Sim.PROFESSIONS) return '';
@@ -1767,7 +2049,10 @@
     return `<div class="ins-row"><span>Trades</span><b style="text-align:right">${roster}</b></div>` +
       `<div class="ins-row"><span>Harvest</span><b>+${(L.food || 0).toFixed(2)}/t</b></div>` +
       (L.science > 0.01 ? `<div class="ins-row"><span>Study</span><b>${(L.science || 0).toFixed(2)}/t</b></div>` : '') +
-      (v.order != null ? `<div class="ins-bar"><span>Order</span>${bar(v.order, '#7aa0e0')}</div>` : '') +
+      (v.order != null ? `<div class="ins-bar"><span>Order</span>${bar(v.order, v.order < 0.35 ? '#e07a7a' : '#7aa0e0')}</div>` : '') +
+      ((v.underAttack || 0) > 0 ? `<div class="ins-row war"><span>⚔ Under attack</span><b>raising soldiers</b></div>` : '') +
+      ((v.crimeT || 0) > 0 ? `<div class="ins-row war"><span>🗝 Thieves</span><b>the store is being robbed</b></div>` : '') +
+      ((v.plagueT || 0) > 0 ? `<div class="ins-row war"><span>☣ Sickness</span><b>${v.sickCount || 0} afflicted</b></div>` : '') +
       (v.morale != null ? `<div class="ins-bar"><span>Morale</span>${bar(v.morale, '#c48ae0')}</div>` : '');
   }
 
@@ -1800,7 +2085,14 @@
     G.openPanel = name;
     $('#panel-' + name).classList.add('show');
     $('#tab-' + name) && $('#tab-' + name).classList.add('active');
-    $('#chronicle').style.display = 'none'; // panels own that corner
+    // Three things want that column: the panel (z17), the inspector (z15) and
+    // the chronicle (z14). Only the topmost was reachable, so opening a panel
+    // silently buried the inspector's action buttons under .panel-scroll —
+    // you could see a dossier you could not press. The panel takes the column
+    // outright; selecting something while a panel is open closes the panel
+    // instead (see selectAt).
+    $('#chronicle').style.display = 'none';
+    $('#inspect').classList.remove('show');
     refreshOpenPanel(true);
     Audio8.sfx('select');
   }
@@ -1811,6 +2103,7 @@
     $('#chronicle').style.display = '';
     G.openPanel = null;
   }
+  let lastDeedSig = '';
   function refreshOpenPanel(force) {
     if (!G.openPanel) return;
     switch (G.openPanel) {
@@ -1819,10 +2112,53 @@
       case 'feed': renderFeed(); break;
       case 'souls': renderSouls(force); break;
       case 'time': renderTime(force); break;
-      case 'testament': if (force) renderTestament(); break;
+      // Deeds count progress ("7/25 lightning bolts") and only ever redrew on
+      // force, so casting with the panel open left the counter frozen. Redraw
+      // only when a count actually moves: renderTestament replaces innerHTML,
+      // and doing that every 250ms would re-hide a hint the moment you
+      // revealed it.
+      case 'testament': {
+        const sig = ACHIEVEMENTS.map(a => G.ach[a.id] || 0).join(',') + '|' + G.story.active +
+                    '|' + Object.keys(G.story.done).length + '|' + G.divinity;
+        if (force || sig !== lastDeedSig) { lastDeedSig = sig; renderTestament(); }
+        break;
+      }
       case 'cosmos': if (force) renderCosmosControls(); break;
       case 'genesis': break; // static form
     }
+  }
+
+  // How close a nation is to its next era. `need` is the same expression the
+  // sim uses (society.js) — neither n.science nor the threshold appeared
+  // anywhere in the game, so "why won't they advance" had no answer, while a
+  // Testament chapter hung on reaching the Modern age.
+  function eraNeed(era) { return 40 * Math.pow(1.9, era); }
+  function nationProgress(n) {
+    const ERAS = PD.Society.ERAS;
+    if (n.era >= ERAS.length - 1) return '<div class="nat-era">Space Age — nothing further to learn.</div>';
+    const need = eraNeed(n.era);
+    const pct = PD.clamp((n.science || 0) / need, 0, 1);
+    return `<div class="nat-era">
+      <span>→ ${ERAS[n.era + 1]}</span>
+      <span class="bar"><span class="bar-fill" style="width:${(pct * 100).toFixed(0)}%;background:var(--accent)"></span></span>
+      <small>${Math.floor(n.science || 0)}/${Math.floor(need)}</small></div>`;
+  }
+  // The drifting opinions that actually decide who declares war (they snap at
+  // -70). Omniscience promised "every nation's true intent" and rendered none
+  // of it; this is that promise, kept, and shown only while the eye is open.
+  function nationIntent(n, soc) {
+    if (!G.omniscient || soc.nations.length < 2) return '';
+    const rows = [];
+    for (const m of soc.nations) {
+      if (m.id === n.id) continue;
+      const r = n.relations ? n.relations[m.id] : null;
+      if (r == null) continue;
+      const mood = r < -70 ? 'murderous' : r < -35 ? 'hostile' : r < -10 ? 'cold'
+                 : r < 15 ? 'wary' : r < 50 ? 'warm' : 'devoted';
+      const col = r < -35 ? '#ff8a6a' : r < 15 ? '#9aa6c8' : '#7fe0a0';
+      rows.push(`<span style="color:${col}">${m.name}: ${mood} (${Math.round(r)})</span>`);
+    }
+    return rows.length ? `<div class="nat-intent">👁 ${rows.join(' · ')}</div>` : '';
   }
 
   // ---- History panel ----
@@ -1835,10 +2171,18 @@
     // nations summary
     const ns = $('#nations-list');
     if (soc.nations.length) {
+      const nameOf = (id) => { const m = soc.nations.find(x => x.id === id); return m ? m.name : 'someone'; };
       ns.innerHTML = '<div class="panel-subtitle">Nations</div>' + soc.nations.map(n => {
         const R = Sim.RACES[n.race];
+        // "AT WAR" without saying with whom was the whole report on the one
+        // thing the player might want to intervene in
+        const war = n.warWith.length
+          ? ' · <span class="nat-war">⚔ at war with ' + n.warWith.map(nameOf).join(', ') + '</span>' : '';
         return `<div class="nation-line">${R ? R.emoji : '?'} <b>${n.name}</b> · ${PD.Society.ERAS[n.era]} · ${PD.Society.GOVERNMENTS[n.gov]}<br>
-          <small>${n.leaderName} the ${n.leaderTrait} · pop ${n.pop || 0}${n.warWith.length ? ' · ⚔ AT WAR' : ''}</small></div>`;
+          <small>${n.leaderName} the ${n.leaderTrait} · pop ${n.pop || 0}${
+            n.scholars ? ' · 📚 ' + n.scholars + ' scholar' + (n.scholars === 1 ? '' : 's')
+                       : ' · <span style="color:#8a7a5a">no scholars</span>'
+          }${war}</small>${nationProgress(n)}${nationIntent(n, soc)}</div>`;
       }).join('');
     } else ns.innerHTML = '';
     // legends
@@ -1856,12 +2200,26 @@
     el.innerHTML = soc.prayers.map(p =>
       `<div class="prayer">
         <div class="prayer-text">${p.text}</div>
+        <div class="prayer-grant">${PRAYER_GRANT[p.kind] || 'Their karma rises.'}</div>
         <div class="prayer-btns">
           <button class="pr-answer" data-pid="${p.id}">✨ Answer (+8✦)</button>
-          <button class="pr-refuse" data-pid="${p.id}">🌑 Refuse</button>
+          <button class="pr-refuse" data-pid="${p.id}">🌑 Refuse (−1 karma)</button>
         </div>
       </div>`).join('');
   }
+  // What answering actually does. The effects are wildly unequal — 'monster'
+  // grants a Paragon, the same thing Empower Hero sells for ✦60, in exchange
+  // for GAINING ✦8 — and the panel showed two identical buttons and one
+  // number, so "send us food" and "send us a hero" looked the same. Mirrors
+  // the switch in answerPrayer (society.js).
+  const PRAYER_GRANT = {
+    sick:    'Grants: healed of sickness, restored to full.',
+    famine:  'Grants: +60 food to their town.',
+    war:     'Grants: the town\'s feud ends, and everyone near them is healed.',
+    child:   'Grants: a child is born to their village.',
+    monster: 'Grants: they become a Paragon — a champion, permanently.',
+    thanks:  'Grants: nothing but their gratitude. Karma only.'
+  };
   $('#prayers-list') && $('#prayers-list').addEventListener('click', () => {});
 
   // ---- PixelNet feed ----
@@ -1951,6 +2309,8 @@
     for (const a of ACHIEVEMENTS) {
       const have = G.ach[a.id] || 0;
       const done2 = have >= a.need;
+      // a hidden deed does not exist until you have done it
+      if (a.hidden && !done2) continue;
       html += `<div class="deed ${done2 ? 'deed-done' : ''}">${done2 ? '🏆' : '▫'} <b>${a.name}</b> — ${a.desc} <small>(${Math.min(have, a.need)}/${a.need})</small></div>`;
     }
     // transcendence status
@@ -2201,6 +2561,25 @@
     });
     $('#btn-menu').addEventListener('click', toggleMenu);
     $('#btn-save').addEventListener('click', () => save());
+    // The faith rate was one number with no way to ask what it was made of.
+    // Tap it and it says.
+    const fstat = document.querySelector('#hud-top .stat.faith');
+    if (fstat) {
+      fstat.addEventListener('click', () => {
+        const b = faithBreakdown();
+        const lines = b.rows.filter(r => Math.abs(r[1]) > 0.0005 || r[0] === 'base')
+          .map(r => `<div class="fb-row"><span>${r[0]}</span><b>+${r[1].toFixed(2)}</b>${r[2] ? `<small>${r[2]}</small>` : ''}</div>`);
+        ask({
+          title: '✦ Where your faith comes from',
+          html: `<div class="fb">${lines.join('')}
+            <div class="fb-row fb-sum"><span>subtotal</span><b>+${b.sub.toFixed(2)}</b></div>
+            <div class="fb-row"><span>divinity ⍟${G.divinity}</span><b>×${b.mult.toFixed(2)}</b></div>
+            <div class="fb-row fb-sum"><span>per tick</span><b>+${b.total.toFixed(2)}</b></div></div>
+            <p class="panel-note">A wonder is worth ${(0.8 / 0.22).toFixed(1)} temples. Wonders raise themselves in towns of level 4 and above.</p>`,
+          ok: 'Close', cancel: null
+        });
+      });
+    }
     const search = $('#tool-search');
     if (search) {
       search.addEventListener('input', () => { G.toolQuery = search.value; buildToolbar(); });

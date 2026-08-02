@@ -64,6 +64,47 @@
       color: 'rgba(224,168,106,0.9)', race: 'dwarf',
       desc: 'Carve the stout Dwarves from the mountains — hardy and enduring.',
       apply(G, wx, wy) { return spawnRace(G, 'dwarf', wx, wy, this.cost); } },
+    // Nine of the thirteen sentient peoples had no way into the world at all.
+    // The intro card promises "breathe life into 16 peoples"; the toolbar
+    // offered four, and the only other route was evolution stage 4 picking
+    // one of thirteen at random, behind a Primordial planet and five
+    // advances. Prices track hp/dmg/lifespan against the four that existed.
+    { id: 'spawn_gnome', name: 'Gnomes', icon: '🍄', cat: 'life', cost: 12, radius: 2, cont: true,
+      color: 'rgba(232,200,224,0.9)', race: 'gnome',
+      desc: 'Wake the Gnomes — small, curious, and forever taking things apart. Their nations learn fastest.',
+      apply(G, wx, wy) { return spawnRace(G, 'gnome', wx, wy, this.cost); } },
+    { id: 'spawn_halfling', name: 'Halflings', icon: '🥧', cat: 'life', cost: 7, radius: 2, cont: true,
+      color: 'rgba(240,216,168,0.9)', race: 'halfling',
+      desc: 'Settle the Halflings in the soft country. They want nothing but a full larder, and they breed for it.',
+      apply(G, wx, wy) { return spawnRace(G, 'halfling', wx, wy, this.cost); } },
+    { id: 'spawn_goblin', name: 'Goblins', icon: '👺', cat: 'life', cost: 6, radius: 2, cont: true,
+      color: 'rgba(168,200,96,0.9)', race: 'goblin',
+      desc: 'Let the Goblins out of the swamp. Weak, short-lived, hostile to everything, and there are always more.',
+      apply(G, wx, wy) { return spawnRace(G, 'goblin', wx, wy, this.cost); } },
+    { id: 'spawn_tiefling', name: 'Tieflings', icon: '😈', cat: 'life', cost: 13, radius: 2, cont: true,
+      color: 'rgba(216,138,122,0.9)', race: 'tiefling',
+      desc: 'Call the Tieflings up out of the ash. Horned, hard to burn, and at home where nothing else will live.',
+      apply(G, wx, wy) { return spawnRace(G, 'tiefling', wx, wy, this.cost); } },
+    { id: 'spawn_dragonborn', name: 'Dragonborn', icon: '🐲', cat: 'life', cost: 18, radius: 2, cont: true,
+      color: 'rgba(200,160,64,0.9)', race: 'dragonborn',
+      desc: 'Raise the Dragonborn from the desert stone — few, slow to breed, and worth three of anyone in a fight.',
+      apply(G, wx, wy) { return spawnRace(G, 'dragonborn', wx, wy, this.cost); } },
+    { id: 'spawn_lizardfolk', name: 'Lizardfolk', icon: '🦎', cat: 'life', cost: 10, radius: 2, cont: true,
+      color: 'rgba(122,176,96,0.9)', race: 'lizardfolk',
+      desc: 'Stir the Lizardfolk in the wet heat. They thrive where the swamp defeats everyone else.',
+      apply(G, wx, wy) { return spawnRace(G, 'lizardfolk', wx, wy, this.cost); } },
+    { id: 'spawn_merfolk', name: 'Merfolk', icon: '🧜', cat: 'life', cost: 14, radius: 2, cont: true,
+      color: 'rgba(122,200,216,0.9)', race: 'merfolk',
+      desc: 'Give the sea a people. Merfolk cross water and shore alike — the only ones who can.',
+      apply(G, wx, wy) { return spawnRace(G, 'merfolk', wx, wy, this.cost); } },
+    { id: 'spawn_fairy', name: 'Fairies', icon: '🧚', cat: 'life', cost: 16, radius: 2, cont: true,
+      color: 'rgba(240,200,248,0.9)', race: 'fairy',
+      desc: 'Let there be Fairies — fragile, near-immortal, tending the hurt wherever they drift.',
+      apply(G, wx, wy) { return spawnRace(G, 'fairy', wx, wy, this.cost); } },
+    { id: 'spawn_giant', name: 'Giants', icon: '🗿', cat: 'life', cost: 26, radius: 2, cont: true,
+      color: 'rgba(216,176,144,0.9)', race: 'giant',
+      desc: 'Wake the Giants in the high cold. Almost nothing kills one, and almost nothing makes another.',
+      apply(G, wx, wy) { return spawnRace(G, 'giant', wx, wy, this.cost); } },
     { id: 'spawn_critter', name: 'Critters', icon: '🐇', cat: 'life', cost: 2, radius: 2, cont: true,
       color: 'rgba(230,216,176,0.9)', race: 'critter',
       desc: 'Scatter little critters across the grass. Prey for the food chain.',
@@ -775,6 +816,8 @@
       apply(G) {
         if (!G.omniscient && G.faith < this.cost) { snd('error'); return 0; }
         G.omniscient = !G.omniscient;
+        // the greater form's reach does not outlive the eye that carries it
+        if (!G.omniscient) G.omniAll = false;
         if (PD.Society) PD.Society.hist(G.sim, G.omniscient ? 'The eye opens. Nothing is hidden.' : 'The eye closes.', 'faith');
         snd(G.omniscient ? 'bless' : 'click');
         return G.omniscient ? this.cost : 0;
@@ -791,7 +834,12 @@
         // scrub every trace: chronicle, legends, feed, and the afterlife
         if (PD.Society) {
           const soc = PD.Society.ensure(G.sim);
-          const strip = (arr, key) => { for (let i = arr.length - 1; i >= 0; i--) if ((arr[i][key] || '').indexOf(name) >= 0) arr.splice(i, 1); };
+          // Whole names only. Names are GIVEN+GIVEN2 concatenations, so a
+          // plain indexOf made 'Ala' a match inside 'Alan' — erasing one soul
+          // silently deleted the chronicle, legends and posts of every
+          // stranger whose name happened to contain theirs.
+          const re = new RegExp('(^|[^A-Za-z])' + name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?![A-Za-z])');
+          const strip = (arr, key) => { for (let i = arr.length - 1; i >= 0; i--) if (re.test(arr[i][key] || '')) arr.splice(i, 1); };
           strip(soc.history, 'text'); strip(soc.legends, 'deed'); strip(soc.feed, 'author'); strip(soc.feed, 'text');
         }
         if (PD.Afterlife) PD.Afterlife.erase && PD.Afterlife.erase(name);
@@ -809,16 +857,18 @@
         const plane = PD.Afterlife.AL.planes['grayfields'];
         if (!plane || !plane.souls.length) { snd('error'); return 0; }
         const names = plane.souls.slice(0, 40).map(s => s.name);
-        let n = 0;
+        const back = [];
         for (const nm of names) {
           const spot = W.nearestLand(G.world, wx + (Math.random() * 8 - 4), wy + (Math.random() * 8 - 4), 12);
           if (!spot) continue;
-          if (PD.Afterlife.resurrect(nm, G.sim, spot.x, spot.y)) n++;
+          const u = PD.Afterlife.resurrect(nm, G.sim, spot.x, spot.y);
+          if (u) back.push(u);
         }
-        if (!n) { snd('error'); return 0; }
+        if (!back.length) { snd('error'); return 0; }
         FX.shock(wx, wy, 8, '#bfffdc');
-        if (PD.Society) PD.Society.hist(G.sim, `${n} souls are breathed back out of limbo. The Grayfields thin.`, 'legend');
+        if (PD.Society) PD.Society.hist(G.sim, `${back.length} souls are breathed back out of limbo. The Grayfields thin.`, 'legend');
         snd('levelup');
+        firstOfTheThirst(G, back);
         return this.cost;
       } },
     { id: 'sabbath', name: 'Sabbath', icon: '⏸️', cat: 'godhead', cost: 25, radius: 0, cont: false,
@@ -835,6 +885,52 @@
       } },
 
   ];
+
+  // ------------------------------------------------------------------
+  // Vampires have been fully implemented since the first build — nocturnal,
+  // 9000-tick lifespan, their own art, and a bite that turns the bitten. The
+  // only line that ever created one required the killer to be a vampire
+  // already. No power made them, no omen, no ambient spawn, and they were
+  // left out of SENTIENT so evolution could not pick them either. A vampire
+  // could only be made by a vampire, so there had never been a first one.
+  //
+  // That stays true. There is exactly one way to make patient zero, and
+  // nothing in the game will tell you what it is: breathe the Grayfields
+  // empty while a blood moon is up, and one of them comes back wrong. From
+  // there the bite does the rest with no help from anyone.
+  //
+  // Do not mention this in the power's description, the Testament, or a
+  // tooltip. It is meant to be found.
+  function firstOfTheThirst(G, returned) {
+    const sim = G.sim;
+    if (!sim || !(sim.bloodMoonT > 0)) return;
+    if ((sim.counts && sim.counts.vampire) > 0) return;   // there is already a first
+    if (!returned || !returned.length) return;
+    // One of the souls you just breathed back — not an extra body. A mature
+    // world sits at UNIT_CAP, so anything that needed headroom of its own
+    // would never happen on the worlds where blood moons do.
+    const u = returned[(Math.random() * returned.length) | 0];
+    if (!u || u.dead) return;
+    u.race = 'vampire';
+    // The progenitor is not an ordinary vampire. An ordinary one — made by a
+    // bite — has 40 hp and dies to the first mob that finds it, which is
+    // fine; that is what a vampire is. But this one was breathed out of limbo
+    // by a god under a blood moon, and it has to survive long enough to make
+    // a second. Only this one is built this way; every vampire it makes is
+    // the ordinary kind.
+    u.paragon = 2;
+    u.maxHp = PD.Sim.RACES.vampire.hp * 5;
+    u.hp = u.maxHp;
+    u.village = -1;                       // it does not go home
+    u.lifespan = Math.max(u.lifespan || 0, (u.age || 0) + 9000);
+    PD.Sim.recount(sim);                  // so counts.vampire is true immediately
+    if (FX) { FX.shock(u.x, u.y, 5, '#5a1030'); FX.blood && FX.blood(u.x, u.y); }
+    if (PD.Society) PD.Society.hist(sim, 'One of them did not come back the same.', 'legend');
+    PD.Sim.logEvent(sim, 'One of them did not come back the same.', 'fall');
+    // G.ach is the counter map, not the function — the recorder is G.deed
+    if (typeof G.deed === 'function') G.deed('firstthirst');
+    snd('plague');
+  }
 
   // helpers for targeted powers
   function nearestUnit(G, wx, wy, r) {
@@ -889,5 +985,231 @@
     { id: 'omni', name: 'Omnipotence' }
   ];
 
-  global.PD.Powers = { soundAt, POWERS, BY_ID, CATEGORIES };
+
+  // =====================================================================
+  //  THE SECOND WORD
+  //
+  //  A god speaks, and the world obeys. A god speaks AND HOLDS, and the
+  //  word becomes a Word. Every power below has a greater form: hold the
+  //  press until the ring closes and release, and what happens instead is
+  //  the same act committed without restraint.
+  //
+  //  Mechanically this is one trick applied uniformly. Powers read
+  //  `this.cost` and `this.radius` off their own object, so the invoker
+  //  swaps those for the greater values and calls the ordinary apply()
+  //  several times across a wider area. That means every power escalates
+  //  correctly without 57 bespoke implementations — and the ones that
+  //  deserve something qualitatively different get an `apply` of their own.
+  //
+  //  Not everything has one. `inspect` and `pan` are navigation, not acts;
+  //  the eight genesis steps are a fixed scripted sequence where "more"
+  //  would break the ordering of creation itself.
+  // =====================================================================
+  const AWE = {
+    // ---- life: one becomes many ----
+    spawn_human:  { name: 'A MULTITUDE',        cost: 44,  rMul: 3.2, reps: 9,
+                    desc: 'Not a family. A generation, arriving at once.' },
+    spawn_elf:    { name: 'THE LONG COUNCIL',   cost: 55,  rMul: 3.2, reps: 9,
+                    desc: 'The forest fills with those who will outlive your regret.' },
+    spawn_orc:    { name: 'THE HORDE',          cost: 50,  rMul: 3.4, reps: 11,
+                    desc: 'Not warriors. A war, already begun.' },
+    spawn_dwarf:  { name: 'THE DEEP HOLDS',     cost: 60,  rMul: 3.0, reps: 9,
+                    desc: 'The mountain is opened, and it was always full.' },
+    spawn_gnome:  { name: 'THE WORKSHOP AGE',   cost: 66,  rMul: 3.0, reps: 9,
+                    desc: 'Every one of them already has an idea.' },
+    spawn_halfling:{ name: 'THE HUNDRED HEARTHS', cost: 40, rMul: 3.4, reps: 11,
+                    desc: 'The kettles go on across a whole county at once.' },
+    spawn_goblin: { name: 'THE SWARM',          cost: 34,  rMul: 3.6, reps: 13,
+                    desc: 'You will not count them. Nobody ever has.' },
+    spawn_tiefling:{ name: 'THE INFERNAL COMPACT', cost: 72, rMul: 3.0, reps: 9,
+                    desc: 'The ash remembers what walked out of it.' },
+    spawn_dragonborn:{ name: 'THE SCALED LEGION', cost: 100, rMul: 2.8, reps: 8,
+                    desc: 'Few. Enough.' },
+    spawn_lizardfolk:{ name: 'THE DROWNED CITIES', cost: 56, rMul: 3.2, reps: 10,
+                    desc: 'The swamp was never empty. It was only waiting.' },
+    spawn_merfolk:{ name: 'THE TIDE PEOPLE',    cost: 78,  rMul: 3.4, reps: 10,
+                    desc: 'Every shore at once, and everything between them.' },
+    spawn_fairy:  { name: 'THE GLIMMERING',     cost: 105, rMul: 3.6, reps: 12,
+                    desc: 'The air itself goes kind.' },
+    spawn_giant:  { name: 'THE OLD HIGH FOLK',  cost: 95,  rMul: 2.6, reps: 6,
+                    desc: 'They were here before the mountains had names.' },
+    spawn_critter:{ name: 'THE TEEMING',        cost: 12,  rMul: 4.0, reps: 14,
+                    desc: 'Every hedge and hollow, all at once, alive.' },
+    spawn_wolf:   { name: 'THE LONG WINTER PACK',cost: 22, rMul: 3.4, reps: 10,
+                    desc: 'The dark between the trees acquires eyes.' },
+    spawn_kraken: { name: 'WHAT SLEEPS BENEATH',cost: 190, rMul: 3.0, reps: 4,
+                    desc: 'The deep gives up more than one of its children.' },
+    found:        { name: 'A CITY, ENTIRE',     cost: 220, rMul: 1,   reps: 5,
+                    desc: 'Not a settlement to grow, but streets that were always there.' },
+
+    // ---- terra: the hand of the sculptor, unrestrained ----
+    raise:        { name: 'CONTINENT',          cost: 26,  rMul: 3.6, reps: 8,
+                    desc: 'The sea remembers where it used to be.' },
+    lower:        { name: 'THE ABYSSAL TRENCH', cost: 26,  rMul: 3.6, reps: 8,
+                    desc: 'Open the floor of the world and let the water in.' },
+    forest:       { name: 'THE OLD WOOD',       cost: 18,  rMul: 3.8, reps: 10,
+                    desc: 'A forest with no memory of having been planted.' },
+    grass:        { name: 'THE GREAT PLAIN',    cost: 18,  rMul: 3.8, reps: 10,
+                    desc: 'Green to the horizon, and past it.' },
+    desert:       { name: 'THE EMPTY QUARTER',  cost: 18,  rMul: 3.8, reps: 10,
+                    desc: 'Everything the wind touches, it keeps.' },
+    mountain:     { name: 'THE SPINE OF THE WORLD', cost: 34, rMul: 3.4, reps: 9,
+                    desc: 'Stone thrown at heaven, and it stays there.' },
+
+    // ---- blessing: mercy at scale ----
+    bless:        { name: 'GRACE ABOUNDING',    cost: 48,  rMul: 3.2, reps: 9,
+                    desc: 'Every soul in reach, lifted, whether they asked or not.' },
+    rain:         { name: 'THE LONG RAINS',     cost: 30,  rMul: 3.2, reps: 8,
+                    desc: 'Weeks of it. The rivers will remember this year.' },
+
+    // ---- wrath: the difference between anger and judgement ----
+    lightning:    { name: 'THE STORM ENTIRE',   cost: 70,  rMul: 2.6, reps: 12,
+                    desc: 'Not a bolt. A sky that has decided.' },
+    fire:         { name: 'THE BURNING',        cost: 34,  rMul: 3.6, reps: 12,
+                    desc: 'Fire that does not need anything left to want more.' },
+    meteor:       { name: 'THE HAMMER FALL',    cost: 190, rMul: 2.6, reps: 7,
+                    desc: 'The sky opens in several places at once.' },
+    plague:       { name: 'THE PESTILENCE',     cost: 90,  rMul: 3.0, reps: 8,
+                    desc: 'It will outlast the ones who first carried it.' },
+    quake:        { name: 'THE SUNDERING',      cost: 140, rMul: 2.8, reps: 7,
+                    desc: 'The ground stops being a thing that can be trusted.' },
+    freeze:       { name: 'THE LONG COLD',      cost: 62,  rMul: 3.2, reps: 9,
+                    desc: 'Winter arrives and forgets to leave.' },
+    raise_dead:   { name: 'THE RESTLESS DEAD',  cost: 85,  rMul: 3.2, reps: 10,
+                    desc: 'Every grave in reach hears you.' },
+    storm:        { name: 'THE TEMPEST',        cost: 95,  rMul: 2.4, reps: 6,
+                    desc: 'A storm with a shape and an intention.' },
+    tornado:      { name: 'THE WHIRLWIND',      cost: 200, rMul: 2.2, reps: 6,
+                    desc: 'Speak from inside it, if you have anything to say.' },
+    volcano:      { name: 'THE FIRE UNDERNEATH',cost: 260, rMul: 2.6, reps: 5,
+                    desc: 'What the world is actually made of, briefly visible.' },
+
+    // ---- godhead ----
+    voice:        { name: 'THE VOICE UNVEILED', cost: 32,  rMul: 1, reps: 5,
+                    desc: 'Not a whisper to one. A word to everyone alive.' },
+    empower:      { name: 'THE CHOSEN',         cost: 300, rMul: 1, reps: 4,
+                    desc: 'Not a hero. A generation of them.' },
+    miracle:      { name: 'THE AGE OF WONDERS', cost: 140, rMul: 2.8, reps: 8,
+                    desc: 'Enough impossible things that they stop counting.' },
+    stabilize:    { name: 'THE STILL POINT',    cost: 700, rMul: 1, reps: 3,
+                    desc: 'The core forgets it was ever restless.' },
+    evolve:       { name: 'THE GREAT LEAP',     cost: 160, rMul: 1, reps: 5,
+                    desc: 'A hundred thousand years, spent at once.' },
+    judgment:     { name: 'THE FINAL ACCOUNTING', cost: 800, rMul: 1, reps: 3,
+                    desc: 'Every ledger, opened, and every one read aloud.' },
+    omniscience:  { name: 'THE UNBLINKING EYE', cost: 190, rMul: 1,
+                    toggle: true, flag: 'omniscient',
+                    desc: 'Nothing is hidden. Nothing was ever hidden.',
+                    // the lesser eye only reads what you lean close to; this
+                    // one reads the whole world at any remove, and the
+                    // nations' private opinions of each other with it
+                    after(G) { G.omniAll = true; } },
+    unmake:       { name: 'ERASURE',            cost: 340, rMul: 1, reps: 3,
+                    desc: 'Not killed. Never having been.' },
+    breath:       { name: 'THE FIRST BREATH',   cost: 520, rMul: 1, reps: 4,
+                    desc: 'The lungs of the world fill again.' },
+    sabbath:      { name: 'THE LONG SABBATH',   cost: 110, rMul: 1,
+                    toggle: true, flag: 'sabbath',
+                    desc: 'Rest, imposed. The world will thank you later.',
+                    // rest that repairs: every fire goes out, every larder
+                    // fills, every town breathes easier while nothing moves
+                    after(G) {
+                      const sim = G.sim; if (!sim) return;
+                      const w = sim.world;
+                      if (w && w.fire) w.fire.fill(0);
+                      for (const v of sim.villages) {
+                        v.food += 40;
+                        v.prosperity = PD.clamp((v.prosperity || 0) + 0.25, 0, 1);
+                      }
+                      if (PD.Society) PD.Society.hist(sim, 'The long rest. Fires die, granaries fill, and nothing stirs.', 'faith');
+                    } },
+
+    // ---- politics: the thumb on the scale, pressed harder ----
+    crown:        { name: 'THE DYNASTY',        cost: 95,  rMul: 1, reps: 5,
+                    desc: 'Not a ruler. A line of them, and a claim.' },
+    peace:        { name: 'THE GREAT PEACE',    cost: 140, rMul: 1, reps: 5,
+                    desc: 'Every blade in the world set down at once.' },
+    incite:       { name: 'THE WORLD WAR',      cost: 120, rMul: 1, reps: 6,
+                    desc: 'Everyone remembers a grievance simultaneously.' },
+    revolt:       { name: 'THE TURNING',        cost: 120, rMul: 1, reps: 6,
+                    desc: 'Every throne at once discovers it is only a chair.' },
+
+    // ---- scripture ----
+    flood:        { name: 'THE DELUGE',         cost: 560, rMul: 1, reps: 4,
+                    desc: 'Forty days was a mercy. This is not that.' },
+    plagues:      { name: 'ALL OF THEM, AT ONCE', cost: 280, rMul: 2.4, reps: 8,
+                    desc: 'The ten did not have to arrive in order.' },
+    prophet:      { name: 'THE PROPHETS',       cost: 140, rMul: 1, reps: 5,
+                    desc: 'Many voices, one message, no possible misunderstanding.' },
+    commandments: { name: 'THE WHOLE LAW',      cost: 230, rMul: 1, reps: 4,
+                    desc: 'Not ten. Everything, carved, and binding.' },
+    babel:        { name: 'THE SCATTERING',     cost: 180, rMul: 1, reps: 5,
+                    desc: 'Not confusion of tongues. Confusion of intent.' },
+
+    // ---- omnipotence: already excessive; make it absurd ----
+    midas:        { name: 'THE GOLDEN AGE',     cost: 250, rMul: 3.0, reps: 8,
+                    desc: 'Everything you meant to be beautiful, and it is.' },
+    blackhole:    { name: 'THE THROAT OF NIGHT',cost: 420, rMul: 2.6, reps: 5,
+                    desc: 'A hole with an appetite and a memory.' },
+    host:         { name: 'THE HEAVENLY WAR',   cost: 320, rMul: 3.0, reps: 8,
+                    desc: 'The sky is full of wings and none of them are gentle.' },
+    legion:       { name: 'THE PIT, OPENED',    cost: 320, rMul: 3.0, reps: 8,
+                    desc: 'It was never a metaphor.' },
+    armageddon:   { name: 'THE LAST DAY',       cost: 1100, rMul: 1, reps: 4,
+                    desc: 'There is no verse after this one.' },
+    zombify:      { name: 'THE GREAT NECROPOLIS', cost: 360, rMul: 2.8, reps: 8,
+                    desc: 'A city where the census only ever goes up.' },
+    polymorph:    { name: 'THE UNSHAPING',      cost: 140, rMul: 3.2, reps: 9,
+                    desc: 'Form was only ever a suggestion.' },
+    youth:        { name: 'THE UNAGEING',       cost: 180, rMul: 3.2, reps: 9,
+                    desc: 'Give back every year you took, and then some.' },
+    fertility:    { name: 'THE QUICKENING',     cost: 160, rMul: 3.2, reps: 9,
+                    desc: 'Every cradle in the province, filled by morning.' },
+    rapture:      { name: 'THE GATHERING',      cost: 270, rMul: 3.0, reps: 8,
+                    desc: 'The worthy are taken. The rest look up.' },
+    aegis:        { name: 'THE UNBREAKABLE',    cost: 230, rMul: 1, reps: 5,
+                    desc: 'Nothing you love can be touched today.' },
+    titan:        { name: 'THE COLOSSI',        cost: 450, rMul: 1, reps: 5,
+                    desc: 'They will have to invent new words for them.' }
+  };
+
+  function aweOf(id) { return AWE[id] || null; }
+
+  // Invoke the greater form. Returns faith spent, 0 if refused.
+  function invokeAwe(G, p, wx, wy) {
+    const a = AWE[p.id];
+    if (!a) return 0;
+    if (G.faith < a.cost) { snd('error'); return 0; }
+
+    const baseCost = p.cost, baseRadius = p.radius;
+    // The repeats must not each charge; the greater form is priced once.
+    p.cost = 0;
+    p.radius = Math.max(1, Math.round(baseRadius * (a.rMul || 1)));
+    const spread = Math.max(1.2, baseRadius * 1.25);
+    // A toggle repeated is a toggle undone. Sabbath and Omniscience flip a
+    // flag, so firing them `reps` times landed exactly where one press would
+    // — for four times the faith. Toggles fire once, and only to turn ON.
+    const reps = a.toggle ? 1 : (a.reps || 5);
+    const alreadyOn = a.toggle && a.flag && !!G[a.flag];
+    try {
+      if (!alreadyOn) {
+        for (let i = 0; i < reps; i++) {
+          // first at the point itself, the rest in a ring around it
+          const ang = (i / Math.max(1, reps - 1)) * 6.2832;
+          const d = i === 0 ? 0 : spread * (0.6 + (i % 3) * 0.32);
+          p.apply(G, wx + Math.cos(ang) * d, wy + Math.sin(ang) * d);
+        }
+      }
+      // the escalation proper — what makes the greater form greater
+      if (typeof a.after === 'function') a.after(G, wx, wy);
+    } finally {
+      p.cost = baseCost;
+      p.radius = baseRadius;
+    }
+    if (FX) { FX.shock(wx, wy, 9, '#ffe9a8'); FX.shock(wx, wy, 6, '#fff'); }
+    snd('levelup');
+    return a.cost;
+  }
+
+  global.PD.Powers = { soundAt, AWE, aweOf, invokeAwe, POWERS, BY_ID, CATEGORIES };
 })(window);

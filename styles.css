@@ -53,6 +53,10 @@
   --tab:clamp(34px, 8.2vh, 44px);        /* tab-rail button size */
   --gap:clamp(6px, 1.2vh, 10px);
   --chrome-top:calc(var(--hud-h) + var(--sa-t) + var(--gap));
+  /* the toolbar's width lives here so the side panels can subtract it: at
+     500px wide a 340px panel reached back across 64px of the toolbar, leaving
+     tool buttons visible and unpressable */
+  --tool-w:clamp(154px, 23vw, 206px);
 }
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
 html,body{height:100%;overflow:hidden;background:var(--bg);}
@@ -203,6 +207,15 @@ body{
 .stat.faith .stat-ico{font-size:var(--t-lg);}
 .stat.faith small{color:#b09a40;font-size:var(--t-xs);font-weight:400;}
 .race-counts,#race-counts{display:flex;gap:var(--s1);flex-wrap:nowrap;flex:0 0 auto;}
+/* standing toggles, shown in the HUD only while one is held */
+#toggle-chips{display:flex;gap:var(--s1);align-items:center;}
+.tgl-chip{
+  font-family:var(--f-ui);font-size:var(--t-xs);font-weight:800;
+  letter-spacing:.1em;
+  color:var(--accent);background:rgba(20,40,70,0.55);
+  border:1px solid var(--accent);border-radius:var(--r-sm);
+  padding:var(--s1) var(--s2);white-space:nowrap;
+}
 .race-chip{
   font-family:var(--f-mono);font-size:var(--t-sm);font-weight:600;
   font-variant-numeric:tabular-nums;
@@ -278,7 +291,7 @@ body{
   left:calc(10px + var(--sa-l));
   top:var(--chrome-top);
   bottom:calc(var(--gap) + var(--sa-b));
-  width:clamp(154px, 23vw, 206px);
+  width:var(--tool-w);
   display:flex;flex-direction:column;
   overflow:hidden;
 }
@@ -336,6 +349,17 @@ body{
   background:linear-gradient(180deg,rgba(70,56,16,0.7),rgba(28,22,6,0.7));
   box-shadow:0 0 0 1px var(--gold) inset,0 0 14px rgba(240,200,110,0.3);
 }
+/* a power holding a state, as opposed to a power merely selected: Sabbath and
+   Omniscience are toggles, and nothing used to show that they were on */
+.tool.tool-on{
+  border-color:var(--accent);
+  box-shadow:0 0 0 1px var(--accent) inset,0 0 12px rgba(120,200,255,0.28);
+}
+.tool.tool-on::after{
+  content:'';position:absolute;top:2px;left:2px;width:5px;height:5px;
+  border-radius:50%;background:var(--accent);
+  box-shadow:0 0 6px var(--accent);
+}
 .tool-ico{font-size:clamp(15px,3.2vh,19px);line-height:1;}
 .tool-name{
   font-family:var(--f-ui);font-size:var(--t-xs);font-weight:700;
@@ -350,10 +374,21 @@ body{
 .tool-empty{
   font-size:var(--t-sm);color:var(--dim);text-align:center;padding:var(--s4) var(--s2);
 }
+/* #toolbar is overflow:hidden and cannot scroll. #power-info was flex:0 0
+   auto, so it refused to shrink, and once the greater-form block was added to
+   it the whole thing ran out of the bottom of the toolbar on a short screen —
+   76px of it cut off with nothing able to scroll to it, and painting outside
+   the viewport on the way. It shrinks now, and scrolls what it cannot show;
+   the cap keeps it from eating the power grid it sits under. */
 #power-info{
   border-top:1px solid var(--rule);padding:var(--s3);
-  background:rgba(2,4,10,0.55);flex:0 0 auto;
+  background:rgba(2,4,10,0.55);
+  flex:0 1 auto;min-height:0;max-height:46%;
+  overflow-y:auto;overscroll-behavior:contain;
+  scrollbar-width:thin;scrollbar-color:var(--edge2) transparent;
 }
+#power-info::-webkit-scrollbar{width:5px;}
+#power-info::-webkit-scrollbar-thumb{background:var(--edge2);border-radius:6px;}
 #power-name{
   font-family:var(--f-serif);font-weight:400;font-size:var(--t-lg);
   color:var(--gold);margin-bottom:var(--s1);letter-spacing:.02em;
@@ -415,7 +450,9 @@ body{
   right:calc(var(--tab) + 16px + var(--sa-r));
   top:var(--chrome-top);
   bottom:calc(var(--gap) + var(--sa-b));
-  width:min(340px, calc(100vw - var(--tab) - 32px - var(--sa-l) - var(--sa-r)));
+  /* never back across the toolbar — see --tool-w */
+  width:min(340px, calc(100vw - var(--tab) - 26px - var(--sa-r) - var(--sa-l)
+                        - var(--tool-w) - var(--gap)));
   display:none;flex-direction:column;overflow:hidden;
 }
 .side-panel.show{display:flex;animation:pop .15s ease-out;}
@@ -448,6 +485,17 @@ body{
   background:var(--gold);opacity:.8;
 }
 .panel-note{font-size:var(--t-sm);color:var(--dim);line-height:1.55;margin:var(--s3) 0;}
+/* the faith-income breakdown, opened by tapping the ✦ stat */
+.fb{font-family:var(--f-mono);font-size:var(--t-sm);}
+.fb-row{
+  display:grid;grid-template-columns:1fr auto;align-items:baseline;
+  gap:var(--s2);padding:var(--s1) 0;border-bottom:1px solid rgba(60,70,110,0.25);
+  color:var(--dim);
+}
+.fb-row b{color:var(--ink);font-weight:700;}
+.fb-row small{grid-column:1/-1;color:#5a668c;font-size:var(--t-xs);}
+.fb-row.fb-sum{border-bottom:none;border-top:1px solid var(--gold-dim);color:var(--gold);}
+.fb-row.fb-sum b{color:var(--gold);}
 .empty{font-size:var(--t-md);color:var(--dim);text-align:center;padding:var(--s6) var(--s2);line-height:1.6;}
 
 /* history */
@@ -458,6 +506,19 @@ body{
 .hist-nation{color:var(--good);}
 .nation-line{font-size:var(--t-sm);line-height:1.5;padding:6px 0;border-bottom:1px dotted rgba(60,70,110,0.35);}
 .nation-line small{color:var(--dim);}
+.nat-war{color:#ff8a6a;}
+/* progress to the next era — the quantity the whole tech tree turns on */
+.nat-era{
+  display:flex;align-items:center;gap:var(--s2);margin-top:3px;
+  font-size:var(--t-xs);color:var(--dim);
+}
+.nat-era .bar{flex:1;min-width:40px;height:5px;}
+.nat-era small{font-family:var(--f-mono);white-space:nowrap;}
+/* what the nations privately think of each other — omniscience only */
+.nat-intent{
+  font-size:var(--t-xs);line-height:1.5;margin-top:3px;
+  padding-left:var(--s2);border-left:1px solid var(--accent);
+}
 .legend-line{font-size:var(--t-sm);color:#ffd070;padding:3px 0;}
 
 /* prayers */
@@ -471,6 +532,12 @@ body{
 .prayer-text{
   font-family:var(--f-serif);font-size:var(--t-md);line-height:1.55;
   font-style:italic;color:#dee5f8;margin-bottom:var(--s2);
+}
+/* what answering this one actually grants — the effects range from a heal to
+   a free Paragon, and the two buttons looked identical for all of them */
+.prayer-grant{
+  font-family:var(--f-mono);font-size:var(--t-xs);color:var(--accent);
+  margin-bottom:var(--s2);line-height:1.4;
 }
 .prayer-btns{display:flex;gap:var(--s2);}
 .prayer-btns button{
@@ -542,7 +609,16 @@ body{
 .deed-done{color:#ffd070;} .deed-done b{color:#ffd070;}
 
 /* cosmos */
-#cosmos-canvas{width:100%;height:270px;display:block;border-bottom:2px solid var(--edge);image-rendering:pixelated;cursor:pointer;flex-shrink:0;}
+/* A rigid 270px orrery inside a panel that is 165px tall on a landscape
+   phone: the canvas overflowed its own panel by 158px and pushed
+   #cosmos-controls — every "create a world" button there is — completely off
+   the screen, inside an overflow:hidden box with nothing able to scroll to
+   it. The whole panel was unusable at that height. It yields now. */
+#cosmos-canvas{
+  width:100%;display:block;border-bottom:2px solid var(--edge);
+  image-rendering:pixelated;cursor:pointer;
+  flex:0 1 auto;height:min(270px, 38vh);min-height:64px;
+}
 .cosmos-create{display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-bottom:8px;}
 .cosmos-new{
   font-family:var(--f-ui);font-size:var(--t-xs);font-weight:700;padding:7px 4px;
@@ -569,19 +645,28 @@ body{
 .gen-label small{color:#5a648a;font-size:var(--t-xs);}
 .gen-cols{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
 .gen-flags{display:grid;grid-template-columns:1fr 1fr;gap:4px;margin:10px 0;font-size:var(--t-sm);color:var(--dim);}
-.gen-flags label{cursor:pointer;}
+.gen-flags label{cursor:pointer;display:block;line-height:1.3;}
 .gen-flags input{accent-color:var(--gold);}
+.gen-flags small{display:block;padding-left:18px;font-size:var(--t-xs);color:#5a668c;}
+/* the one irreversible choice on the panel, marked as one */
+.gen-flags label.gen-warn small{color:#d8896a;}
 
 /* ---------- Inspect panel ---------- */
 /* The one panel outside the (correct) .panel-scroll system: it had no bottom,
    no max-height and no overflow, so a village dossier ran straight off the
-   bottom edge with no way to reach the buttons. */
+   bottom edge with no way to reach the buttons.
+   It then had a max-height that let it reach the bottom edge — straight over
+   #chronicle, which lives in the same column at bottom:102px. A real village
+   dossier clears that threshold easily, and the event log vanished under it.
+   --chron-h is the room the chronicle needs; the media queries that hide the
+   chronicle zero it, so the inspector gets the space back. */
+:root{--chron-h:calc(102px + min(170px, 34vh) + var(--gap));}
 #inspect{
   position:absolute;z-index:15;
   right:calc(var(--tab) + 16px + var(--sa-r));
   top:var(--chrome-top);
   width:230px;
-  max-height:calc(100% - var(--chrome-top) - var(--gap) - var(--sa-b));
+  max-height:calc(100% - var(--chrome-top) - var(--chron-h) - var(--gap) - var(--sa-b));
   overflow-y:auto;overscroll-behavior:contain;
   background:rgba(14,19,38,0.85);
   backdrop-filter:var(--glass);-webkit-backdrop-filter:var(--glass);
@@ -594,6 +679,16 @@ body{
 .ins-row{display:flex;justify-content:space-between;gap:var(--s3);font-size:var(--t-sm);margin:var(--s1) 0;color:var(--dim);font-family:var(--f-mono);}
 .ins-row b{color:var(--ink);font-weight:700;}
 .ins-row.war b,.ins-row.war span{color:var(--bad);}
+/* population against the land that feeds it — the cap was silent, so a town
+   that stopped growing gave no reason */
+.ins-cap{font-family:var(--f-mono);color:var(--dim);font-weight:400;}
+.ins-cap.ins-capped{color:#e0a860;}
+/* why a town has no scholars, and therefore why its nation cannot advance */
+.ins-note{
+  font-size:var(--t-xs);line-height:1.5;color:var(--dim);
+  margin:var(--s2) 0;padding-left:var(--s2);border-left:1px solid var(--edge2);
+}
+.ins-note.ins-gate{color:#c8a86a;border-left-color:var(--gold-dim);}
 .ins-bar{font-size:var(--t-sm);color:var(--dim);margin:5px 0;}
 .ins-bar span{display:block;margin-bottom:2px;}
 .bar{height:8px;background:#0a0e1a;border:1px solid var(--edge);border-radius:3px;overflow:hidden;}
@@ -720,7 +815,9 @@ body{
    WIDE and SHORT — height is what actually runs out, so it gets its own
    queries here. */
 @media (max-width:760px){
-  #toolbar{width:clamp(140px, 30vw, 172px);}
+  /* set the variable, not the width: .side-panel subtracts --tool-w to stay
+     off the toolbar, and overriding #toolbar directly would break that link */
+  :root{--tool-w:clamp(140px, 30vw, 172px);}
   .tool-grid{grid-template-columns:1fr;}
   .tool{flex-direction:row;justify-content:flex-start;gap:6px;padding:6px;}
   .tool-name{font-size:var(--t-xs);}
@@ -733,7 +830,9 @@ body{
   .speed-btn{padding:5px 5px;}
 }
 @media (max-width:520px){
+  /* the chronicle steps aside here, so the inspector may have its room */
   #chronicle{display:none;}
+  :root{--chron-h:0px;}
   #power-info #power-desc{min-height:auto;}
 }
 
@@ -759,6 +858,7 @@ body{
   .intro-text{font-size:var(--t-sm);line-height:1.35;}
   .intro-tips li:nth-child(n+4){display:none;}
   #chronicle{display:none;}
+  :root{--chron-h:0px;}
   .menu-help{display:none;}
 }
 /* Below ~320px there is no room for prose at all. CI caught this: the
@@ -798,4 +898,20 @@ body{
 #ask-modal.danger .big-btn{
   background:linear-gradient(170deg,#ff9a80,#e8503a 60%,#a3301f);color:#1a0604;
   box-shadow:0 10px 30px rgba(230,80,58,0.3);
+}
+
+/* ---------- the second word ---------- */
+#power-awe{
+  display:none;margin-top:var(--s2);padding-top:var(--s2);
+  border-top:1px solid var(--gold-dim);
+  font-size:var(--t-xs);line-height:1.45;color:var(--dim);
+}
+#power-awe b{
+  color:var(--gold);font-family:var(--f-serif);font-weight:400;
+  font-size:var(--t-sm);letter-spacing:.06em;
+}
+#power-awe i{color:#9aa6c8;font-style:italic;}
+#power-awe span{
+  color:var(--gold-dim);font-family:var(--f-mono);
+  font-size:calc(var(--t-xs) - 1px);letter-spacing:.12em;text-transform:uppercase;
 }
