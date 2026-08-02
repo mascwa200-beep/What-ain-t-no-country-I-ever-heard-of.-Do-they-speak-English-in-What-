@@ -338,20 +338,29 @@ console.log('genesis hooks fired:', genesisCalls, '| sabbath toggles:', sabbathC
   PD.Powers.BY_ID.breath.apply(eggG, 90, 60);
   PD.Sim.step(sim, 1);
   const made = vampCount();
-  console.log('breath of life UNDER a blood moon — vampires now:', made, '| deeds:', deeds.join(',') || '(none)');
+  // >= 1, not == 1: the progenitor can already have bitten someone inside the
+  // single step below, so this legitimately reads 1 or 2 run to run
+  console.log('breath of life UNDER a blood moon — vampires now:', made, '(expect >=1)',
+    '| deeds:', deeds.join(',') || '(none)');
   if (made < 1) { console.error('EGG ERR: no patient zero under a blood moon'); perrs++; }
   if (deeds.indexOf('firstthirst') < 0) { console.error('EGG ERR: the hidden deed did not fire'); perrs++; }
 
   // (c) it happens once. A second casting must not mint a second progenitor.
+  //
+  // Do NOT measure this as a delta on the vampire count. That count also
+  // falls when a vampire dies, so a broken guard that adds one while another
+  // is killed nets to zero and the test passes while the bug ships. Observed
+  // in practice: this line printed -1 on some runs. Ask the question the
+  // claim actually makes — did the act fire a second time — which only
+  // firstOfTheThirst can answer, and it does, through the deed.
   stock();
   sim.bloodMoonT = 400;
-  const had = vampCount();
   eggG.faith = 1e6;
   PD.Powers.BY_ID.breath.apply(eggG, 90, 60);
   PD.Sim.step(sim, 1);
-  const again = vampCount() - had;
-  console.log('a second casting under a second blood moon — new progenitors:', again, '(expect 0)');
-  if (again > 0) { console.error('EGG ERR: patient zero can be made twice'); perrs++; }
+  const fired = deeds.filter(d => d === 'firstthirst').length;
+  console.log('times the hidden act has fired after three castings:', fired, '(expect 1)');
+  if (fired !== 1) { console.error('EGG ERR: patient zero was made ' + fired + ' times'); perrs++; }
 
 }
 
