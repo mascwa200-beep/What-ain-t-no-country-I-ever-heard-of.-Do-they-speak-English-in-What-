@@ -203,12 +203,13 @@ void main(){
   const VS_CLOUD = `
 attribute vec3 aPos; attribute vec2 aUV;
 uniform mat4 uMVP; uniform float uScroll;
+uniform float uCShell;
 varying vec2 vUV; varying vec2 vUV0; varying vec3 vN;
 void main(){
   vUV = vec2(aUV.x + uScroll, aUV.y);   // the deck drifts...
   vUV0 = aUV;                            // ...but the weather stays over its ground
   vN = aPos;
-  gl_Position = uMVP * vec4(aPos * 1.035, 1.0);
+  gl_Position = uMVP * vec4(aPos * uCShell, 1.0);
 }`;
   const FS_CLOUD = `
 precision highp float;
@@ -1596,6 +1597,16 @@ void main(){
       gl.uniform3fv(pc.u.uSun, sun);
       gl.uniform3fv(pc.u.uEye, eye);
       gl.uniform1f(pc.u.uTime, performance.now() * 0.001);
+      // The deck sat at 1.035 — 223 km up, which is a readable stylised
+      // altitude from orbit and absurd once the camera can stand on the
+      // ground. Bring it down toward the real 8 km as you descend, so from
+      // low altitude the clouds are above you rather than a shell around you.
+      {
+        const camR2 = (cam.sDist != null ? cam.sDist : cam.dist);
+        const altKm2 = (camR2 - 1) * R_EARTH_M / 1000;
+        const k = PD.clamp((altKm2 - 60) / 900, 0, 1);   // 60 km .. 960 km
+        gl.uniform1f(pc.u.uCShell, 1.00126 + (1.035 - 1.00126) * k);
+      }
       gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, r.texCloud); gl.uniform1i(pc.u.uTex, 0);
       gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, r.texClim); gl.uniform1i(pc.u.uClim, 1);
       gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, r.bufIdx);
@@ -1613,7 +1624,14 @@ void main(){
     drawFXLines(r, vp);
     gl.enable(gl.CULL_FACE);
 
-    // Atmosphere. FRONT faces only: the near side of the shell is always in
+    // Atmosphere. Which face to draw depends on whether the camera is INSIDE
+    // the shell — which it never was until cam.min came down to 80 m, and
+    // which silently produced no atmosphere at all when it first could: the
+    // front faces are behind the eye and get culled, so the sky vanished.
+    // The raymarch already starts at ro = uEye and clamps t0 = max(atm.x, 0),
+    // so from inside, the FAR side of the shell is the correct proxy and
+    // covers the screen. Same shader, opposite cull.
+    // FRONT faces only when outside: the near side of the shell is always in
     // front of the planet, so it passes the depth test everywhere and the
     // raymarch can integrate either to the ground or out through the far side.
     // (Back faces fail depth over the disc, so the aerial-perspective term
@@ -1621,6 +1639,9 @@ void main(){
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
     const pa = r.progAtmo;
     const shell = 1.10;
+    const camR = (cam.sDist != null ? cam.sDist : cam.dist);
+    const inside = camR < shell;
+    gl.cullFace(inside ? gl.FRONT : gl.BACK);
     gl.useProgram(pa.p);
     bindAttr(gl, pa.a.aPos, r.bufPos, 3);
     gl.uniformMatrix4fv(pa.u.uMVP, false, vp);
@@ -1632,6 +1653,7 @@ void main(){
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, r.bufIdx);
     gl.drawElements(gl.TRIANGLES, r.nIdx, r.idxType, 0);
 
+    gl.cullFace(gl.BACK);              // restore for everything after this
     gl.depthMask(true);
     gl.disable(gl.BLEND);
     gl.disable(gl.CULL_FACE);
