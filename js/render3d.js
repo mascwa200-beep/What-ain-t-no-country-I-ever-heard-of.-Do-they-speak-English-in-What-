@@ -492,6 +492,33 @@ void main(){
     let headless = true;
     try { headless = !(gl && gl.createShader && gl.createShader(35633)); } catch (e) { headless = true; }
 
+    // A WebView that loses its GL context gets it back only if you ask. There
+    // was no handler at all, so a backgrounded phone or a VRAM squeeze simply
+    // killed the planet — a black canvas with the game still running behind
+    // it. preventDefault is what makes the restore event possible; without it
+    // the browser never offers one.
+    if (!headless && canvas.addEventListener) {
+      canvas.addEventListener('webglcontextlost', (ev) => {
+        ev.preventDefault();
+        if (global.console) console.warn('WebGL context lost — rebuilding on restore');
+        const rr = canvas._pdRenderer;
+        if (rr) { rr.lost = true; rr._texInit = false; }
+      }, false);
+      canvas.addEventListener('webglcontextrestored', () => {
+        const rr = canvas._pdRenderer;
+        if (!rr) return;
+        try {
+          initGL(rr); initPost(rr);
+          rr.lost = false;
+          rr.texDirty = true; rr.heightsDirty = true; rr.crackDirty = true;
+          rr.world.dirty = true;          // force a full re-bake and re-upload
+          if (global.console) console.warn('WebGL context restored');
+        } catch (e) {
+          if (global.console) console.error('context restore failed', e);
+        }
+      }, false);
+    }
+
     // pixel-art terrain bake target (texture source)
     const terra = document.createElement('canvas');
     terra.width = world.W * TILE; terra.height = world.H * TILE;
@@ -507,7 +534,12 @@ void main(){
     // from; `shake` is a real eye-space offset, not a CSS transform on the DOM
     // canvas (which used to desync picking).
     const cam = {
-      lon: 0.6, lat: 0.45, dist: 2.6, min: 1.25, max: 6.5, idle: 0,
+      // dist is measured from the planet CENTRE with the sphere at radius 1,
+      // so altitude = dist - 1. min was 1.25 — one and a half thousand
+      // kilometres up, which is why nothing below it has ever been exercised.
+      // 80 m is street level; everything downstream that divided by dist has
+      // to be re-expressed against ALTITUDE, or it divides by ~1 and explodes.
+      lon: 0.6, lat: 0.45, dist: 2.6, min: 1 + 80 / R_EARTH_M, max: 6.5, idle: 0,
       sLon: 0.6, sLat: 0.45, sDist: 2.6,
       fov: 0.9, fovT: 0.9,
       shake: 0, shakeX: 0, shakeY: 0,
@@ -555,6 +587,9 @@ void main(){
     bakeTerrain(r);
 
     if (!headless) initGL(r);
+    // the context-loss listeners above reach the renderer through the canvas,
+    // because they are attached before r exists
+    if (!headless) canvas._pdRenderer = r;
     r.resize();
     return r;
   }
@@ -572,6 +607,9 @@ void main(){
   const HD = 8;          // baked pixels per tile -> 1440x960 for a 180x120 world
   const NT = 256;        // detail-noise tile size (wraps)
   const SEA = 0.38;
+  // The sphere is radius 1, so one world unit is one Earth radius. Everything
+  // that wants a real distance goes through this.
+  const R_EARTH_M = 6371000;
 
   const HD_COLORS = {
     2:  [214, 196, 148], 3:  [92, 138, 62],  4:  [44, 94, 48],
@@ -970,6 +1008,7 @@ void main(){
   function initPost(r) {
     const gl = r.gl;
     const gl2 = !!(global.WebGL2RenderingContext && gl instanceof global.WebGL2RenderingContext);
+    r.gl2 = gl2;                       // makeTarget needs it for 24-bit depth
     let type = gl.UNSIGNED_BYTE, internal = gl.RGBA;
     if (gl2) {
       // WebGL2 needs the sized internal format AND the render extension
@@ -1009,7 +1048,10 @@ void main(){
     if (withDepth) {
       t.depth = gl.createRenderbuffer();
       gl.bindRenderbuffer(gl.RENDERBUFFER, t.depth);
-      gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT16, w, h);
+      // 16-bit depth across a frustum that now spans 80 m to orbit produces
+      // crawling stripes on the ground. Take 24 bits when the context has them.
+      gl.renderbufferStorage(gl.RENDERBUFFER,
+        r.gl2 ? gl.DEPTH_COMPONENT24 : gl.DEPTH_COMPONENT16, w, h);
       gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, t.depth);
     }
     const ok = gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE;
@@ -1326,7 +1368,14 @@ void main(){
     // ray-sphere (unit radius)
     const b = 2 * (eye[0] * dir[0] + eye[1] * dir[1] + eye[2] * dir[2]);
     const a = dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2];
-    const c = eye[0] * eye[0] + eye[1] * eye[1] + eye[2] * eye[2] - 1.045; // slight fudge for mountains
+    // Picking intersects a sphere slightly larger than the planet so a click
+    // on a mountain still lands. 1.045 is a radius of 1.0222 — 141 km above
+    // the surface, which was invisible while the camera could not get closer
+    // than 1593 km and is a gross error once it can. Shrink the allowance
+    // toward the real surface as the camera descends.
+    const pickAlt = Math.max(0, (cam.sDist != null ? cam.sDist : cam.dist) - 1);
+    const bulge = 1 + Math.min(0.022, pickAlt * 0.09);
+    const c = eye[0] * eye[0] + eye[1] * eye[1] + eye[2] * eye[2] - bulge * bulge;
     const disc = b * b - 4 * a * c;
     if (disc < 0) return null; // clicked space
     const t = (-b - Math.sqrt(disc)) / (2 * a);
@@ -1377,7 +1426,13 @@ void main(){
     r._camT = nowT;
     // idle auto-spin: the world turns beneath the god's gaze
     cam.idle++;
-    if (cam.idle > 300 && cam.flyDur <= 0) cam.lon += 0.0006;
+    // 0.0006 rad/frame is 3.8 km per frame at the surface — 230 km/s, which
+    // reads as a crash rather than as an idle drift. Scale it with altitude
+    // and stop entirely below ~50 km.
+    if (cam.idle > 300 && cam.flyDur <= 0) {
+      const altKm = (cam.dist - 1) * R_EARTH_M / 1000;
+      if (altKm > 50) cam.lon += 0.0006 * Math.min(1, altKm / 1600);
+    }
     stepCam(r, camDt);
 
     if (r.texDirty) {
@@ -1425,7 +1480,13 @@ void main(){
     }
 
     const eye = camEye(cam);
-    const proj = mat4Persp(cam.fov, r.w / r.h, 0.05, 100);
+    // A fixed near plane of 0.05 is 318 km: at any altitude below that the
+    // whole planet is in front of it and gets clipped away. Scale both planes
+    // with altitude so the frustum always brackets the ground.
+    const alt = Math.max(1e-6, (cam.sDist != null ? cam.sDist : cam.dist) - 1);
+    const near = Math.max(1e-7, alt * 0.02);
+    const far = Math.max(4, alt * 12 + 3);
+    const proj = mat4Persp(cam.fov, r.w / r.h, near, far);
     // shake displaces the LOOK TARGET — a real camera kick, in eye space
     const view = mat4LookAt(eye, [cam.shakeX, cam.shakeY, 0], [0, 1, 0]);
     const vp = mat4Mul(proj, view);
@@ -1606,7 +1667,12 @@ void main(){
     if (!r._uP || r._uP.length < cap * 3) {
       r._uP = new Float32Array(cap * 3); r._uC = new Float32Array(cap * 4); r._uS = new Float32Array(cap);
     }
-    const zoomSize = 260 / r.cam.dist;
+    // 260 / dist was fine while dist was never below 1.25. At 80 m altitude
+    // dist is 1.0000126 and this returns 260 — times 0.09 and divided by a
+    // clip-space w of ~1e-5, that is a point sprite of tens of thousands of
+    // pixels, silently clamped by the driver so every unit becomes the same
+    // giant square. Size against ALTITUDE and clamp it ourselves.
+    const zoomSize = PD.clamp(0.9 / Math.max(1e-6, r.cam.dist - 1), 8, 900);
     for (let i = 0; i < units.length && n < cap; i++) {
       const u = units[i];
       if (u.dead) continue;
@@ -1646,7 +1712,7 @@ void main(){
       r._fP[i * 3] = q.p[0]; r._fP[i * 3 + 1] = q.p[1]; r._fP[i * 3 + 2] = q.p[2];
       const a = Math.min(1, q.life / q.max * 1.6);
       r._fC[i * 4] = q.col[0]; r._fC[i * 4 + 1] = q.col[1]; r._fC[i * 4 + 2] = q.col[2]; r._fC[i * 4 + 3] = a * q.col[3];
-      r._fS[i] = q.size / r.cam.dist;
+      r._fS[i] = PD.clamp(q.size * 0.0035 / Math.max(1e-6, r.cam.dist - 1), 1, 600);
     }
     gl.bindBuffer(gl.ARRAY_BUFFER, r.bufPts); gl.bufferData(gl.ARRAY_BUFFER, r._fP.subarray(0, n * 3), gl.DYNAMIC_DRAW);
     gl.bindBuffer(gl.ARRAY_BUFFER, r.bufPtsCol); gl.bufferData(gl.ARRAY_BUFFER, r._fC.subarray(0, n * 4), gl.DYNAMIC_DRAW);
@@ -1795,7 +1861,7 @@ void main(){
     if (ui.mouseW && !ui.overUI) {
       const s = worldToScreen(r, ui.mouseW.x, ui.mouseW.y);
       if (s) {
-        const rad = (ui.brushRadius || 1) * (46 / r.cam.dist);
+        const rad = (ui.brushRadius || 1) * PD.clamp(0.16 / Math.max(1e-6, r.cam.dist - 1), 4, 400);
         ctx.strokeStyle = ui.brushColor || 'rgba(255,255,255,0.7)';
         ctx.lineWidth = 1.5;
         ctx.beginPath(); ctx.arc(s.x, s.y, Math.max(6, rad), 0, 6.283); ctx.stroke();

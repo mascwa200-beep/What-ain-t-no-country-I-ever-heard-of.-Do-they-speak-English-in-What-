@@ -119,6 +119,69 @@ console.log('\n--- the defects stay fixed ---');
   check("the game times 'sim.step'", gsrc.indexOf("Prof.begin('sim.step')") >= 0);
 }
 
+// ---- the camera can reach the ground ------------------------------------
+// cam.min was 1.25, which is 1,593 km up. Everything that scaled with
+// cam.dist was written against a camera that could never get close, and
+// divides by ~1 the moment it can.
+console.log('\n--- the camera reaches the ground ---');
+{
+  const src = fs.readFileSync(path.join(base, 'js', 'render3d.js'), 'utf8');
+  const R = 6371000;
+
+  check('cam.min is an altitude, not a magic 1.25',
+    /min: 1 \+ 80 \/ R_EARTH_M/.test(src) && !/min: 1\.25/.test(src));
+
+  // the near plane must bracket the ground at every altitude, not clip it
+  check('the near plane tracks altitude instead of a fixed 0.05',
+    /mat4Persp\(cam\.fov, r\.w \/ r\.h, near, far\)/.test(src) &&
+    !/mat4Persp\(cam\.fov, r\.w \/ r\.h, 0\.05, 100\)/.test(src));
+  {
+    // near = alt*0.02 must always be in front of the surface
+    let bad = 0;
+    for (const altM of [80, 500, 5e3, 5e4, 5e5, 5e6, 3.5e7]) {
+      const alt = altM / R;
+      if (Math.max(1e-7, alt * 0.02) >= alt) bad++;   // near plane past the ground
+      if (Math.max(4, alt * 12 + 3) <= alt) bad++;    // far plane short of it
+    }
+    check('near and far bracket the ground from 80 m to geostationary', bad === 0, bad + ' bad');
+  }
+
+  // sprite sizes must stay finite at street level
+  check('unit sprites size against altitude and are clamped',
+    /zoomSize = PD\.clamp\(0\.9 \/ Math\.max\(1e-6, r\.cam\.dist - 1\)/.test(src));
+  {
+    const zoom = (altM) => Math.min(900, Math.max(8, 0.9 / Math.max(1e-6, altM / R)));
+    check('a unit at 80 m is a sprite, not a screenful', zoom(80) <= 900,
+      Math.round(zoom(80)) + ' px, was ~23400');
+    check('a unit in orbit is still visible', zoom(1.6e6) >= 8, Math.round(zoom(1.6e6)) + ' px');
+  }
+  check('the brush cursor is clamped too', /brushRadius \|\| 1\) \* PD\.clamp\(/.test(src));
+  check('FX particles are clamped too', /_fS\[i\] = PD\.clamp\(/.test(src));
+
+  // the idle spin was 230 km/s at the surface
+  check('the idle spin scales with altitude and stops near the ground',
+    /if \(altKm > 50\) cam\.lon \+= 0\.0006/.test(src));
+
+  // picking intersected a sphere 141 km above the surface
+  check('picking no longer uses a fixed 141 km bulge',
+    !/- 1\.045;/.test(src) && /bulge \* bulge/.test(src));
+  {
+    const bulge = (altM) => 1 + Math.min(0.022, (altM / R) * 0.09);
+    const errM = (altM) => (bulge(altM) - 1) * R;
+    check('the pick error shrinks to metres near the ground',
+      errM(80) < 20, errM(80).toFixed(1) + ' m at 80 m altitude (was 141000 m)');
+    check('and keeps a mountain allowance from orbit',
+      errM(2e6) > 100000, Math.round(errM(2e6)) + ' m');
+  }
+
+  check('depth is 24-bit where the context allows', /DEPTH_COMPONENT24 : gl\.DEPTH_COMPONENT16/.test(src));
+  check('a lost GL context is handled', /webglcontextlost/.test(src) && /webglcontextrestored/.test(src));
+
+  const gsrc = fs.readFileSync(path.join(base, 'js', 'game.js'), 'utf8');
+  check('pan speed no longer has a floor that dominates the usable range',
+    !/Math\.max\(0\.35, \(cam\.dist - 1\) \/ 1\.6\)/.test(gsrc));
+}
+
 console.log('\n=== perf failures: ' + fails + ' ===');
 console.log(fails === 0 ? 'PERF TEST PASSED' : 'PERF TEST FAILED');
 process.exit(fails === 0 ? 0 : 1);
