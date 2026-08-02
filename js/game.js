@@ -1103,12 +1103,50 @@
     if (p.react && PD.Society) PD.Society.reactToMiracle(G.sim, p.react);
   }
 
+  // The ring that closes while a god gathers their will. Drawn on the
+  // overlay canvas so it costs nothing in the WebGL pass.
+  function drawChargeRing() {
+    const c = G.charge;
+    if (!c || c.t <= 0 || !G.r.octx) return;
+    const ctx = G.r.octx;
+    const k = Math.min(1, c.t / 850);
+    const x = c.sx, y = c.sy;
+    const R = 34 + k * 10;
+    ctx.save();
+    // the gathering arc
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = c.ready ? 'rgba(255,233,168,0.95)' : 'rgba(240,201,106,' + (0.35 + k * 0.5) + ')';
+    ctx.beginPath();
+    ctx.arc(x, y, R, -Math.PI / 2, -Math.PI / 2 + k * 6.2832);
+    ctx.stroke();
+    // a faint full circle behind it, so the arc reads as filling something
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = 'rgba(160,195,255,0.22)';
+    ctx.beginPath(); ctx.arc(x, y, R, 0, 6.2832); ctx.stroke();
+    if (c.ready) {
+      // at full, name the thing you are about to do
+      const a = G.power && Powers.aweOf ? Powers.aweOf(G.power.id) : null;
+      if (a) {
+        ctx.font = '600 11px ui-monospace, monospace';
+        ctx.textAlign = 'center';
+        ctx.fillStyle = 'rgba(255,233,168,0.95)';
+        ctx.fillText(a.name, x, y - R - 10);
+      }
+      ctx.strokeStyle = 'rgba(255,255,255,0.75)';
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(x, y, R + 6 + Math.sin(G.now / 90) * 2, 0, 6.2832); ctx.stroke();
+    }
+    ctx.restore();
+  }
+
   // ================= Game loop =================
   function loop(t) {
     if (!G.running) return;
     const dt = Math.min(100, t - G.lastT);
     G.lastT = t;
+    G.now = t;                       // the charge clock, and applyPower's throttle
     handleKeyPan(dt);
+    if (typeof G._chargeTick === 'function') G._chargeTick(dt);
 
     if (!G.paused && G.speed > 0) {
       G.acc += dt * G.speed;
@@ -1138,6 +1176,7 @@
     // pointer and desync picking against getBoundingClientRect.
     Render.draw(G.r, G.sim, G.ui);
     drawOverlays();
+    drawChargeRing();
     if (G.flash > 0 && G.r.octx) { const c = G.r.octx; c.fillStyle = `rgba(255,255,255,${G.flash * 0.5})`; c.fillRect(0, 0, G.r.w, G.r.h); }
 
     G.hudTimer = (G.hudTimer || 0) + dt;
@@ -1265,15 +1304,106 @@
       const cy = (e.touches ? e.touches[0].clientY : e.clientY) - rect.top;
       return { x: cx, y: cy };
     }
+    // Continuous brushes used to apply once per pointer-move event, so a
+    // 144Hz device painted 2.4x faster than a 60Hz one for the same gesture.
+    // Throttled to a fixed rate, the brush behaves the same everywhere and
+    // its price is predictable.
+    const CONT_HZ = 12;
+    let lastCont = 0, contDebt = 0;
+
+    // ---- THE SECOND WORD ----
+    // Hold the press. A ring closes over CHARGE_MS. Release with it full and
+    // the power's greater form fires instead of the ordinary one. On a brush
+    // the charge only builds while you stay put, so ordinary painting is
+    // untouched — you have to deliberately lean on it.
+    const CHARGE_MS = 850;
+    G.charge = { t: 0, on: false, sx: 0, sy: 0, ready: false };
+
+    G._chargeTick = chargeTick;
+
+    function chargeBegin(sx, sy) {
+      const p = G.power;
+      if (!p || !Powers.aweOf || !Powers.aweOf(p.id)) { G.charge.on = false; return; }
+      G.charge.on = true; G.charge.t = 0; G.charge.ready = false;
+      G.charge.sx = sx; G.charge.sy = sy;
+    }
+    function chargeMove(sx, sy) {
+      if (!G.charge.on) return;
+      // a brush that is being dragged is painting, not gathering
+      const dx = sx - G.charge.sx, dy = sy - G.charge.sy;
+      if (dx * dx + dy * dy > 26 * 26) { G.charge.on = false; G.charge.t = 0; }
+    }
+    // called from the frame loop so charge is time-based, not event-based
+    function chargeTick(dtMs) {
+      if (!G.charge.on) { if (G.charge.t > 0) G.charge.t = Math.max(0, G.charge.t - dtMs * 3); return; }
+      G.charge.t = Math.min(CHARGE_MS, G.charge.t + dtMs);
+      const nowReady = G.charge.t >= CHARGE_MS;
+      if (nowReady && !G.charge.ready) { G.charge.ready = true; Audio8.sfx('select'); }
+    }
+    // returns true if the greater form consumed the release
+    function chargeRelease(sx, sy) {
+      const wasReady = G.charge.on && G.charge.ready;
+      G.charge.on = false;
+      if (!wasReady) { G.charge.t = 0; return false; }
+      G.charge.t = 0; G.charge.ready = false;
+      const p = G.power;
+      const a = p && Powers.aweOf ? Powers.aweOf(p.id) : null;
+      if (!a) return false;
+      const wc = Render.screenToWorld(G.r, sx, sy);
+      if (!wc) return false;
+      if (G.faith < a.cost) {
+        flashToast('The ' + a.name + ' asks ✦' + a.cost);
+        Audio8.sfx('error');
+        return true;                    // consumed: do not also fire the small form
+      }
+      if (Powers.soundAt) Powers.soundAt(wc.x, wc.y, G.world.W, G.world.H);
+      const spent = Powers.invokeAwe(G, p, wc.x, wc.y);
+      if (Powers.soundAt) Powers.soundAt(null);
+      if (spent > 0) {
+        onPowerUsed(p, spent);
+        flashToast(a.name);
+        G.flash = Math.max(G.flash || 0, 0.45);
+        G.shake = Math.max(G.shake || 0, 0.5);
+        if (PD.Society) PD.Society.hist && PD.Society.hist(G.sim, 'The god spoke twice: ' + a.name, 'legend');
+      }
+      return true;
+    }
+
     function applyPower(sx, sy) {
       const wc = Render.screenToWorld(G.r, sx, sy);
       G.ui.mouseW = wc;
       const p = G.power;
       if (!p || !wc) return; // clicked past the planet's limb into space
+
+      if (p.cont) {
+        const now = (G.now || Date.now());
+        if (now - lastCont < 1000 / CONT_HZ) return;
+        lastCont = now;
+      }
+
       if (Powers.soundAt) Powers.soundAt(wc.x, wc.y, G.world.W, G.world.H);
       const spent = p.apply(G, wc.x, wc.y);
       if (Powers.soundAt) Powers.soundAt(null);
-      if (spent > 0) onPowerUsed(p);
+
+      // THE BUG: this called onPowerUsed(p) with no second argument, so
+      // `spent` inside it was undefined, `spent != null` was false, and the
+      // deduction never ran. Every power invoked by clicking the world has
+      // been free for the entire life of this project — faith gated you the
+      // first time and was never actually spent. The two inspector buttons
+      // (smite/bless a specific soul) passed it correctly, which is why the
+      // economy looked like it worked.
+      if (spent > 0) {
+        if (p.cont) {
+          // a brush is priced per SECOND of painting, not per event, so the
+          // throttle rate above cannot change what a gesture costs
+          contDebt += spent / CONT_HZ;
+          const whole = Math.floor(contDebt);
+          if (whole > 0) { contDebt -= whole; onPowerUsed(p, whole); }
+          else onPowerUsed(p, 0);
+        } else {
+          onPowerUsed(p, spent);
+        }
+      }
     }
     function onMinimap(x, y) {
       const m = G.r._mini;
@@ -1294,7 +1424,7 @@
       if (onMinimap(l.x, l.y)) { jumpMinimap(l.x, l.y); e.preventDefault(); return; }
       const p = G.power;
       if (e.button === 2 || e.button === 1 || (p && p.pan)) { panning = true; }
-      else { dragging = true; applyPower(l.x, l.y); }
+      else { dragging = true; applyPower(l.x, l.y); chargeBegin(l.x, l.y); }
       e.preventDefault();
     });
     global.addEventListener('mousemove', (e) => {
@@ -1307,9 +1437,11 @@
         cam.lon -= dx * k; cam.lat += dy * k; cam.idle = 0; clampCam();
       }
       else if (dragging && G.power && G.power.cont) applyPower(l.x, l.y);
+        chargeMove(l.x, l.y);
       lastX = l.x; lastY = l.y;
     });
     global.addEventListener('mouseup', () => {
+      chargeRelease(lastX, lastY);
       if (panning && moved < 5 && G.power && G.power.id === 'inspect') applyPower(lastX, lastY);
       dragging = false; panning = false;
     });
@@ -1333,7 +1465,7 @@
         if (onMinimap(l.x, l.y)) { jumpMinimap(l.x, l.y); e.preventDefault(); return; }
         const p = G.power;
         if (p && p.pan) touchPanning = true;
-        else { dragging = true; applyPower(l.x, l.y); }
+        else { dragging = true; applyPower(l.x, l.y); chargeBegin(l.x, l.y); }
       }
       e.preventDefault();
     }, { passive: false });
@@ -1352,11 +1484,13 @@
           cam.lon -= dx * k; cam.lat += dy * k; cam.idle = 0; clampCam();
         }
         else if (dragging && G.power && G.power.cont) applyPower(l.x, l.y);
+        chargeMove(l.x, l.y);
         lastX = l.x; lastY = l.y;
       }
       e.preventDefault();
     }, { passive: false });
     cv.addEventListener('touchend', () => {
+      chargeRelease(lastX, lastY);
       if (touchPanning && moved < 8 && G.power && G.power.id === 'inspect') applyPower(lastX, lastY);
       dragging = false; touchPanning = false;
     });
@@ -1571,7 +1705,19 @@
     if (!p) return;
     $('#power-name').textContent = p.icon + ' ' + p.name;
     $('#power-desc').textContent = p.desc;
-    $('#power-cost').textContent = p.cost > 0 ? ('Cost: ✦' + p.cost + (p.cont ? ' / touch' : '')) : 'Free';
+    // brushes are priced per second of painting now, not per touch event
+    $('#power-cost').textContent = p.cost > 0
+      ? ('Cost: ✦' + p.cost + (p.cont ? ' / sec' : ''))
+      : 'Free';
+    // the greater form, named, so holding is discoverable rather than secret
+    const awe = Powers.aweOf ? Powers.aweOf(p.id) : null;
+    const ae = $('#power-awe');
+    if (ae) {
+      ae.innerHTML = awe
+        ? `<b>${awe.name}</b> · ✦${awe.cost}<br><i>${awe.desc}</i><br><span>hold to gather</span>`
+        : '';
+      ae.style.display = awe ? 'block' : 'none';
+    }
   }
 
   // register a spawn power for a custom race and rebuild the toolbar

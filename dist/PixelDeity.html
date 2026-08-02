@@ -812,6 +812,22 @@ body{
   box-shadow:0 10px 30px rgba(230,80,58,0.3);
 }
 
+/* ---------- the second word ---------- */
+#power-awe{
+  display:none;margin-top:var(--s2);padding-top:var(--s2);
+  border-top:1px solid var(--gold-dim);
+  font-size:var(--t-xs);line-height:1.45;color:var(--dim);
+}
+#power-awe b{
+  color:var(--gold);font-family:var(--f-serif);font-weight:400;
+  font-size:var(--t-sm);letter-spacing:.06em;
+}
+#power-awe i{color:#9aa6c8;font-style:italic;}
+#power-awe span{
+  color:var(--gold-dim);font-family:var(--f-mono);
+  font-size:calc(var(--t-xs) - 1px);letter-spacing:.12em;text-transform:uppercase;
+}
+
 </style>
 </head>
 <body>
@@ -859,6 +875,7 @@ body{
       <div id="power-name">✋ Move Map</div>
       <div id="power-desc">Drag to pan across your world.</div>
       <div id="power-cost">Free</div>
+      <div id="power-awe"></div>
       <div class="brush-hint">Brush size: <b>[ ]</b> keys · Zoom: wheel/pinch</div>
     </div>
   </aside>
@@ -7592,7 +7609,189 @@ void main(){
     { id: 'omni', name: 'Omnipotence' }
   ];
 
-  global.PD.Powers = { soundAt, POWERS, BY_ID, CATEGORIES };
+
+  // =====================================================================
+  //  THE SECOND WORD
+  //
+  //  A god speaks, and the world obeys. A god speaks AND HOLDS, and the
+  //  word becomes a Word. Every power below has a greater form: hold the
+  //  press until the ring closes and release, and what happens instead is
+  //  the same act committed without restraint.
+  //
+  //  Mechanically this is one trick applied uniformly. Powers read
+  //  `this.cost` and `this.radius` off their own object, so the invoker
+  //  swaps those for the greater values and calls the ordinary apply()
+  //  several times across a wider area. That means every power escalates
+  //  correctly without 57 bespoke implementations — and the ones that
+  //  deserve something qualitatively different get an `apply` of their own.
+  //
+  //  Not everything has one. `inspect` and `pan` are navigation, not acts;
+  //  the eight genesis steps are a fixed scripted sequence where "more"
+  //  would break the ordering of creation itself.
+  // =====================================================================
+  const AWE = {
+    // ---- life: one becomes many ----
+    spawn_human:  { name: 'A MULTITUDE',        cost: 44,  rMul: 3.2, reps: 9,
+                    desc: 'Not a family. A generation, arriving at once.' },
+    spawn_elf:    { name: 'THE LONG COUNCIL',   cost: 55,  rMul: 3.2, reps: 9,
+                    desc: 'The forest fills with those who will outlive your regret.' },
+    spawn_orc:    { name: 'THE HORDE',          cost: 50,  rMul: 3.4, reps: 11,
+                    desc: 'Not warriors. A war, already begun.' },
+    spawn_dwarf:  { name: 'THE DEEP HOLDS',     cost: 60,  rMul: 3.0, reps: 9,
+                    desc: 'The mountain is opened, and it was always full.' },
+    spawn_critter:{ name: 'THE TEEMING',        cost: 12,  rMul: 4.0, reps: 14,
+                    desc: 'Every hedge and hollow, all at once, alive.' },
+    spawn_wolf:   { name: 'THE LONG WINTER PACK',cost: 22, rMul: 3.4, reps: 10,
+                    desc: 'The dark between the trees acquires eyes.' },
+    spawn_kraken: { name: 'WHAT SLEEPS BENEATH',cost: 190, rMul: 3.0, reps: 4,
+                    desc: 'The deep gives up more than one of its children.' },
+    found:        { name: 'A CITY, ENTIRE',     cost: 220, rMul: 1,   reps: 5,
+                    desc: 'Not a settlement to grow, but streets that were always there.' },
+
+    // ---- terra: the hand of the sculptor, unrestrained ----
+    raise:        { name: 'CONTINENT',          cost: 26,  rMul: 3.6, reps: 8,
+                    desc: 'The sea remembers where it used to be.' },
+    lower:        { name: 'THE ABYSSAL TRENCH', cost: 26,  rMul: 3.6, reps: 8,
+                    desc: 'Open the floor of the world and let the water in.' },
+    forest:       { name: 'THE OLD WOOD',       cost: 18,  rMul: 3.8, reps: 10,
+                    desc: 'A forest with no memory of having been planted.' },
+    grass:        { name: 'THE GREAT PLAIN',    cost: 18,  rMul: 3.8, reps: 10,
+                    desc: 'Green to the horizon, and past it.' },
+    desert:       { name: 'THE EMPTY QUARTER',  cost: 18,  rMul: 3.8, reps: 10,
+                    desc: 'Everything the wind touches, it keeps.' },
+    mountain:     { name: 'THE SPINE OF THE WORLD', cost: 34, rMul: 3.4, reps: 9,
+                    desc: 'Stone thrown at heaven, and it stays there.' },
+
+    // ---- blessing: mercy at scale ----
+    bless:        { name: 'GRACE ABOUNDING',    cost: 48,  rMul: 3.2, reps: 9,
+                    desc: 'Every soul in reach, lifted, whether they asked or not.' },
+    rain:         { name: 'THE LONG RAINS',     cost: 30,  rMul: 3.2, reps: 8,
+                    desc: 'Weeks of it. The rivers will remember this year.' },
+
+    // ---- wrath: the difference between anger and judgement ----
+    lightning:    { name: 'THE STORM ENTIRE',   cost: 70,  rMul: 2.6, reps: 12,
+                    desc: 'Not a bolt. A sky that has decided.' },
+    fire:         { name: 'THE BURNING',        cost: 34,  rMul: 3.6, reps: 12,
+                    desc: 'Fire that does not need anything left to want more.' },
+    meteor:       { name: 'THE HAMMER FALL',    cost: 190, rMul: 2.6, reps: 7,
+                    desc: 'The sky opens in several places at once.' },
+    plague:       { name: 'THE PESTILENCE',     cost: 90,  rMul: 3.0, reps: 8,
+                    desc: 'It will outlast the ones who first carried it.' },
+    quake:        { name: 'THE SUNDERING',      cost: 140, rMul: 2.8, reps: 7,
+                    desc: 'The ground stops being a thing that can be trusted.' },
+    freeze:       { name: 'THE LONG COLD',      cost: 62,  rMul: 3.2, reps: 9,
+                    desc: 'Winter arrives and forgets to leave.' },
+    raise_dead:   { name: 'THE RESTLESS DEAD',  cost: 85,  rMul: 3.2, reps: 10,
+                    desc: 'Every grave in reach hears you.' },
+    storm:        { name: 'THE TEMPEST',        cost: 95,  rMul: 2.4, reps: 6,
+                    desc: 'A storm with a shape and an intention.' },
+    tornado:      { name: 'THE WHIRLWIND',      cost: 200, rMul: 2.2, reps: 6,
+                    desc: 'Speak from inside it, if you have anything to say.' },
+    volcano:      { name: 'THE FIRE UNDERNEATH',cost: 260, rMul: 2.6, reps: 5,
+                    desc: 'What the world is actually made of, briefly visible.' },
+
+    // ---- godhead ----
+    voice:        { name: 'THE VOICE UNVEILED', cost: 32,  rMul: 1, reps: 5,
+                    desc: 'Not a whisper to one. A word to everyone alive.' },
+    empower:      { name: 'THE CHOSEN',         cost: 300, rMul: 1, reps: 4,
+                    desc: 'Not a hero. A generation of them.' },
+    miracle:      { name: 'THE AGE OF WONDERS', cost: 140, rMul: 2.8, reps: 8,
+                    desc: 'Enough impossible things that they stop counting.' },
+    stabilize:    { name: 'THE STILL POINT',    cost: 700, rMul: 1, reps: 3,
+                    desc: 'The core forgets it was ever restless.' },
+    evolve:       { name: 'THE GREAT LEAP',     cost: 160, rMul: 1, reps: 5,
+                    desc: 'A hundred thousand years, spent at once.' },
+    judgment:     { name: 'THE FINAL ACCOUNTING', cost: 800, rMul: 1, reps: 3,
+                    desc: 'Every ledger, opened, and every one read aloud.' },
+    omniscience:  { name: 'THE UNBLINKING EYE', cost: 190, rMul: 1, reps: 3,
+                    desc: 'Nothing is hidden. Nothing was ever hidden.' },
+    unmake:       { name: 'ERASURE',            cost: 340, rMul: 1, reps: 3,
+                    desc: 'Not killed. Never having been.' },
+    breath:       { name: 'THE FIRST BREATH',   cost: 520, rMul: 1, reps: 4,
+                    desc: 'The lungs of the world fill again.' },
+    sabbath:      { name: 'THE LONG SABBATH',   cost: 110, rMul: 1, reps: 3,
+                    desc: 'Rest, imposed. The world will thank you later.' },
+
+    // ---- politics: the thumb on the scale, pressed harder ----
+    crown:        { name: 'THE DYNASTY',        cost: 95,  rMul: 1, reps: 5,
+                    desc: 'Not a ruler. A line of them, and a claim.' },
+    peace:        { name: 'THE GREAT PEACE',    cost: 140, rMul: 1, reps: 5,
+                    desc: 'Every blade in the world set down at once.' },
+    incite:       { name: 'THE WORLD WAR',      cost: 120, rMul: 1, reps: 6,
+                    desc: 'Everyone remembers a grievance simultaneously.' },
+    revolt:       { name: 'THE TURNING',        cost: 120, rMul: 1, reps: 6,
+                    desc: 'Every throne at once discovers it is only a chair.' },
+
+    // ---- scripture ----
+    flood:        { name: 'THE DELUGE',         cost: 560, rMul: 1, reps: 4,
+                    desc: 'Forty days was a mercy. This is not that.' },
+    plagues:      { name: 'ALL OF THEM, AT ONCE', cost: 280, rMul: 2.4, reps: 8,
+                    desc: 'The ten did not have to arrive in order.' },
+    prophet:      { name: 'THE PROPHETS',       cost: 140, rMul: 1, reps: 5,
+                    desc: 'Many voices, one message, no possible misunderstanding.' },
+    commandments: { name: 'THE WHOLE LAW',      cost: 230, rMul: 1, reps: 4,
+                    desc: 'Not ten. Everything, carved, and binding.' },
+    babel:        { name: 'THE SCATTERING',     cost: 180, rMul: 1, reps: 5,
+                    desc: 'Not confusion of tongues. Confusion of intent.' },
+
+    // ---- omnipotence: already excessive; make it absurd ----
+    midas:        { name: 'THE GOLDEN AGE',     cost: 250, rMul: 3.0, reps: 8,
+                    desc: 'Everything you meant to be beautiful, and it is.' },
+    blackhole:    { name: 'THE THROAT OF NIGHT',cost: 420, rMul: 2.6, reps: 5,
+                    desc: 'A hole with an appetite and a memory.' },
+    host:         { name: 'THE HEAVENLY WAR',   cost: 320, rMul: 3.0, reps: 8,
+                    desc: 'The sky is full of wings and none of them are gentle.' },
+    legion:       { name: 'THE PIT, OPENED',    cost: 320, rMul: 3.0, reps: 8,
+                    desc: 'It was never a metaphor.' },
+    armageddon:   { name: 'THE LAST DAY',       cost: 1100, rMul: 1, reps: 4,
+                    desc: 'There is no verse after this one.' },
+    zombify:      { name: 'THE GREAT NECROPOLIS', cost: 360, rMul: 2.8, reps: 8,
+                    desc: 'A city where the census only ever goes up.' },
+    polymorph:    { name: 'THE UNSHAPING',      cost: 140, rMul: 3.2, reps: 9,
+                    desc: 'Form was only ever a suggestion.' },
+    youth:        { name: 'THE UNAGEING',       cost: 180, rMul: 3.2, reps: 9,
+                    desc: 'Give back every year you took, and then some.' },
+    fertility:    { name: 'THE QUICKENING',     cost: 160, rMul: 3.2, reps: 9,
+                    desc: 'Every cradle in the province, filled by morning.' },
+    rapture:      { name: 'THE GATHERING',      cost: 270, rMul: 3.0, reps: 8,
+                    desc: 'The worthy are taken. The rest look up.' },
+    aegis:        { name: 'THE UNBREAKABLE',    cost: 230, rMul: 1, reps: 5,
+                    desc: 'Nothing you love can be touched today.' },
+    titan:        { name: 'THE COLOSSI',        cost: 450, rMul: 1, reps: 5,
+                    desc: 'They will have to invent new words for them.' }
+  };
+
+  function aweOf(id) { return AWE[id] || null; }
+
+  // Invoke the greater form. Returns faith spent, 0 if refused.
+  function invokeAwe(G, p, wx, wy) {
+    const a = AWE[p.id];
+    if (!a) return 0;
+    if (G.faith < a.cost) { snd('error'); return 0; }
+
+    const baseCost = p.cost, baseRadius = p.radius;
+    // The repeats must not each charge; the greater form is priced once.
+    p.cost = 0;
+    p.radius = Math.max(1, Math.round(baseRadius * (a.rMul || 1)));
+    const spread = Math.max(1.2, baseRadius * 1.25);
+    const reps = a.reps || 5;
+    try {
+      for (let i = 0; i < reps; i++) {
+        // first at the point itself, the rest in a ring around it
+        const ang = (i / Math.max(1, reps - 1)) * 6.2832;
+        const d = i === 0 ? 0 : spread * (0.6 + (i % 3) * 0.32);
+        p.apply(G, wx + Math.cos(ang) * d, wy + Math.sin(ang) * d);
+      }
+    } finally {
+      p.cost = baseCost;
+      p.radius = baseRadius;
+    }
+    if (FX) { FX.shock(wx, wy, 9, '#ffe9a8'); FX.shock(wx, wy, 6, '#fff'); }
+    snd('levelup');
+    return a.cost;
+  }
+
+  global.PD.Powers = { soundAt, AWE, aweOf, invokeAwe, POWERS, BY_ID, CATEGORIES };
 })(window);
 
 </script>
@@ -8702,12 +8901,50 @@ void main(){
     if (p.react && PD.Society) PD.Society.reactToMiracle(G.sim, p.react);
   }
 
+  // The ring that closes while a god gathers their will. Drawn on the
+  // overlay canvas so it costs nothing in the WebGL pass.
+  function drawChargeRing() {
+    const c = G.charge;
+    if (!c || c.t <= 0 || !G.r.octx) return;
+    const ctx = G.r.octx;
+    const k = Math.min(1, c.t / 850);
+    const x = c.sx, y = c.sy;
+    const R = 34 + k * 10;
+    ctx.save();
+    // the gathering arc
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = c.ready ? 'rgba(255,233,168,0.95)' : 'rgba(240,201,106,' + (0.35 + k * 0.5) + ')';
+    ctx.beginPath();
+    ctx.arc(x, y, R, -Math.PI / 2, -Math.PI / 2 + k * 6.2832);
+    ctx.stroke();
+    // a faint full circle behind it, so the arc reads as filling something
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = 'rgba(160,195,255,0.22)';
+    ctx.beginPath(); ctx.arc(x, y, R, 0, 6.2832); ctx.stroke();
+    if (c.ready) {
+      // at full, name the thing you are about to do
+      const a = G.power && Powers.aweOf ? Powers.aweOf(G.power.id) : null;
+      if (a) {
+        ctx.font = '600 11px ui-monospace, monospace';
+        ctx.textAlign = 'center';
+        ctx.fillStyle = 'rgba(255,233,168,0.95)';
+        ctx.fillText(a.name, x, y - R - 10);
+      }
+      ctx.strokeStyle = 'rgba(255,255,255,0.75)';
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(x, y, R + 6 + Math.sin(G.now / 90) * 2, 0, 6.2832); ctx.stroke();
+    }
+    ctx.restore();
+  }
+
   // ================= Game loop =================
   function loop(t) {
     if (!G.running) return;
     const dt = Math.min(100, t - G.lastT);
     G.lastT = t;
+    G.now = t;                       // the charge clock, and applyPower's throttle
     handleKeyPan(dt);
+    if (typeof G._chargeTick === 'function') G._chargeTick(dt);
 
     if (!G.paused && G.speed > 0) {
       G.acc += dt * G.speed;
@@ -8737,6 +8974,7 @@ void main(){
     // pointer and desync picking against getBoundingClientRect.
     Render.draw(G.r, G.sim, G.ui);
     drawOverlays();
+    drawChargeRing();
     if (G.flash > 0 && G.r.octx) { const c = G.r.octx; c.fillStyle = `rgba(255,255,255,${G.flash * 0.5})`; c.fillRect(0, 0, G.r.w, G.r.h); }
 
     G.hudTimer = (G.hudTimer || 0) + dt;
@@ -8864,15 +9102,106 @@ void main(){
       const cy = (e.touches ? e.touches[0].clientY : e.clientY) - rect.top;
       return { x: cx, y: cy };
     }
+    // Continuous brushes used to apply once per pointer-move event, so a
+    // 144Hz device painted 2.4x faster than a 60Hz one for the same gesture.
+    // Throttled to a fixed rate, the brush behaves the same everywhere and
+    // its price is predictable.
+    const CONT_HZ = 12;
+    let lastCont = 0, contDebt = 0;
+
+    // ---- THE SECOND WORD ----
+    // Hold the press. A ring closes over CHARGE_MS. Release with it full and
+    // the power's greater form fires instead of the ordinary one. On a brush
+    // the charge only builds while you stay put, so ordinary painting is
+    // untouched — you have to deliberately lean on it.
+    const CHARGE_MS = 850;
+    G.charge = { t: 0, on: false, sx: 0, sy: 0, ready: false };
+
+    G._chargeTick = chargeTick;
+
+    function chargeBegin(sx, sy) {
+      const p = G.power;
+      if (!p || !Powers.aweOf || !Powers.aweOf(p.id)) { G.charge.on = false; return; }
+      G.charge.on = true; G.charge.t = 0; G.charge.ready = false;
+      G.charge.sx = sx; G.charge.sy = sy;
+    }
+    function chargeMove(sx, sy) {
+      if (!G.charge.on) return;
+      // a brush that is being dragged is painting, not gathering
+      const dx = sx - G.charge.sx, dy = sy - G.charge.sy;
+      if (dx * dx + dy * dy > 26 * 26) { G.charge.on = false; G.charge.t = 0; }
+    }
+    // called from the frame loop so charge is time-based, not event-based
+    function chargeTick(dtMs) {
+      if (!G.charge.on) { if (G.charge.t > 0) G.charge.t = Math.max(0, G.charge.t - dtMs * 3); return; }
+      G.charge.t = Math.min(CHARGE_MS, G.charge.t + dtMs);
+      const nowReady = G.charge.t >= CHARGE_MS;
+      if (nowReady && !G.charge.ready) { G.charge.ready = true; Audio8.sfx('select'); }
+    }
+    // returns true if the greater form consumed the release
+    function chargeRelease(sx, sy) {
+      const wasReady = G.charge.on && G.charge.ready;
+      G.charge.on = false;
+      if (!wasReady) { G.charge.t = 0; return false; }
+      G.charge.t = 0; G.charge.ready = false;
+      const p = G.power;
+      const a = p && Powers.aweOf ? Powers.aweOf(p.id) : null;
+      if (!a) return false;
+      const wc = Render.screenToWorld(G.r, sx, sy);
+      if (!wc) return false;
+      if (G.faith < a.cost) {
+        flashToast('The ' + a.name + ' asks ✦' + a.cost);
+        Audio8.sfx('error');
+        return true;                    // consumed: do not also fire the small form
+      }
+      if (Powers.soundAt) Powers.soundAt(wc.x, wc.y, G.world.W, G.world.H);
+      const spent = Powers.invokeAwe(G, p, wc.x, wc.y);
+      if (Powers.soundAt) Powers.soundAt(null);
+      if (spent > 0) {
+        onPowerUsed(p, spent);
+        flashToast(a.name);
+        G.flash = Math.max(G.flash || 0, 0.45);
+        G.shake = Math.max(G.shake || 0, 0.5);
+        if (PD.Society) PD.Society.hist && PD.Society.hist(G.sim, 'The god spoke twice: ' + a.name, 'legend');
+      }
+      return true;
+    }
+
     function applyPower(sx, sy) {
       const wc = Render.screenToWorld(G.r, sx, sy);
       G.ui.mouseW = wc;
       const p = G.power;
       if (!p || !wc) return; // clicked past the planet's limb into space
+
+      if (p.cont) {
+        const now = (G.now || Date.now());
+        if (now - lastCont < 1000 / CONT_HZ) return;
+        lastCont = now;
+      }
+
       if (Powers.soundAt) Powers.soundAt(wc.x, wc.y, G.world.W, G.world.H);
       const spent = p.apply(G, wc.x, wc.y);
       if (Powers.soundAt) Powers.soundAt(null);
-      if (spent > 0) onPowerUsed(p);
+
+      // THE BUG: this called onPowerUsed(p) with no second argument, so
+      // `spent` inside it was undefined, `spent != null` was false, and the
+      // deduction never ran. Every power invoked by clicking the world has
+      // been free for the entire life of this project — faith gated you the
+      // first time and was never actually spent. The two inspector buttons
+      // (smite/bless a specific soul) passed it correctly, which is why the
+      // economy looked like it worked.
+      if (spent > 0) {
+        if (p.cont) {
+          // a brush is priced per SECOND of painting, not per event, so the
+          // throttle rate above cannot change what a gesture costs
+          contDebt += spent / CONT_HZ;
+          const whole = Math.floor(contDebt);
+          if (whole > 0) { contDebt -= whole; onPowerUsed(p, whole); }
+          else onPowerUsed(p, 0);
+        } else {
+          onPowerUsed(p, spent);
+        }
+      }
     }
     function onMinimap(x, y) {
       const m = G.r._mini;
@@ -8893,7 +9222,7 @@ void main(){
       if (onMinimap(l.x, l.y)) { jumpMinimap(l.x, l.y); e.preventDefault(); return; }
       const p = G.power;
       if (e.button === 2 || e.button === 1 || (p && p.pan)) { panning = true; }
-      else { dragging = true; applyPower(l.x, l.y); }
+      else { dragging = true; applyPower(l.x, l.y); chargeBegin(l.x, l.y); }
       e.preventDefault();
     });
     global.addEventListener('mousemove', (e) => {
@@ -8906,9 +9235,11 @@ void main(){
         cam.lon -= dx * k; cam.lat += dy * k; cam.idle = 0; clampCam();
       }
       else if (dragging && G.power && G.power.cont) applyPower(l.x, l.y);
+        chargeMove(l.x, l.y);
       lastX = l.x; lastY = l.y;
     });
     global.addEventListener('mouseup', () => {
+      chargeRelease(lastX, lastY);
       if (panning && moved < 5 && G.power && G.power.id === 'inspect') applyPower(lastX, lastY);
       dragging = false; panning = false;
     });
@@ -8932,7 +9263,7 @@ void main(){
         if (onMinimap(l.x, l.y)) { jumpMinimap(l.x, l.y); e.preventDefault(); return; }
         const p = G.power;
         if (p && p.pan) touchPanning = true;
-        else { dragging = true; applyPower(l.x, l.y); }
+        else { dragging = true; applyPower(l.x, l.y); chargeBegin(l.x, l.y); }
       }
       e.preventDefault();
     }, { passive: false });
@@ -8951,11 +9282,13 @@ void main(){
           cam.lon -= dx * k; cam.lat += dy * k; cam.idle = 0; clampCam();
         }
         else if (dragging && G.power && G.power.cont) applyPower(l.x, l.y);
+        chargeMove(l.x, l.y);
         lastX = l.x; lastY = l.y;
       }
       e.preventDefault();
     }, { passive: false });
     cv.addEventListener('touchend', () => {
+      chargeRelease(lastX, lastY);
       if (touchPanning && moved < 8 && G.power && G.power.id === 'inspect') applyPower(lastX, lastY);
       dragging = false; touchPanning = false;
     });
@@ -9170,7 +9503,19 @@ void main(){
     if (!p) return;
     $('#power-name').textContent = p.icon + ' ' + p.name;
     $('#power-desc').textContent = p.desc;
-    $('#power-cost').textContent = p.cost > 0 ? ('Cost: ✦' + p.cost + (p.cont ? ' / touch' : '')) : 'Free';
+    // brushes are priced per second of painting now, not per touch event
+    $('#power-cost').textContent = p.cost > 0
+      ? ('Cost: ✦' + p.cost + (p.cont ? ' / sec' : ''))
+      : 'Free';
+    // the greater form, named, so holding is discoverable rather than secret
+    const awe = Powers.aweOf ? Powers.aweOf(p.id) : null;
+    const ae = $('#power-awe');
+    if (ae) {
+      ae.innerHTML = awe
+        ? `<b>${awe.name}</b> · ✦${awe.cost}<br><i>${awe.desc}</i><br><span>hold to gather</span>`
+        : '';
+      ae.style.display = awe ? 'block' : 'none';
+    }
   }
 
   // register a spawn power for a custom race and rebuild the toolbar

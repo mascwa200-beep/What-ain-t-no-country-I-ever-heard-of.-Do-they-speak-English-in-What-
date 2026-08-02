@@ -889,5 +889,187 @@
     { id: 'omni', name: 'Omnipotence' }
   ];
 
-  global.PD.Powers = { soundAt, POWERS, BY_ID, CATEGORIES };
+
+  // =====================================================================
+  //  THE SECOND WORD
+  //
+  //  A god speaks, and the world obeys. A god speaks AND HOLDS, and the
+  //  word becomes a Word. Every power below has a greater form: hold the
+  //  press until the ring closes and release, and what happens instead is
+  //  the same act committed without restraint.
+  //
+  //  Mechanically this is one trick applied uniformly. Powers read
+  //  `this.cost` and `this.radius` off their own object, so the invoker
+  //  swaps those for the greater values and calls the ordinary apply()
+  //  several times across a wider area. That means every power escalates
+  //  correctly without 57 bespoke implementations — and the ones that
+  //  deserve something qualitatively different get an `apply` of their own.
+  //
+  //  Not everything has one. `inspect` and `pan` are navigation, not acts;
+  //  the eight genesis steps are a fixed scripted sequence where "more"
+  //  would break the ordering of creation itself.
+  // =====================================================================
+  const AWE = {
+    // ---- life: one becomes many ----
+    spawn_human:  { name: 'A MULTITUDE',        cost: 44,  rMul: 3.2, reps: 9,
+                    desc: 'Not a family. A generation, arriving at once.' },
+    spawn_elf:    { name: 'THE LONG COUNCIL',   cost: 55,  rMul: 3.2, reps: 9,
+                    desc: 'The forest fills with those who will outlive your regret.' },
+    spawn_orc:    { name: 'THE HORDE',          cost: 50,  rMul: 3.4, reps: 11,
+                    desc: 'Not warriors. A war, already begun.' },
+    spawn_dwarf:  { name: 'THE DEEP HOLDS',     cost: 60,  rMul: 3.0, reps: 9,
+                    desc: 'The mountain is opened, and it was always full.' },
+    spawn_critter:{ name: 'THE TEEMING',        cost: 12,  rMul: 4.0, reps: 14,
+                    desc: 'Every hedge and hollow, all at once, alive.' },
+    spawn_wolf:   { name: 'THE LONG WINTER PACK',cost: 22, rMul: 3.4, reps: 10,
+                    desc: 'The dark between the trees acquires eyes.' },
+    spawn_kraken: { name: 'WHAT SLEEPS BENEATH',cost: 190, rMul: 3.0, reps: 4,
+                    desc: 'The deep gives up more than one of its children.' },
+    found:        { name: 'A CITY, ENTIRE',     cost: 220, rMul: 1,   reps: 5,
+                    desc: 'Not a settlement to grow, but streets that were always there.' },
+
+    // ---- terra: the hand of the sculptor, unrestrained ----
+    raise:        { name: 'CONTINENT',          cost: 26,  rMul: 3.6, reps: 8,
+                    desc: 'The sea remembers where it used to be.' },
+    lower:        { name: 'THE ABYSSAL TRENCH', cost: 26,  rMul: 3.6, reps: 8,
+                    desc: 'Open the floor of the world and let the water in.' },
+    forest:       { name: 'THE OLD WOOD',       cost: 18,  rMul: 3.8, reps: 10,
+                    desc: 'A forest with no memory of having been planted.' },
+    grass:        { name: 'THE GREAT PLAIN',    cost: 18,  rMul: 3.8, reps: 10,
+                    desc: 'Green to the horizon, and past it.' },
+    desert:       { name: 'THE EMPTY QUARTER',  cost: 18,  rMul: 3.8, reps: 10,
+                    desc: 'Everything the wind touches, it keeps.' },
+    mountain:     { name: 'THE SPINE OF THE WORLD', cost: 34, rMul: 3.4, reps: 9,
+                    desc: 'Stone thrown at heaven, and it stays there.' },
+
+    // ---- blessing: mercy at scale ----
+    bless:        { name: 'GRACE ABOUNDING',    cost: 48,  rMul: 3.2, reps: 9,
+                    desc: 'Every soul in reach, lifted, whether they asked or not.' },
+    rain:         { name: 'THE LONG RAINS',     cost: 30,  rMul: 3.2, reps: 8,
+                    desc: 'Weeks of it. The rivers will remember this year.' },
+
+    // ---- wrath: the difference between anger and judgement ----
+    lightning:    { name: 'THE STORM ENTIRE',   cost: 70,  rMul: 2.6, reps: 12,
+                    desc: 'Not a bolt. A sky that has decided.' },
+    fire:         { name: 'THE BURNING',        cost: 34,  rMul: 3.6, reps: 12,
+                    desc: 'Fire that does not need anything left to want more.' },
+    meteor:       { name: 'THE HAMMER FALL',    cost: 190, rMul: 2.6, reps: 7,
+                    desc: 'The sky opens in several places at once.' },
+    plague:       { name: 'THE PESTILENCE',     cost: 90,  rMul: 3.0, reps: 8,
+                    desc: 'It will outlast the ones who first carried it.' },
+    quake:        { name: 'THE SUNDERING',      cost: 140, rMul: 2.8, reps: 7,
+                    desc: 'The ground stops being a thing that can be trusted.' },
+    freeze:       { name: 'THE LONG COLD',      cost: 62,  rMul: 3.2, reps: 9,
+                    desc: 'Winter arrives and forgets to leave.' },
+    raise_dead:   { name: 'THE RESTLESS DEAD',  cost: 85,  rMul: 3.2, reps: 10,
+                    desc: 'Every grave in reach hears you.' },
+    storm:        { name: 'THE TEMPEST',        cost: 95,  rMul: 2.4, reps: 6,
+                    desc: 'A storm with a shape and an intention.' },
+    tornado:      { name: 'THE WHIRLWIND',      cost: 200, rMul: 2.2, reps: 6,
+                    desc: 'Speak from inside it, if you have anything to say.' },
+    volcano:      { name: 'THE FIRE UNDERNEATH',cost: 260, rMul: 2.6, reps: 5,
+                    desc: 'What the world is actually made of, briefly visible.' },
+
+    // ---- godhead ----
+    voice:        { name: 'THE VOICE UNVEILED', cost: 32,  rMul: 1, reps: 5,
+                    desc: 'Not a whisper to one. A word to everyone alive.' },
+    empower:      { name: 'THE CHOSEN',         cost: 300, rMul: 1, reps: 4,
+                    desc: 'Not a hero. A generation of them.' },
+    miracle:      { name: 'THE AGE OF WONDERS', cost: 140, rMul: 2.8, reps: 8,
+                    desc: 'Enough impossible things that they stop counting.' },
+    stabilize:    { name: 'THE STILL POINT',    cost: 700, rMul: 1, reps: 3,
+                    desc: 'The core forgets it was ever restless.' },
+    evolve:       { name: 'THE GREAT LEAP',     cost: 160, rMul: 1, reps: 5,
+                    desc: 'A hundred thousand years, spent at once.' },
+    judgment:     { name: 'THE FINAL ACCOUNTING', cost: 800, rMul: 1, reps: 3,
+                    desc: 'Every ledger, opened, and every one read aloud.' },
+    omniscience:  { name: 'THE UNBLINKING EYE', cost: 190, rMul: 1, reps: 3,
+                    desc: 'Nothing is hidden. Nothing was ever hidden.' },
+    unmake:       { name: 'ERASURE',            cost: 340, rMul: 1, reps: 3,
+                    desc: 'Not killed. Never having been.' },
+    breath:       { name: 'THE FIRST BREATH',   cost: 520, rMul: 1, reps: 4,
+                    desc: 'The lungs of the world fill again.' },
+    sabbath:      { name: 'THE LONG SABBATH',   cost: 110, rMul: 1, reps: 3,
+                    desc: 'Rest, imposed. The world will thank you later.' },
+
+    // ---- politics: the thumb on the scale, pressed harder ----
+    crown:        { name: 'THE DYNASTY',        cost: 95,  rMul: 1, reps: 5,
+                    desc: 'Not a ruler. A line of them, and a claim.' },
+    peace:        { name: 'THE GREAT PEACE',    cost: 140, rMul: 1, reps: 5,
+                    desc: 'Every blade in the world set down at once.' },
+    incite:       { name: 'THE WORLD WAR',      cost: 120, rMul: 1, reps: 6,
+                    desc: 'Everyone remembers a grievance simultaneously.' },
+    revolt:       { name: 'THE TURNING',        cost: 120, rMul: 1, reps: 6,
+                    desc: 'Every throne at once discovers it is only a chair.' },
+
+    // ---- scripture ----
+    flood:        { name: 'THE DELUGE',         cost: 560, rMul: 1, reps: 4,
+                    desc: 'Forty days was a mercy. This is not that.' },
+    plagues:      { name: 'ALL OF THEM, AT ONCE', cost: 280, rMul: 2.4, reps: 8,
+                    desc: 'The ten did not have to arrive in order.' },
+    prophet:      { name: 'THE PROPHETS',       cost: 140, rMul: 1, reps: 5,
+                    desc: 'Many voices, one message, no possible misunderstanding.' },
+    commandments: { name: 'THE WHOLE LAW',      cost: 230, rMul: 1, reps: 4,
+                    desc: 'Not ten. Everything, carved, and binding.' },
+    babel:        { name: 'THE SCATTERING',     cost: 180, rMul: 1, reps: 5,
+                    desc: 'Not confusion of tongues. Confusion of intent.' },
+
+    // ---- omnipotence: already excessive; make it absurd ----
+    midas:        { name: 'THE GOLDEN AGE',     cost: 250, rMul: 3.0, reps: 8,
+                    desc: 'Everything you meant to be beautiful, and it is.' },
+    blackhole:    { name: 'THE THROAT OF NIGHT',cost: 420, rMul: 2.6, reps: 5,
+                    desc: 'A hole with an appetite and a memory.' },
+    host:         { name: 'THE HEAVENLY WAR',   cost: 320, rMul: 3.0, reps: 8,
+                    desc: 'The sky is full of wings and none of them are gentle.' },
+    legion:       { name: 'THE PIT, OPENED',    cost: 320, rMul: 3.0, reps: 8,
+                    desc: 'It was never a metaphor.' },
+    armageddon:   { name: 'THE LAST DAY',       cost: 1100, rMul: 1, reps: 4,
+                    desc: 'There is no verse after this one.' },
+    zombify:      { name: 'THE GREAT NECROPOLIS', cost: 360, rMul: 2.8, reps: 8,
+                    desc: 'A city where the census only ever goes up.' },
+    polymorph:    { name: 'THE UNSHAPING',      cost: 140, rMul: 3.2, reps: 9,
+                    desc: 'Form was only ever a suggestion.' },
+    youth:        { name: 'THE UNAGEING',       cost: 180, rMul: 3.2, reps: 9,
+                    desc: 'Give back every year you took, and then some.' },
+    fertility:    { name: 'THE QUICKENING',     cost: 160, rMul: 3.2, reps: 9,
+                    desc: 'Every cradle in the province, filled by morning.' },
+    rapture:      { name: 'THE GATHERING',      cost: 270, rMul: 3.0, reps: 8,
+                    desc: 'The worthy are taken. The rest look up.' },
+    aegis:        { name: 'THE UNBREAKABLE',    cost: 230, rMul: 1, reps: 5,
+                    desc: 'Nothing you love can be touched today.' },
+    titan:        { name: 'THE COLOSSI',        cost: 450, rMul: 1, reps: 5,
+                    desc: 'They will have to invent new words for them.' }
+  };
+
+  function aweOf(id) { return AWE[id] || null; }
+
+  // Invoke the greater form. Returns faith spent, 0 if refused.
+  function invokeAwe(G, p, wx, wy) {
+    const a = AWE[p.id];
+    if (!a) return 0;
+    if (G.faith < a.cost) { snd('error'); return 0; }
+
+    const baseCost = p.cost, baseRadius = p.radius;
+    // The repeats must not each charge; the greater form is priced once.
+    p.cost = 0;
+    p.radius = Math.max(1, Math.round(baseRadius * (a.rMul || 1)));
+    const spread = Math.max(1.2, baseRadius * 1.25);
+    const reps = a.reps || 5;
+    try {
+      for (let i = 0; i < reps; i++) {
+        // first at the point itself, the rest in a ring around it
+        const ang = (i / Math.max(1, reps - 1)) * 6.2832;
+        const d = i === 0 ? 0 : spread * (0.6 + (i % 3) * 0.32);
+        p.apply(G, wx + Math.cos(ang) * d, wy + Math.sin(ang) * d);
+      }
+    } finally {
+      p.cost = baseCost;
+      p.radius = baseRadius;
+    }
+    if (FX) { FX.shock(wx, wy, 9, '#ffe9a8'); FX.shock(wx, wy, 6, '#fff'); }
+    snd('levelup');
+    return a.cost;
+  }
+
+  global.PD.Powers = { soundAt, AWE, aweOf, invokeAwe, POWERS, BY_ID, CATEGORIES };
 })(window);

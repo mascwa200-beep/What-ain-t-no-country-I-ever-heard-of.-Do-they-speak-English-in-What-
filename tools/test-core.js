@@ -151,6 +151,46 @@ for (const p of PD.Powers.POWERS){
   catch(e){ perrs++; console.error('POWER ERR', p.id, e.message); }
 }
 console.log('powers tested:', PD.Powers.POWERS.length, 'errors:', perrs);
+
+// ---- THE SECOND WORD: every greater form must survive being invoked ----
+// invokeAwe() temporarily swaps a power's cost and radius so the ordinary
+// apply() can be reused at scale. If it ever fails to put them back, the
+// power is permanently mutated for the rest of the session — free, or with
+// a giant radius. That is the failure mode worth pinning.
+let aerrs = 0, adone = 0, arestore = 0;
+for (const p of PD.Powers.POWERS) {
+  const a = PD.Powers.aweOf(p.id);
+  if (!a) continue;
+  const c0 = p.cost, r0 = p.radius;
+  fakeG.power = Object.assign({}, p);
+  fakeG.faith = 1e6;
+  try {
+    const spent = PD.Powers.invokeAwe(fakeG, p, 90, 60);
+    if (typeof spent !== 'number') throw new Error('non-numeric return');
+    if (spent !== a.cost) throw new Error('spent ' + spent + ' != declared ' + a.cost);
+    adone++;
+  } catch (e) {
+    aerrs++; console.error('AWE ERR', p.id, e.message);
+  }
+  if (p.cost !== c0 || p.radius !== r0) {
+    arestore++;
+    console.error('AWE LEAK', p.id, 'cost', c0, '->', p.cost, 'radius', r0, '->', p.radius);
+  }
+}
+console.log('greater forms invoked:', adone, 'errors:', aerrs, 'cost/radius leaks:', arestore);
+
+// a greater form must be refused, not half-applied, when faith is short
+let refused = 0;
+for (const p of PD.Powers.POWERS) {
+  const a = PD.Powers.aweOf(p.id);
+  if (!a || a.cost <= 0) continue;
+  fakeG.faith = a.cost - 1;
+  fakeG.power = Object.assign({}, p);
+  if (PD.Powers.invokeAwe(fakeG, p, 90, 60) === 0) refused++;
+}
+console.log('greater forms correctly refused when faith is short:', refused);
+perrs += aerrs + arestore;
+if (refused < adone) { console.error('SOME GREATER FORMS FIRED WITHOUT PAYING'); perrs++; }
 console.log('genesis hooks fired:', genesisCalls, '| sabbath toggles:', sabbathCalls, '| unmaking undos:', undoCalls);
 
 // ---- serialization of the whole thing (like game.js does) ----

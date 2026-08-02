@@ -799,3 +799,19 @@ body{
   background:linear-gradient(170deg,#ff9a80,#e8503a 60%,#a3301f);color:#1a0604;
   box-shadow:0 10px 30px rgba(230,80,58,0.3);
 }
+
+/* ---------- the second word ---------- */
+#power-awe{
+  display:none;margin-top:var(--s2);padding-top:var(--s2);
+  border-top:1px solid var(--gold-dim);
+  font-size:var(--t-xs);line-height:1.45;color:var(--dim);
+}
+#power-awe b{
+  color:var(--gold);font-family:var(--f-serif);font-weight:400;
+  font-size:var(--t-sm);letter-spacing:.06em;
+}
+#power-awe i{color:#9aa6c8;font-style:italic;}
+#power-awe span{
+  color:var(--gold-dim);font-family:var(--f-mono);
+  font-size:calc(var(--t-xs) - 1px);letter-spacing:.12em;text-transform:uppercase;
+}
