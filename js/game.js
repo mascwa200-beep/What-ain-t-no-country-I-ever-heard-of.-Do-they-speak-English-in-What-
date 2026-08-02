@@ -1368,7 +1368,12 @@
   let keys = {};
   function handleKeyPan(dt) {
     const cam = G.r.cam;
-    const spd = 0.022 * (dt / 16) * Math.max(0.35, (cam.dist - 1) / 1.6);
+    // (cam.dist - 1) is altitude, so this was the right shape all along — but
+    // the 0.35 floor dominates everything below 1.56 (3600 km up), which used
+    // to be most of the usable range and is now almost none of it. At 80 m the
+    // floor would pan a third of the planet per keypress. No floor; a small
+    // absolute minimum instead, so it still moves when you are on the ground.
+    const spd = 0.022 * (dt / 16) * Math.max(0.000002, (cam.dist - 1) / 1.6);
     let moved = false;
     if (keys['w'] || keys['arrowup']) { cam.lat += spd; moved = true; }
     if (keys['s'] || keys['arrowdown']) { cam.lat -= spd; moved = true; }
@@ -1523,7 +1528,7 @@
       G.ui.mouseW = Render.screenToWorld(G.r, l.x, l.y);
       const dx = l.x - lastX, dy = l.y - lastY; moved += Math.abs(dx) + Math.abs(dy);
       if (panning) {
-        const cam = G.r.cam, k = 0.0035 * Math.max(0.35, (cam.dist - 1) / 1.6);
+        const cam = G.r.cam, k = 0.0035 * Math.max(0.000002, (cam.dist - 1) / 1.6);
         cam.lon -= dx * k; cam.lat += dy * k; cam.idle = 0; clampCam();
       }
       else if (dragging && G.power && G.power.cont) applyPower(l.x, l.y);
@@ -1570,7 +1575,7 @@
         const l = localXY(e); const dx = l.x - lastX, dy = l.y - lastY; moved += Math.abs(dx) + Math.abs(dy);
         G.ui.mouseW = Render.screenToWorld(G.r, l.x, l.y);
         if (touchPanning) {
-          const cam = G.r.cam, k = 0.0035 * Math.max(0.35, (cam.dist - 1) / 1.6);
+          const cam = G.r.cam, k = 0.0035 * Math.max(0.000002, (cam.dist - 1) / 1.6);
           cam.lon -= dx * k; cam.lat += dy * k; cam.idle = 0; clampCam();
         }
         else if (dragging && G.power && G.power.cont) applyPower(l.x, l.y);
