@@ -256,23 +256,37 @@ console.log('genesis hooks fired:', genesisCalls, '| sabbath toggles:', sabbathC
 // fragment of their name. Names are GIVEN+GIVEN2 concatenations, so indexOf
 // made 'Ala' a match inside 'Alan'. ----
 {
-  const soc = PD.Society.ensure(p1.sim);
-  const histLen = soc.history.length, legLen = soc.legends.length, feedLen = soc.feed.length;
+  // On its OWN planet. unmake targets the NEAREST living unit, and by this
+  // point p1.sim is full of souls the 66-greater-form loop scattered around
+  // (90,60) with Math.random() jitter — so which one got erased was never
+  // deterministic. It picked the planted victim locally and someone else on
+  // CI, and the test reported that the target survived. The claim under test
+  // is the name matcher, so give it a world where the target is unambiguous.
+  const unP = Cosmos.createPlanet('verdant', 'unmake-seed');
+  const soc = PD.Society.ensure(unP.sim);
   soc.history.push({ t: 0, text: 'Alan built a wall.', kind: 'event' });
   soc.history.push({ t: 0, text: 'Ala the quiet died.', kind: 'event' });
   soc.history.push({ t: 0, text: 'Alanna sang.', kind: 'event' });
-  const victim = { name: 'Ala', x: 90, y: 60, dead: false, race: 'human', karma: 0 };
-  p1.sim.units.push(victim);
-  fakeG.faith = 1e6;
-  PD.Powers.BY_ID.unmake.apply(fakeG, 90.2, 60.2);
-  const left = soc.history.slice(histLen).map(h => h.text);
+  const spot = PD.World.nearestLand(unP.world, 90, 60, 25) || { x: 90, y: 60 };
+  const victim = PD.Sim.spawnUnit(unP.sim, 'human', spot.x, spot.y);
+  const unG = Object.assign({}, fakeG, {
+    world: unP.world, sim: unP.sim, faith: 1e6, view: { kind: 'planet', id: unP.id }
+  });
+  let targeted = null;
+  if (victim) {
+    victim.name = 'Ala';
+    // the only living soul on this world, so it is the one unmake will find
+    targeted = unP.sim.units.filter(u => !u.dead).length;
+    PD.Powers.BY_ID.unmake.apply(unG, victim.x + 0.1, victim.y + 0.1);
+  }
+  const left = soc.history.map(h => h.text);
   const survived = left.filter(t => /Alan/.test(t)).length;
   const erased = left.filter(t => /^Ala the/.test(t)).length;
+  if (!victim) { console.error('UNMAKE ERR: could not place a victim'); perrs++; }
   if (survived !== 2) { console.error('UNMAKE ERR: strangers erased — expected 2 Alan lines, found', survived, left); perrs++; }
-  if (erased !== 0) { console.error('UNMAKE ERR: the target survived'); perrs++; }
-  console.log('unmake erases whole names only: Alan/Alanna lines left =', survived, '(expect 2), target lines left =', erased, '(expect 0)');
-  soc.history.length = histLen; soc.legends.length = legLen; soc.feed.length = feedLen;
-  p1.sim.units.pop();
+  if (erased !== 0) { console.error('UNMAKE ERR: the target survived (living souls on that world: ' + targeted + ')'); perrs++; }
+  console.log('unmake erases whole names only: Alan/Alanna lines left =', survived,
+    '(expect 2), target lines left =', erased, '(expect 0), living souls on that world:', targeted);
 }
 
 // ---- the hidden act ----
