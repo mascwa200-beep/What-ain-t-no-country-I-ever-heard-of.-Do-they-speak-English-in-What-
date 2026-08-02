@@ -1711,7 +1711,10 @@
         <div class="ins-row"><span>People</span><b>${R.name}</b></div>
         ${n ? `<div class="ins-row"><span>Nation</span><b>${n.name}</b></div>
         <div class="ins-row"><span>Rule</span><b>${PD.Society.GOVERNMENTS[n.gov]} · ${n.leaderName}</b></div>
-        <div class="ins-row"><span>Era</span><b>${PD.Society.ERAS[n.era]}</b></div>` : ''}
+        <div class="ins-row"><span>Era</span><b>${PD.Society.ERAS[n.era]}</b></div>
+        <div class="ins-row"><span>Scholars</span><b>${
+          n.scholars ? n.scholars + ' 📚' : '<span style="color:#8a7a5a">none — this age will not pass</span>'
+        }</b></div>` : ''}
         ${faith ? `<div class="ins-row"><span>Faith</span><b>${faith.name}</b></div>` : ''}
         <div class="ins-row"><span>Population</span><b>${v.pop}</b></div>
         <div class="ins-row"><span>Tier</span><b>${['Hamlet', 'Village', 'Town', 'City', 'Metropolis'][Math.min(4, v.level - 1)]} (lvl ${v.level})</b></div>
@@ -1846,7 +1849,10 @@
       ns.innerHTML = '<div class="panel-subtitle">Nations</div>' + soc.nations.map(n => {
         const R = Sim.RACES[n.race];
         return `<div class="nation-line">${R ? R.emoji : '?'} <b>${n.name}</b> · ${PD.Society.ERAS[n.era]} · ${PD.Society.GOVERNMENTS[n.gov]}<br>
-          <small>${n.leaderName} the ${n.leaderTrait} · pop ${n.pop || 0}${n.warWith.length ? ' · ⚔ AT WAR' : ''}</small></div>`;
+          <small>${n.leaderName} the ${n.leaderTrait} · pop ${n.pop || 0}${
+            n.scholars ? ' · 📚 ' + n.scholars + ' scholar' + (n.scholars === 1 ? '' : 's')
+                       : ' · <span style="color:#8a7a5a">no scholars</span>'
+          }${n.warWith.length ? ' · ⚔ AT WAR' : ''}</small></div>`;
       }).join('');
     } else ns.innerHTML = '';
     // legends
