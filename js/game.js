@@ -550,9 +550,35 @@
   const REWIND = {
     fineEvery: 4,      // sim ticks between motion frames
     fullEvery: 60,     // sim ticks between true restore points
-    fineCap: 400,      // ~27 min of 1x play
-    fullCap: 24        // ~7.5MB worst case
+    fineCap: 400,      // ~27 min of 1x play, ~6.6MB
+    fullCap: 24,       // ~14MB at full population (a mature snapshot measures 610KB,
+                       // not the 311KB a young world costs — measured, not estimated)
+    // The deep archive. fine+full together only span ~13 in-game years, which
+    // is nothing against a world that has been running for centuries. These
+    // are the same snapshots, kept at 5-year intervals and then THINNED
+    // GEOMETRICALLY — dense in living memory, sparse in antiquity — so a
+    // fixed 28 slots reach all the way back to the world's first morning.
+    archEvery: 600,    // 5 years. A multiple of fullEvery: the snapshot is shared, not re-taken
+    archCap: 28        // ~17MB. Spacing grows with age, so 28 slots cover a world of ANY age
+                       // (measured: 500 ages thin to 28, spanning year 0 → 2500).
+                       // Whole-engine rewind residency tops out near 38MB.
   };
+
+  // Drop the snapshot that is packed tighter than its age warrants, so the
+  // archive relaxes into a geometric series. The oldest entry is never a
+  // candidate: whatever else goes, the beginning is kept.
+  function thinArchive(arch, now) {
+    while (arch.length > REWIND.archCap) {
+      let victim = -1, best = Infinity;
+      for (let i = 1; i < arch.length - 1; i++) {
+        const age = Math.max(1, now - arch[i].tick);
+        const cost = (arch[i + 1].tick - arch[i - 1].tick) / age;
+        if (cost < best) { best = cost; victim = i; }
+      }
+      if (victim < 0) { arch.shift(); continue; }
+      arch.splice(victim, 1);
+    }
+  }
 
   // How long the ⧏⧏⧏ notch must be held, once the record runs out, before
   // the world actually starts coming apart. Un-creation is the one act in the
@@ -561,11 +587,13 @@
 
   function initRewind() {
     G.rewind = {
-      fine: [], full: [], stage: 0, prog: 0,
+      fine: [], full: [], arch: [], stage: 0, prog: 0,
       undo: null,      // the last moment before the unmaking — the way home
       armed: false,    // un-creation has actually begun
       arm: 0,          // 0..1 progress through the arming hold
-      atFloor: false   // the record is exhausted; only ⧏⧏⧏ goes further
+      atFloor: false,  // the record is exhausted; only ⧏⧏⧏ goes further
+      inArchive: false,// walking back through whole ages
+      archT: 0         // paces how fast the ages blur past
     };
   }
 
@@ -576,7 +604,8 @@
     if (!rw || !rw.undo) { flashToast('There is nothing to undo'); Audio8.sfx('error'); return false; }
     restoreFull(rw.undo);
     rw.undo = null; rw.armed = false; rw.arm = 0; rw.stage = 0; rw.prog = 0;
-    rw.atFloor = false; rw.fine.length = 0; rw.full.length = 0;
+    rw.atFloor = false; rw.inArchive = false; rw.archT = 0;
+    rw.fine.length = 0; rw.full.length = 0; rw.arch.length = 0;
     G.creationStage = null; G.dissolve = 0;
     setSpeedIdx(IDX_PAUSE, true);
     buildToolbar();
@@ -628,8 +657,12 @@
       if (rw.fine.length > REWIND.fineCap) rw.fine.shift();
     }
     if (t % REWIND.fullEvery === 0) {
-      rw.full.push(captureFull(p));
+      const f = captureFull(p);
+      rw.full.push(f);
       if (rw.full.length > REWIND.fullCap) rw.full.shift();
+      // archEvery is a multiple of fullEvery, so the deep archive keeps the
+      // very same snapshot object — remembering an age costs nothing extra
+      if (t % REWIND.archEvery === 0) { rw.arch.push(f); thinArchive(rw.arch, t); }
       // fine frames older than the oldest restore point are unusable
       const floor = rw.full[0].tick;
       while (rw.fine.length && rw.fine[0].tick < floor) rw.fine.shift();
@@ -683,7 +716,7 @@
     const rw = G.rewind; if (!rw) return;
     G._reversed = true;   // the Testament notices, however you got here
     if (G.view.kind !== 'planet') { flashToast('Only living worlds can be rewound'); setSpeedIdx(IDX_PAUSE); return; }
-    const p = Cosmos.active(); if (!p) return;
+    let p = Cosmos.active(); if (!p) return;
     const rate = Math.abs(G.speed);
     // how many recorded ticks to unwind this frame
     let budget = Math.max(1, Math.round(rate * 6 * dt / 1000 * REWIND.fineEvery));
@@ -695,12 +728,41 @@
       if (full && f.tick <= full.tick) {
         rw.full.pop();
         restoreFull(full);
+        // restoreFull swaps in a NEW planet object; without this the rest of
+        // the frame would walk people around a world no longer on the map
+        p = Cosmos.active(); if (!p) return;
       } else {
         applyFine(p.sim, f);
       }
       rw.fine.pop();
       budget -= REWIND.fineEvery;
     }
+
+    // The detailed record is spent, but the world is older than the record.
+    // Walk back through the deep archive — whole ages at a time — before
+    // anything is allowed to come apart.
+    if (!rw.fine.length && rw.arch.length) {
+      while (rw.arch.length && rw.arch[rw.arch.length - 1].tick >= p.sim.tick) rw.arch.pop();
+      if (rw.arch.length) {
+        const stepMs = Math.max(60, 4000 / Math.max(1, rate));
+        rw.archT += dt;
+        let moved = false;
+        while (rw.arch.length && rw.archT >= stepMs) {
+          rw.archT -= stepMs;
+          restoreFull(rw.arch.pop());
+          p = Cosmos.active(); if (!p) return;
+          moved = true;
+        }
+        rw.inArchive = true;
+        rw.atFloor = false;
+        if (moved) Audio8.sfx('terra');
+        p.world.dirtyMini = true;
+        return;
+      }
+    }
+    rw.inArchive = false;
+    rw.archT = 0;
+
     if (!rw.fine.length) {
       // Past the beginning of the record. This is where the world itself comes
       // apart — so it takes a deliberate act, not the tail end of a scrub.
@@ -799,12 +861,21 @@
   function rewindBannerText() {
     const rw = G.rewind;
     if (!rw) return null;
-    if (rw.fine.length) return { t: '⟲ REWINDING', s: 'Year ' + Math.floor(G.sim.tick / TICKS_PER_YEAR) };
+    const year = Math.floor(G.sim.tick / TICKS_PER_YEAR);
+    if (rw.fine.length) return { t: '⟲ REWINDING', s: 'Year ' + year };
+    if (rw.inArchive) {
+      // whole ages at a time, back toward the world's first morning
+      return {
+        t: '⟲ THE AGES REVERSED',
+        s: rw.arch.length ? 'Year ' + year + '  ·  ' + rw.arch.length + ' ages remain'
+                          : 'Year ' + year + '  ·  the first morning'
+      };
+    }
     if (!rw.armed) {
       // the record is spent. Say so honestly — this is not the whole of history
       // running backwards, it is the edge of what was written down.
       if (G.speedIdx !== IDX_UNMAKING) {
-        return { t: '⟲ THE RECORD BEGINS HERE', s: 'to go back further, hold ⧏⧏⧏ · the Unmaking' };
+        return { t: '⟲ THE FIRST MORNING', s: 'there is no earlier · to go further, hold ⧏⧏⧏ · the Unmaking' };
       }
       const bar = '█'.repeat(Math.round(rw.arm * 12)).padEnd(12, '░');
       return { t: 'UNMAKING', s: bar + '  release to stop' };
@@ -1989,7 +2060,12 @@
     requestAnimationFrame(loop);
   }
 
-  global.PixelDeity = { boot, save, load, G, timeTravel, gotoPlanet, gotoPlane };
+  global.PixelDeity = {
+    boot, save, load, G, timeTravel, gotoPlanet, gotoPlane,
+    // exposed for the headless suites in tools/ — they drive the sim directly
+    // rather than at the mercy of a frame budget
+    newMultiverse, recordRewind, setSpeedIdx, undoUnmaking, thinArchive, REWIND
+  };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
   else boot();
 })(window);
