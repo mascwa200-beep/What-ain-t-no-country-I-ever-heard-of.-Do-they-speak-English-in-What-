@@ -257,6 +257,11 @@
 <script src="js/util.js"></script>
 <script src="js/codec.js"></script>
 <script src="js/world.js"></script>
+<!-- the real shape of the Earth (generated; see tools/build-earth.js) and the
+     module that turns it into a world. After world.js because earth.js uses
+     PD.World, before cosmos.js because the earth planet type needs it. -->
+<script src="js/earthdata.js"></script>
+<script src="js/earth.js"></script>
 <script src="js/sim.js"></script>
 <script src="js/render.js"></script>
 <script src="js/render3d.js"></script>

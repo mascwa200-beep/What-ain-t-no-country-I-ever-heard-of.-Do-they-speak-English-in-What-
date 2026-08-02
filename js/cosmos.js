@@ -18,7 +18,10 @@
     oceanic:    { name: 'Oceanic',    desc: 'A water world of scattered islands. Merfolk paradise.', opts: { seaShift: 0.12 } },
     hellscape:  { name: 'Hellscape',  desc: 'Lava seas and ashen rock. Tieflings feel at home.', opts: { mode: 'hell', tempShift: 0.3 } },
     primordial: { name: 'Primordial', desc: 'A young world of ooze and shallow seas. Guide its evolution.', opts: { mode: 'primordial', seaShift: 0.08 } },
-    doomed:     { name: 'Doomed',     desc: 'A beautiful world with an unstable core. It WILL shatter. Unless…', opts: {} }
+    doomed:     { name: 'Doomed',     desc: 'A beautiful world with an unstable core. It WILL shatter. Unless…', opts: {} },
+    // Not generated. Loaded — real coastlines, real mountains, real ocean
+    // trenches, from the height field baked into js/earthdata.js.
+    earth:      { name: 'Earth',      desc: 'The world as it actually is. Real continents, real mountains, real seas.', opts: {}, real: true }
   };
 
   const PLANET_NAMES = ['Aeloria', 'Bront', 'Cindral', 'Dawnmere', 'Erebos', 'Feyland', 'Gloamhold', 'Hythera', 'Ionaal', 'Jorvan', 'Kaldrun', 'Lumen', 'Morrow', 'Nyxis', 'Oberon', 'Pyrros', 'Quellon', 'Rimeworld', 'Solyn', 'Thessa', 'Umbra', 'Vernal', 'Wyrd', 'Xanthe', 'Ythil', 'Zephyria'];
@@ -49,6 +52,15 @@
       rot: rng() * 1
     };
     sim.planetName = p.name;
+    // Earth's surface is not noise, so replace the generated field with the
+    // real one. If the data could not be decoded the world stays as generated
+    // and the planet is honestly relabelled rather than pretending.
+    if (t.real && PD.Earth && PD.Earth.loaded()) {
+      if (PD.Earth.build(world)) { p.name = name || 'Earth'; sim.planetName = p.name; p.isEarth = true; }
+      else p.type = 'verdant';
+    } else if (t.real) {
+      p.type = 'verdant';
+    }
     if (type === 'doomed') p.meta.doom = 4800 + (rng() * 1200 | 0); // ~40 min of watched time
     if (type === 'primordial') p.meta.evo = 0;
     C.planets.push(p);

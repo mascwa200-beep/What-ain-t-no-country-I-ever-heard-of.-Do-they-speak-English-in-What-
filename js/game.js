@@ -104,12 +104,44 @@
     initRewind();
     G.creationStage = null; G.dissolve = 0;
     G.story = { done: {}, active: 0 };
-    const p = Cosmos.createPlanet('verdant', seedStr);
+    // Earth if we have the real height field, a generated world if not. The
+    // fallback is not a failure mode to hide — an old WebView without
+    // DecompressionStream still gets a playable planet, it is just not this
+    // one, and createPlanet relabels it honestly.
+    const wantEarth = PD.Earth && PD.Earth.loaded();
+    const p = Cosmos.createPlanet(wantEarth ? 'earth' : 'verdant', seedStr);
     Cosmos.C.activeId = p.id;
-    seedInitialLife(p.sim, p.world);
+    if (p.isEarth) seedEarthLife(p.sim, p.world);
+    else seedInitialLife(p.sim, p.world);
     Sim.recount(p.sim);
     G.view = { kind: 'planet', id: p.id };
     bindView();
+  }
+
+  // On the real Earth, people start where people are. The city list is real
+  // (name, latitude, longitude, population), so this places a settlement at
+  // each one that lands on land, sized by how large the city actually is.
+  function seedEarthLife(sim, world) {
+    for (let k = 0; k < 60; k++) {
+      const x = (sim.rng() * world.W) | 0, y = (sim.rng() * world.H) | 0;
+      const s = W.nearestLand(world, x, y, 12);
+      if (s) Sim.spawnUnit(sim, sim.rng() < 0.15 ? 'wolf' : 'critter', s.x, s.y);
+    }
+    const places = PD.Earth.places(world);
+    // largest first, so if two real cities collapse onto the same coarse tile
+    // the bigger one wins the spot
+    places.sort((a, b) => b.pop - a.pop);
+    let placed = 0;
+    for (const c of places) {
+      if (placed >= 28) break;
+      if (!W.inBounds(world, c.x, c.y)) continue;
+      if (world.owner[W.idx(world, c.x, c.y)] >= 0) continue;   // already a town here
+      const v = Sim.foundVillage(sim, 'human', c.x, c.y);
+      if (!v) continue;
+      v.name = c.name;                       // it is called what it is called
+      placed++;
+    }
+    if (PD.Society) PD.Society.hist(sim, 'The Earth, as it is. ' + placed + ' cities stand where they stand.', 'era');
   }
 
   function seedInitialLife(sim, world) {
@@ -2550,6 +2582,16 @@
 
   // ================= Boot =================
   function boot() {
+    // The real height field is gzipped and decodes asynchronously, so the
+    // world cannot be built until it has landed. Wait for it, then boot
+    // exactly as before — and boot anyway if it never arrives.
+    if (PD.Earth && PD.Earth.ready && !PD.Earth.loaded()) {
+      PD.Earth.ready().then(bootNow, bootNow);
+      return;
+    }
+    bootNow();
+  }
+  function bootNow() {
     const canvas = $('#game');
     PD.Afterlife.init();
     const started = hasSave();
