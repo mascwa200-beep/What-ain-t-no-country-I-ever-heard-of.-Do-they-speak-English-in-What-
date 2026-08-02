@@ -1265,7 +1265,9 @@
       G.ui.mouseW = wc;
       const p = G.power;
       if (!p || !wc) return; // clicked past the planet's limb into space
+      if (Powers.soundAt) Powers.soundAt(wc.x, wc.y, G.world.W, G.world.H);
       const spent = p.apply(G, wc.x, wc.y);
+      if (Powers.soundAt) Powers.soundAt(null);
       if (spent > 0) onPowerUsed(p);
     }
     function onMinimap(x, y) {
@@ -1592,7 +1594,35 @@
   }
 
   // ================= HUD =================
+  // ---- the score listens to the world --------------------------------
+  // The music was four chords on a timer, identical whether the world below
+  // was a paradise or a graveyard. Read the state of creation and tell the
+  // audio engine what it is looking at. Cheap: aggregates already computed.
+  let lastMood = '', moodCd = 0;
+  function updateMood() {
+    if (!Audio8.setMood || --moodCd > 0) return;
+    moodCd = 40;                     // re-evaluate about twice a second
+    const s = G.sim; if (!s) return;
+    let pop = 0, sick = 0, atWar = 0, prosperity = 0, temples = 0;
+    for (const v of s.villages) {
+      pop += v.pop; temples += v.temples || 0;
+      prosperity += v.prosperity || 0;
+      sick += v.sickCount || 0;
+      if (v.rival >= 0) atWar++;
+    }
+    const nV = Math.max(1, s.villages.length);
+    prosperity /= nV;
+    let m;
+    if (pop === 0) m = 'empty';
+    else if (sick > pop * 0.22) m = 'plague';
+    else if (atWar > 0 || s.bloodMoonT > 0) m = 'war';
+    else if (prosperity > 0.7 && temples >= 2) m = 'glory';
+    else m = 'calm';
+    if (m !== lastMood) { lastMood = m; Audio8.setMood(m); }
+  }
+
   function refreshHUD() {
+    updateMood();
     $('#faith-val').textContent = Math.floor(G.faith);
     $('#faith-rate').textContent = '+' + faithPerStep().toFixed(1) + '/t' + (G.divinity > 0 ? ' ⍟' + G.divinity : '');
     const ts = $('#time-scale');
@@ -1704,7 +1734,9 @@
     if (btn.id === 'ins-close') { G.selected = null; $('#inspect').classList.remove('show'); return; }
     if (btn.id === 'smite-btn' && G.selected && G.selected.type === 'village') {
       const v = G.selected.ref;
+      if (Powers.soundAt) Powers.soundAt(v.x, v.y, G.world.W, G.world.H);
       const spent = Powers.BY_ID.lightning.apply(G, v.x, v.y);
+      if (Powers.soundAt) Powers.soundAt(null);
       if (spent > 0) onPowerUsed(Powers.BY_ID.lightning, spent);
       return;
     }
@@ -1713,9 +1745,13 @@
       const u = G.selected.ref;
       let spent = 0, pw = null;
       if (act === 'blessone') { if (G.faith >= 4) { u.hp = u.maxHp; u.food = 1; u.sick = 0; u.karma += 1; PD.FX.spark(u.x, u.y); Audio8.sfx('bless'); spent = 4; pw = Powers.BY_ID.bless; } }
-      else if (act === 'voiceone') { pw = Powers.BY_ID.voice; spent = pw.apply(G, u.x, u.y); }
-      else if (act === 'empowerone') { pw = Powers.BY_ID.empower; spent = pw.apply(G, u.x, u.y); }
-      else if (act === 'smiteone') { pw = Powers.BY_ID.lightning; spent = pw.apply(G, u.x, u.y); }
+      else if (act === 'voiceone' || act === 'empowerone' || act === 'smiteone') {
+        pw = act === 'voiceone' ? Powers.BY_ID.voice
+           : act === 'empowerone' ? Powers.BY_ID.empower : Powers.BY_ID.lightning;
+        if (Powers.soundAt) Powers.soundAt(u.x, u.y, G.world.W, G.world.H);
+        spent = pw.apply(G, u.x, u.y);
+        if (Powers.soundAt) Powers.soundAt(null);
+      }
       if (spent > 0) onPowerUsed(pw || { cat: 'god' }, spent);
     }
   }

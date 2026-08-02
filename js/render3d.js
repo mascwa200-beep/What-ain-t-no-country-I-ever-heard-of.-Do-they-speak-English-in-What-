@@ -1244,6 +1244,10 @@ void main(){
     cam.sDist += (cam.dist - cam.sDist) * f;
     cam.fov += (cam.fovT - cam.fov) * f * 0.6;
 
+    // the ear rides the camera: sounds are placed and attenuated against
+    // wherever the god is currently looking
+    if (PD.Audio8 && PD.Audio8.listen) PD.Audio8.listen(cam.sLon, cam.sLat, cam.sDist);
+
     // shake decays, and drives a real jitter of the eye
     const G = global.G || {};
     cam.shake = Math.max(0, (G.shake || 0));

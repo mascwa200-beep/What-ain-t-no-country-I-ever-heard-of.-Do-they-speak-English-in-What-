@@ -287,6 +287,13 @@
       kind, text: PRAYER_KINDS[kind].text(u, v), t: sim.tick,
       x: u.x, y: u.y
     });
+    // and it is HEARD. Prayers have only ever been text in a side panel;
+    // now the voice carries from where the supplicant is standing.
+    if (PD.Audio8 && PD.Audio8.whisper) {
+      const faith = soc.faiths.length ? soc.faiths[0] : null;
+      PD.Audio8.whisper([u.x, u.y, sim.world.W, sim.world.H],
+                        faith ? PD.clamp(faith.fervor || 0.5, 0, 1) : 0.5);
+    }
     if (PD.Game && PD.Game.onPrayer) PD.Game.onPrayer(sim);
   }
 
