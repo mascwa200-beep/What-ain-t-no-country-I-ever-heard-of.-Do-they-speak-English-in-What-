@@ -1164,8 +1164,29 @@ void main(){
         c[o] = np * 255; c[o + 1] = nc * 255; c[o + 2] = ns * 255; c[o + 3] = nw * 255;
       }
     }
+
+    // The field is one texel per TILE but the albedo is 8x that, so straight
+    // bilinear magnification shows the tile grid — snowlines came out as
+    // 5px blocks. A wrap-aware box blur turns them into weather fronts.
+    if (!r.climBlur || r.climBlur.length !== c.length) r.climBlur = new Uint8Array(c.length);
+    const b = r.climBlur;
+    for (let y = 0; y < w.H; y++) {
+      const yUp = y > 0 ? y - 1 : 0, yDn = y < w.H - 1 ? y + 1 : w.H - 1;
+      for (let x = 0; x < w.W; x++) {
+        const xL = (x - 1 + w.W) % w.W, xR = (x + 1) % w.W;   // longitude wraps
+        const o = (y * w.W + x) * 4;
+        for (let ch = 0; ch < 4; ch++) {
+          b[o + ch] = (
+            c[(yUp * w.W + xL) * 4 + ch] + c[(yUp * w.W + x) * 4 + ch] * 2 + c[(yUp * w.W + xR) * 4 + ch] +
+            c[(y * w.W + xL) * 4 + ch] * 2 + c[o + ch] * 4 + c[(y * w.W + xR) * 4 + ch] * 2 +
+            c[(yDn * w.W + xL) * 4 + ch] + c[(yDn * w.W + x) * 4 + ch] * 2 + c[(yDn * w.W + xR) * 4 + ch]
+          ) / 16;
+        }
+      }
+    }
     gl.bindTexture(gl.TEXTURE_2D, r.texClim);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, w.W, w.H, 0, gl.RGBA, gl.UNSIGNED_BYTE, c);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, w.W, w.H, 0, gl.RGBA, gl.UNSIGNED_BYTE, b);
   }
 
   // city lights / water mask / fire / crack mask, rebuilt cheaply per frame

@@ -47,8 +47,13 @@
 
   <!-- Toolbar (powers) -->
   <aside id="toolbar">
+    <div id="tool-search-wrap">
+      <input id="tool-search" type="search" placeholder="Search powers…"
+             autocomplete="off" autocorrect="off" spellcheck="false"
+             aria-label="Search divine powers">
+    </div>
     <div id="tools"></div>
-    <div id="power-info">
+    <div id="power-info" aria-live="polite">
       <div id="power-name">✋ Move Map</div>
       <div id="power-desc">Drag to pan across your world.</div>
       <div id="power-cost">Free</div>
@@ -152,13 +157,28 @@
 
   <!-- Event log -->
   <section id="chronicle">
-    <div class="chron-title">📜 Chronicle</div>
-    <div id="event-log"></div>
+    <div class="chron-title rule-title">Chronicle</div>
+    <div id="event-log" aria-live="polite" aria-relevant="additions"></div>
   </section>
 
   <div id="rewind-banner"></div>
 
-  <div id="toast"></div>
+  <div id="toast" role="status" aria-live="polite"></div>
+
+  <!-- Themed ask/confirm — native confirm()/prompt() are unstyleable and
+       broke the frame every time the god did something irreversible -->
+  <div id="ask-modal" class="modal-overlay" role="dialog" aria-modal="true"
+       aria-labelledby="ask-title">
+    <div class="modal">
+      <div class="modal-title" id="ask-title">…</div>
+      <div id="ask-body"></div>
+      <input id="ask-input" type="text" autocomplete="off" spellcheck="false">
+      <div class="ask-btns">
+        <button id="ask-cancel" class="menu-btn">Cancel</button>
+        <button id="ask-ok" class="big-btn">Confirm</button>
+      </div>
+    </div>
+  </div>
 
   <!-- Intro overlay -->
   <div id="intro" class="modal-overlay show">

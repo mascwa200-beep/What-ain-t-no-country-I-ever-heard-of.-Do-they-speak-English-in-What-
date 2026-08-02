@@ -147,14 +147,58 @@
   }
 
   // ---- Transcendence (prestige): trade a multiverse for permanent power
+  // ================= Themed ask / confirm =================
+  // Native confirm() and prompt() are unstyleable, and they broke the frame
+  // at exactly the moments that should feel weightiest — unmaking a world,
+  // transcending, starting over. Promise-based so the call sites read the
+  // same way they did.
+  function ask(opts) {
+    return new Promise((resolve) => {
+      const m = $('#ask-modal');
+      if (!m) { resolve(opts.input != null ? global.prompt(opts.body, opts.input) : global.confirm(opts.body)); return; }
+      const input = $('#ask-input'), okBtn = $('#ask-ok'), cancel = $('#ask-cancel');
+      $('#ask-title').textContent = opts.title || 'Are you certain?';
+      $('#ask-body').textContent = opts.body || '';
+      okBtn.textContent = opts.ok || 'Confirm';
+      cancel.textContent = opts.cancel || 'Cancel';
+      m.classList.toggle('has-input', opts.input != null);
+      m.classList.toggle('danger', !!opts.danger);
+      if (opts.input != null) { input.value = opts.input; }
+      m.classList.add('show');
+      if (opts.input != null) setTimeout(() => { try { input.focus(); input.select(); } catch (e) {} }, 30);
+
+      const done = (val) => {
+        m.classList.remove('show');
+        okBtn.removeEventListener('click', onOk);
+        cancel.removeEventListener('click', onCancel);
+        document.removeEventListener('keydown', onKey, true);
+        resolve(val);
+      };
+      const onOk = () => done(opts.input != null ? input.value : true);
+      const onCancel = () => done(opts.input != null ? null : false);
+      const onKey = (e) => {
+        if (e.key === 'Escape') { e.stopPropagation(); onCancel(); }
+        else if (e.key === 'Enter' && opts.input != null) { e.stopPropagation(); onOk(); }
+      };
+      okBtn.addEventListener('click', onOk);
+      cancel.addEventListener('click', onCancel);
+      document.addEventListener('keydown', onKey, true);
+    });
+  }
+
   function transcendCost() { return 2000 * Math.pow(3, G.divinity); }
-  function transcend() {
+  async function transcend() {
     const cost = transcendCost();
     if (G.faithTotal < cost) {
       flashToast(`Transcendence needs ${Math.floor(cost)} total faith earned (you: ${Math.floor(G.faithTotal)})`);
       Audio8.sfx('error'); return;
     }
-    if (!confirm(`TRANSCEND?\n\nYour multiverse dissolves into pure divinity. You begin again — but every future world yields ${25}% more faith, forever, per transcendence.\n\nCurrent Divinity: ${G.divinity} → ${G.divinity + 1}`)) return;
+    const yes = await ask({
+      title: 'Transcend',
+      body: `Your multiverse dissolves into pure divinity. You begin again — but every world you make from now on yields 25% more faith, forever, for each transcendence.\n\nDivinity: ${G.divinity} → ${G.divinity + 1}`,
+      ok: 'Dissolve it all', danger: true
+    });
+    if (!yes) return;
     G.divinity++;
     ach('transcends');
     const d = G.divinity;
@@ -1310,8 +1354,18 @@
       dragging = false; touchPanning = false;
     });
 
+    // Typing into any field must never fire a hotkey — 'r' should not reverse
+    // time while you are naming a race in the Genesis Lab.
+    const inField = (e) => {
+      const t = e.target;
+      if (!t || !t.tagName) return false;
+      const tag = t.tagName.toLowerCase();
+      return tag === 'input' || tag === 'textarea' || tag === 'select' || t.isContentEditable;
+    };
+
     // keyboard
     global.addEventListener('keydown', (e) => {
+      if (inField(e)) return;
       const k = e.key.toLowerCase(); keys[k] = true;
       if (k === ' ') { e.preventDefault(); togglePause(); }
       else if (k === '1') setSpeedIdx(IDX_NORMAL);
@@ -1428,10 +1482,17 @@
     wrap.innerHTML = html;
   }
 
+  // which categories the player has folded away, remembered across rebuilds
+  const collapsedCats = {};
+  G.toolQuery = '';
+
   function buildToolbar() {
     const wrap = $('#tools');
     wrap.innerHTML = '';
     const creating = G.creationStage != null;
+    const q = (G.toolQuery || '').trim().toLowerCase();
+    let shown = 0;
+
     for (const cat of Powers.CATEGORIES) {
       let powers = Powers.POWERS.filter(x => x.cat === cat.id);
       if (cat.id === 'genesis') {
@@ -1442,11 +1503,30 @@
         // nothing else can be done to a world that does not yet exist
         powers = powers.filter(x => x.cat === 'god');
       }
+      // search matches name, description and category — 59 powers is too many
+      // to find anything in by scrolling
+      if (q) {
+        powers = powers.filter(x =>
+          x.name.toLowerCase().includes(q) ||
+          (x.desc || '').toLowerCase().includes(q) ||
+          cat.name.toLowerCase().includes(q));
+      }
       if (!powers.length) continue;
+      shown += powers.length;
+
       const group = document.createElement('div');
-      group.className = 'tool-group';
-      const h = document.createElement('div'); h.className = 'tool-group-title'; h.textContent = cat.name;
+      group.className = 'tool-group' + (!q && collapsedCats[cat.id] ? ' collapsed' : '');
+      // a real button: keyboard-reachable, and it announces its own state
+      const h = document.createElement('button');
+      h.className = 'tool-group-title';
+      h.textContent = cat.name + '  (' + powers.length + ')';
+      h.setAttribute('aria-expanded', String(!collapsedCats[cat.id]));
+      h.addEventListener('click', () => {
+        collapsedCats[cat.id] = !collapsedCats[cat.id];
+        buildToolbar();
+      });
       group.appendChild(h);
+
       const grid = document.createElement('div'); grid.className = 'tool-grid';
       for (const p of powers) {
         const btn = document.createElement('button');
@@ -1454,13 +1534,26 @@
         btn.innerHTML = `<span class="tool-ico">${p.icon}</span><span class="tool-name">${p.name}</span>` +
           (p.cost > 0 ? `<span class="tool-cost">✦${p.cost}</span>` : '');
         btn.title = p.desc;
+        btn.setAttribute('aria-label', p.name + (p.cost > 0 ? ', costs ' + p.cost + ' faith' : ', free'));
+        // Hover previews the power. On a touch screen mouseenter never fires,
+        // so without the pointerdown/focus paths you had to SELECT a power to
+        // find out what it did or cost — on the platform this ships to.
         btn.addEventListener('mouseenter', () => updatePowerInfo(p));
         btn.addEventListener('mouseleave', () => updatePowerInfo(G.power));
+        btn.addEventListener('pointerdown', () => updatePowerInfo(p));
+        btn.addEventListener('focus', () => updatePowerInfo(p));
         btn.addEventListener('click', () => setPower(p.id));
         grid.appendChild(btn);
       }
       group.appendChild(grid);
       wrap.appendChild(group);
+    }
+
+    if (!shown) {
+      const none = document.createElement('div');
+      none.className = 'tool-empty';
+      none.textContent = q ? 'No power by that name.' : 'Nothing can be done yet.';
+      wrap.appendChild(none);
     }
     highlightPower(G.power ? G.power.id : 'pan');
   }
@@ -1927,7 +2020,7 @@
       }
       renderCosmosControls();
     });
-    $('#cosmos-controls').addEventListener('click', (e) => {
+    $('#cosmos-controls').addEventListener('click', async (e) => {
       const b = e.target.closest('button'); if (!b) return;
       if (b.classList.contains('cosmos-new')) {
         if (G.faith < 150) { flashToast('Creating a world needs ✦150'); Audio8.sfx('error'); return; }
@@ -1944,12 +2037,12 @@
         gotoPlanet(cosmosSel); closePanel();
       } else if (b.id === 'cosmos-rename' && cosmosSel >= 0) {
         const p = Cosmos.getPlanet(cosmosSel);
-        const name = prompt('Name this world:', p.name);
+        const name = await ask({ title: 'Name this world', body: 'What shall it be called?', input: p.name, ok: 'Name it' });
         if (name) { p.name = name; p.sim.planetName = name; refreshHUD(); renderCosmosControls(); }
       } else if (b.id === 'cosmos-destroy' && cosmosSel >= 0) {
         if (Cosmos.C.planets.length <= 1) { flashToast('You cannot unmake the last world'); return; }
         if (G.faith < 100) { flashToast('Unmaking needs ✦100'); return; }
-        if (confirm('Unmake this world and every soul on it?')) {
+        if (await ask({ title: 'Unmake this world', body: 'This world and every soul on it will cease to have been. There is no undo for this one.', ok: 'Unmake it', danger: true })) {
           G.faith -= 100;
           ach('unmade');
           Cosmos.destroyPlanet(cosmosSel);
@@ -2035,6 +2128,15 @@
     });
     $('#btn-menu').addEventListener('click', toggleMenu);
     $('#btn-save').addEventListener('click', () => save());
+    const search = $('#tool-search');
+    if (search) {
+      search.addEventListener('input', () => { G.toolQuery = search.value; buildToolbar(); });
+      // typing in the box must not drive the game's hotkeys
+      search.addEventListener('keydown', (e) => {
+        e.stopPropagation();
+        if (e.key === 'Escape') { search.value = ''; G.toolQuery = ''; buildToolbar(); search.blur(); }
+      });
+    }
     $('#btn-labels').addEventListener('click', toggleLabels);
     $('#btn-sound').addEventListener('click', () => {
       const on = !Audio8.isEnabled(); Audio8.setEnabled(on); Audio8.setMusic(on);
@@ -2042,16 +2144,16 @@
       if (on) Audio8.unlock();
     });
 
-    $('#menu-new').addEventListener('click', () => {
-      if (confirm('Begin a NEW multiverse? Everything will be overwritten.')) {
+    $('#menu-new').addEventListener('click', async () => {
+      if (await ask({ title: 'A new multiverse', body: 'Everything you have made will be overwritten. Your transcendences are kept.', ok: 'Begin again', danger: true })) {
         wipeSave(); newMultiverse(); Render.FX.clear(); $('#menu-modal').classList.remove('show'); flashToast('In the beginning…');
       }
     });
     $('#menu-resume').addEventListener('click', () => $('#menu-modal').classList.remove('show'));
     $('#menu-transcend').addEventListener('click', transcend);
     $('#menu-save').addEventListener('click', () => { save(); });
-    $('#menu-regen-seed').addEventListener('click', () => {
-      const s = prompt('Enter a world seed (any text):', G.world.seedStr);
+    $('#menu-regen-seed').addEventListener('click', async () => {
+      const s = await ask({ title: 'A world from a word', body: 'Any text becomes a world. The same word always makes the same world.', input: G.world.seedStr, ok: 'Make it' });
       if (s != null) { wipeSave(); newMultiverse(s); Render.FX.clear(); $('#menu-modal').classList.remove('show'); flashToast('World seed: ' + s); }
     });
 
