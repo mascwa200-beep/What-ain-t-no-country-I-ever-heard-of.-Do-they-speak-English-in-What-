@@ -11,15 +11,46 @@
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' fill='%230a0e1a'/><rect x='6' y='2' width='4' height='4' fill='%23f0d040'/><rect x='4' y='6' width='8' height='6' fill='%235aa03c'/></svg>">
 <style>
 /* =========================================================================
-   PIXEL DEITY — styles.css   (retro 8-bit UI, fully self-contained/offline)
+   PIXEL DEITY — styles.css
+   "The divine instrument": the precision of a targeting HUD carrying the
+   weight of an illuminated manuscript. Angular frames, thin luminous rules
+   and corner ticks; deep black glass; serif titles against monospace
+   telemetry; gold leaf reserved for acts of god. Fully offline, no webfonts.
    ========================================================================= */
 :root{
-  --bg:#070a14; --panel:rgba(18,24,44,0.66); --panel2:rgba(26,33,60,0.72);
-  --edge:rgba(255,255,255,0.09); --edge2:rgba(255,255,255,0.18);
-  --ink:#eef2ff; --dim:#93a0c4; --gold:#ffd257;
-  --good:#57d977; --bad:#ff6752; --accent:#8ab2ff;
-  --shadow:0 10px 30px rgba(0,0,0,0.45);
-  --glass:blur(18px) saturate(1.3);
+  /* ---- surface ---- */
+  --bg:#05070e;
+  --panel:rgba(9,13,26,0.78); --panel2:rgba(18,25,46,0.86);
+  --edge:rgba(150,180,240,0.16); --edge2:rgba(160,195,255,0.34);
+  --rule:rgba(160,195,255,0.5);        /* the thin luminous hairline */
+  --ink:#e8eeff; --dim:#8595bd;
+  --gold:#f0c96a; --gold-hi:#ffe9a8; --gold-dim:#8a7434;
+  --good:#5fd98a; --bad:#ff6a54; --accent:#7fb0ff;
+  --shadow:0 18px 44px rgba(0,0,0,0.6);
+  --glow:0 0 18px rgba(120,170,255,0.16);
+  --glass:blur(20px) saturate(1.25);
+
+  /* ---- type ----
+     One serif for voice (titles, scripture, names), one monospace for
+     instrumentation (numbers, time, costs). Nothing else. */
+  --f-serif:'Iowan Old Style','Palatino Linotype','Palatino','Georgia',
+            'Times New Roman',serif;
+  --f-ui:'Inter','SF Pro Text','Segoe UI',system-ui,-apple-system,sans-serif;
+  --f-mono:ui-monospace,'SF Mono','Cascadia Mono','Roboto Mono',Menlo,monospace;
+
+  /* fluid type scale — replaces the 9.5px/10.5px/11.5px literals */
+  --t-xs:clamp(9px,   1.7vh, 10.5px);
+  --t-sm:clamp(10px,  1.9vh, 11.5px);
+  --t-md:clamp(11px,  2.1vh, 13px);
+  --t-lg:clamp(13px,  2.6vh, 15px);
+  --t-xl:clamp(15px,  3.2vh, 19px);
+  --t-2xl:clamp(19px, 4.4vh, 30px);
+
+  /* ---- space & shape ---- */
+  --s1:4px; --s2:6px; --s3:9px; --s4:13px; --s5:18px; --s6:26px;
+  --r-sm:4px; --r-md:7px; --r-lg:10px;
+  --cut:10px;                          /* the angular corner chamfer */
+  --hit:44px;                          /* minimum touch target */
 
   /* ---- layout metrics -------------------------------------------------
      Everything that positions chrome derives from these. Before this, every
@@ -40,11 +71,67 @@ html,body{height:100%;overflow:hidden;background:var(--bg);}
 /* dvh where supported: the URL bar collapsing must not clip the chrome */
 @supports (height:100dvh){ html,body{height:100dvh;} }
 body{
-  font-family:'Inter','SF Pro Display','Segoe UI',system-ui,sans-serif;
+  font-family:var(--f-ui);
   color:var(--ink);user-select:none;
   -webkit-font-smoothing:antialiased;
 }
 #app{position:fixed;inset:0;}
+
+/* ---------- the instrument's shared vocabulary ---------- */
+
+/* An angular frame: chamfered corners, a hairline edge, black glass. This is
+   the one shape the whole UI is built from. */
+.frame,#toolbar,.side-panel,#inspect,#chronicle,.modal,.side-tab,#hud-top{
+  background:var(--panel);
+  backdrop-filter:var(--glass);-webkit-backdrop-filter:var(--glass);
+  border:1px solid var(--edge);
+  box-shadow:var(--shadow),var(--glow);
+}
+.frame,#toolbar,.side-panel,#inspect,#chronicle,.modal{
+  clip-path:polygon(
+    var(--cut) 0, 100% 0, 100% calc(100% - var(--cut)),
+    calc(100% - var(--cut)) 100%, 0 100%, 0 var(--cut));
+  border-radius:2px;
+}
+/* corner ticks — the small registration marks that read as an instrument */
+.side-panel::before,#toolbar::before,.modal::before{
+  content:'';position:absolute;left:0;top:var(--cut);
+  width:1px;height:22px;background:var(--rule);opacity:0.8;pointer-events:none;
+}
+.side-panel::after,#toolbar::after,.modal::after{
+  content:'';position:absolute;right:0;bottom:var(--cut);
+  width:1px;height:22px;background:var(--rule);opacity:0.8;pointer-events:none;
+}
+.side-panel,#toolbar,.modal,#inspect,#chronicle{position:absolute;}
+.modal{position:relative;}
+
+/* section headings: small caps, letterspaced, on a hairline */
+.rule-title{
+  font-family:var(--f-ui);font-size:var(--t-xs);font-weight:800;
+  letter-spacing:.22em;text-transform:uppercase;color:var(--dim);
+  padding-bottom:var(--s1);margin-bottom:var(--s2);
+  border-bottom:1px solid var(--edge);
+  position:relative;
+}
+.rule-title::after{
+  content:'';position:absolute;left:0;bottom:-1px;width:26px;height:1px;
+  background:var(--gold);opacity:.85;
+}
+
+/* every focusable thing must SAY it is focused — there was no :focus rule
+   anywhere in this file, with tap highlight disabled on top of it */
+:where(button,input,select,[tabindex]):focus-visible{
+  outline:2px solid var(--gold);
+  outline-offset:2px;
+  border-radius:2px;
+}
+
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{
+    animation-duration:.001ms!important;animation-iteration-count:1!important;
+    transition-duration:.001ms!important;
+  }
+}
 
 #game{
   position:absolute;inset:0;width:100%;height:100%;display:block;
@@ -56,7 +143,7 @@ body{
 }
 
 /* ---------- pixel-ish font utility ---------- */
-.px{font-family:inherit;letter-spacing:1px;}
+.px{font-family:var(--f-ui);letter-spacing:1px;}
 
 /* ---------- Top HUD ---------- */
 #hud-top{
@@ -70,20 +157,34 @@ body{
   /* a fixed-height bar must never let its contents paint outside it */
   overflow:hidden;
 }
+/* the title is set, not stamped: serif, wide, gold leaf */
 .logo,.intro-logo{
-  font-weight:800;letter-spacing:3px;
-  font-size:19px;background:linear-gradient(120deg,#ffd257,#ff9d5c);-webkit-background-clip:text;background-clip:text;color:transparent;filter:drop-shadow(0 2px 6px rgba(255,180,60,0.35));
+  font-family:var(--f-serif);font-weight:400;letter-spacing:.2em;
+  font-size:var(--t-lg);text-transform:uppercase;white-space:nowrap;
+  background:linear-gradient(170deg,var(--gold-hi),var(--gold) 55%,#b98f36);
+  -webkit-background-clip:text;background-clip:text;color:transparent;
+  filter:drop-shadow(0 1px 8px rgba(240,200,110,0.28));
 }
-.logo span,.intro-logo span{background:linear-gradient(120deg,#8ab2ff,#c48aff);-webkit-background-clip:text;background-clip:text;color:transparent;}
+.logo span,.intro-logo span{
+  background:linear-gradient(170deg,#cfe0ff,var(--accent));
+  -webkit-background-clip:text;background-clip:text;color:transparent;
+}
 /* One row, always. Wrapping inside a fixed-height bar is what painted the
    stats over the canvas; overflowing sideways is scrollable and honest. */
 .hud-center{
-  display:flex;align-items:center;gap:8px;flex:1 1 auto;justify-content:center;
+  display:flex;align-items:center;gap:8px;flex:1 1 auto;
+  /* `center` on an OVERFLOWING flex row clips the leading items and they
+     cannot be scrolled to — the faith counter read "r 0". `safe center`
+     falls back to start the moment the content stops fitting. */
+  justify-content:center;
+  justify-content:safe center;
   flex-wrap:nowrap;min-width:0;overflow-x:auto;overflow-y:hidden;
   scrollbar-width:none;-ms-overflow-style:none;
 }
 .hud-center::-webkit-scrollbar{display:none;}
-.hud-left{min-width:0;flex:0 1 auto;overflow:hidden;}
+/* the title must never be clipped mid-word — it read "PIXEL DEI" */
+.hud-left{min-width:0;flex:0 0 auto;overflow:visible;}
+.intro-logo{font-size:var(--t-2xl);letter-spacing:.24em;}
 /* The dial alone is ~380px; on a narrow screen the whole right cluster used to
    run off the edge and take the save/menu buttons with it. Let it shrink and
    scroll rather than escape. */
@@ -95,36 +196,64 @@ body{
 .hud-right::-webkit-scrollbar{display:none;}
 .hud-right > *{flex:0 0 auto;}
 
+/* readouts are instrumentation: monospace, tabular, on a hairline */
 .stat{
-  font-family:inherit;font-size:13px;font-weight:700;
-  background:var(--panel);border:1px solid var(--edge);border-radius:10px;
-  padding:5px 9px;display:flex;align-items:center;gap:5px;white-space:nowrap;
-  box-shadow:var(--shadow);
+  font-family:var(--f-mono);font-size:var(--t-md);font-weight:600;
+  font-variant-numeric:tabular-nums;
+  background:rgba(10,15,30,0.55);
+  border:1px solid var(--edge);
+  border-left:1px solid var(--rule);
+  border-radius:0 var(--r-sm) var(--r-sm) 0;
+  padding:var(--s2) var(--s3);
+  display:flex;align-items:center;gap:var(--s2);white-space:nowrap;
 }
-.stat.faith{color:var(--gold);border-color:#6a5a1a;background:#1a1806;}
-.stat.faith .stat-ico{font-size:14px;}
-.stat.faith small{color:#b09a40;font-size:10px;font-weight:400;}
-.race-counts,#race-counts{display:flex;gap:4px;flex-wrap:nowrap;flex:0 0 auto;}
+.stat.faith{
+  color:var(--gold);border-color:var(--gold-dim);
+  border-left-color:var(--gold);
+  background:linear-gradient(90deg,rgba(60,48,12,0.55),rgba(20,17,8,0.45));
+}
+.stat.faith .stat-ico{font-size:var(--t-lg);}
+.stat.faith small{color:#b09a40;font-size:var(--t-xs);font-weight:400;}
+.race-counts,#race-counts{display:flex;gap:var(--s1);flex-wrap:nowrap;flex:0 0 auto;}
 .race-chip{
-  font-family:inherit;font-size:12px;font-weight:700;
-  background:var(--panel);border:1px solid var(--edge);border-radius:8px;
-  padding:3px 6px;display:flex;align-items:center;gap:3px;
+  font-family:var(--f-mono);font-size:var(--t-sm);font-weight:600;
+  font-variant-numeric:tabular-nums;
+  background:rgba(10,15,30,0.5);border:1px solid var(--edge);
+  border-radius:var(--r-sm);
+  padding:var(--s1) var(--s2);display:flex;align-items:center;gap:var(--s1);
 }
-.race-chip i{width:8px;height:8px;border-radius:2px;display:inline-block;border:1px solid rgba(0,0,0,0.4);}
+.race-chip i{width:7px;height:7px;display:inline-block;border:1px solid rgba(0,0,0,0.5);}
 
-.speeds{display:flex;gap:2px;background:var(--panel);border:1px solid var(--edge);border-radius:12px;padding:2px;}
-.speed-btn{
-  font-family:ui-monospace,monospace;font-size:11px;color:var(--dim);background:transparent;
-  border:none;border-radius:3px;padding:5px 7px;cursor:pointer;font-weight:700;
+/* the time dial: a machined strip of notches, not a row of buttons */
+.speeds{
+  display:flex;gap:0;background:rgba(8,12,24,0.7);
+  border:1px solid var(--edge);border-radius:var(--r-sm);
+  padding:2px;position:relative;
 }
-.speed-btn:hover{color:var(--ink);background:var(--panel2);}
-.speed-btn.active{color:var(--bg);background:var(--gold);}
+.speed-btn{
+  font-family:var(--f-mono);font-size:var(--t-sm);color:var(--dim);
+  background:transparent;border:none;border-radius:2px;
+  /* was ~24x21px with 13 of them adjacent — under half the touch guideline */
+  min-width:clamp(22px,4.4vh,30px);min-height:clamp(26px,5vh,32px);
+  padding:0 var(--s1);cursor:pointer;font-weight:700;
+  transition:color .12s,background .12s;
+}
+.speed-btn:hover{color:var(--ink);background:rgba(120,160,240,0.12);}
+.speed-btn.active{
+  color:#140f02;
+  background:linear-gradient(180deg,var(--gold-hi),var(--gold));
+  box-shadow:0 0 12px rgba(240,200,110,0.45);
+}
 .speed-btn.rev{color:#ff9a8a;}
-.speed-btn.rev.active{color:#2a0a0a;background:#ff7a5a;}
-.speed-btn.sep{pointer-events:none;opacity:0.35;padding:5px 2px;}
-#time-scale{font-family:ui-monospace,monospace;font-size:11px;}
+.speed-btn.rev.active{
+  color:#230706;
+  background:linear-gradient(180deg,#ffa48c,#ff7a5a);
+  box-shadow:0 0 12px rgba(255,120,90,0.45);
+}
+.speed-btn.sep{pointer-events:none;opacity:0.3;min-width:0;padding:0 2px;}
+#time-scale{font-family:var(--f-mono);font-size:var(--t-sm);}
 #time-stat .reversing{color:#ff8a6a;}
-#time-stat.reversing{border-color:#7a2a20;}
+#time-stat.reversing{border-color:#7a2a20;border-left-color:#ff7a5a;}
 
 /* rewind: the world running backwards */
 #rewind-banner{
@@ -133,16 +262,24 @@ body{
 }
 #rewind-banner.show{display:block;}
 .rw-title{
-  font-family:ui-monospace,monospace;font-size:34px;font-weight:800;letter-spacing:6px;
-  color:#cfe4ff;text-shadow:0 0 24px rgba(120,180,255,0.7);
+  font-family:var(--f-serif);font-size:var(--t-2xl);font-weight:400;
+  letter-spacing:.28em;text-transform:uppercase;
+  color:#dbe9ff;text-shadow:0 0 30px rgba(120,180,255,0.75);
   animation:rwpulse 1.1s ease-in-out infinite;
 }
-.rw-sub{font-family:ui-monospace,monospace;font-size:15px;color:#8fb4e0;letter-spacing:2px;margin-top:6px;}
+.rw-sub{
+  font-family:var(--f-mono);font-size:var(--t-md);color:#8fb4e0;
+  letter-spacing:.18em;margin-top:var(--s2);
+}
 @keyframes rwpulse{0%,100%{opacity:.55;}50%{opacity:1;}}
 .icon-btn{
-  font-size:15px;background:var(--panel);border:1px solid var(--edge);
-  border-radius:10px;padding:5px 8px;cursor:pointer;color:var(--ink);
-  box-shadow:var(--shadow);line-height:1;
+  font-size:var(--t-lg);background:rgba(10,15,30,0.55);
+  border:1px solid var(--edge);border-radius:var(--r-sm);
+  /* was ~31x25px */
+  min-width:clamp(30px,5.6vh,38px);min-height:clamp(28px,5.4vh,36px);
+  padding:0 var(--s2);cursor:pointer;color:var(--ink);line-height:1;
+  display:inline-flex;align-items:center;justify-content:center;
+  transition:border-color .12s,background .12s;
 }
 .icon-btn:hover{background:var(--panel2);border-color:var(--edge2);}
 .icon-btn.off{opacity:0.4;}
@@ -153,50 +290,99 @@ body{
   left:calc(10px + var(--sa-l));
   top:var(--chrome-top);
   bottom:calc(var(--gap) + var(--sa-b));
-  width:clamp(150px, 22vw, 200px);
-  background:var(--panel);
-  backdrop-filter:var(--glass);-webkit-backdrop-filter:var(--glass);
-  border:1px solid var(--edge);border-radius:18px;
-  display:flex;flex-direction:column;box-shadow:var(--shadow);
+  width:clamp(154px, 23vw, 206px);
+  display:flex;flex-direction:column;
   overflow:hidden;
 }
-#tools{flex:1;overflow-y:auto;padding:8px;scrollbar-width:thin;scrollbar-color:var(--edge2) transparent;}
-#tools::-webkit-scrollbar{width:8px;}
-#tools::-webkit-scrollbar-thumb{background:var(--edge2);border-radius:8px;}
-.tool-group{margin-bottom:10px;}
-.tool-group-title{
-  font-family:inherit;font-size:10px;font-weight:900;
-  letter-spacing:2px;text-transform:uppercase;color:var(--dim);
-  margin:0 0 5px 2px;border-bottom:1px dashed var(--edge);padding-bottom:3px;
+/* search: 59 powers in a ~6-screen scroll needed a way in */
+#tool-search-wrap{
+  padding:var(--s2) var(--s2) var(--s1);
+  border-bottom:1px solid var(--edge);flex:0 0 auto;
 }
-.tool-grid{display:grid;grid-template-columns:1fr 1fr;gap:5px;}
+#tool-search{
+  width:100%;background:rgba(4,7,16,0.8);border:1px solid var(--edge);
+  color:var(--ink);font-family:var(--f-mono);font-size:var(--t-sm);
+  padding:var(--s2) var(--s2);border-radius:var(--r-sm);min-height:32px;
+}
+#tool-search::placeholder{color:#5a668c;}
+#tool-search:focus{border-color:var(--edge2);outline:none;}
+#tools{
+  flex:1;overflow-y:auto;padding:var(--s2);
+  scrollbar-width:thin;scrollbar-color:var(--edge2) transparent;
+  overscroll-behavior:contain;
+}
+#tools::-webkit-scrollbar{width:6px;}
+#tools::-webkit-scrollbar-thumb{background:var(--edge2);border-radius:6px;}
+.tool-group{margin-bottom:var(--s3);}
+/* categories collapse — the whole list was always fully expanded */
+.tool-group-title{
+  font-family:var(--f-ui);font-size:var(--t-xs);font-weight:800;
+  letter-spacing:.2em;text-transform:uppercase;color:var(--dim);
+  margin:0 0 var(--s2);padding:var(--s1) 0 var(--s1) 12px;
+  border-bottom:1px solid var(--edge);
+  cursor:pointer;position:relative;width:100%;text-align:left;
+  background:none;display:block;
+}
+.tool-group-title::before{
+  content:'';position:absolute;left:2px;top:50%;
+  border:4px solid transparent;border-left-color:var(--gold);
+  transform:translateY(-50%) rotate(90deg);transform-origin:2px 0;
+  transition:transform .15s;
+}
+.tool-group.collapsed .tool-group-title::before{transform:translateY(-50%) rotate(0deg);}
+.tool-group.collapsed .tool-grid{display:none;}
+.tool-grid{display:grid;grid-template-columns:1fr 1fr;gap:var(--s1);}
 .tool{
-  position:relative;background:var(--panel);border:1px solid var(--edge);
-  border-radius:10px;padding:6px 3px 5px;cursor:pointer;color:var(--ink);
+  position:relative;background:rgba(12,18,34,0.55);
+  border:1px solid var(--edge);
+  border-radius:var(--r-sm);
+  padding:var(--s2) 2px var(--s1);cursor:pointer;color:var(--ink);
   display:flex;flex-direction:column;align-items:center;gap:2px;
-  transition:transform .05s,border-color .1s,background .1s;
+  min-height:46px;
+  transition:transform .06s,border-color .12s,background .12s,box-shadow .12s;
 }
 .tool:hover{border-color:var(--edge2);background:var(--panel2);transform:translateY(-1px);}
 .tool:active{transform:translateY(1px);}
-.tool.active{border-color:var(--gold);background:#221d05;box-shadow:0 0 0 1px var(--gold) inset;}
-.tool-ico{font-size:18px;line-height:1;}
-.tool-name{font-family:inherit;font-size:9.5px;font-weight:700;text-align:center;}
+.tool.active{
+  border-color:var(--gold);
+  background:linear-gradient(180deg,rgba(70,56,16,0.7),rgba(28,22,6,0.7));
+  box-shadow:0 0 0 1px var(--gold) inset,0 0 14px rgba(240,200,110,0.3);
+}
+.tool-ico{font-size:clamp(15px,3.2vh,19px);line-height:1;}
+.tool-name{
+  font-family:var(--f-ui);font-size:var(--t-xs);font-weight:700;
+  text-align:center;line-height:1.15;
+}
 .tool-cost{
-  position:absolute;top:2px;right:3px;font-family:ui-monospace,monospace;font-size:8px;
-  color:var(--gold);font-weight:700;background:rgba(0,0,0,0.5);border-radius:3px;padding:0 2px;
+  position:absolute;top:1px;right:2px;font-family:var(--f-mono);
+  font-size:calc(var(--t-xs) - 1px);
+  color:var(--gold);font-weight:700;background:rgba(0,0,0,0.6);
+  border-radius:2px;padding:0 2px;
+}
+.tool-empty{
+  font-size:var(--t-sm);color:var(--dim);text-align:center;padding:var(--s4) var(--s2);
 }
 #power-info{
-  border-top:2px solid var(--edge);padding:8px 10px;background:rgba(0,0,0,0.25);
+  border-top:1px solid var(--rule);padding:var(--s3);
+  background:rgba(2,4,10,0.55);flex:0 0 auto;
 }
-#power-name{font-family:inherit;font-weight:900;font-size:13px;color:var(--gold);margin-bottom:3px;}
-#power-desc{font-size:11px;color:var(--dim);line-height:1.35;margin-bottom:4px;min-height:44px;}
-#power-cost{font-family:ui-monospace,monospace;font-size:11px;color:var(--accent);font-weight:700;}
-.brush-hint{font-size:9.5px;color:#5a648a;margin-top:5px;}
+#power-name{
+  font-family:var(--f-serif);font-weight:400;font-size:var(--t-lg);
+  color:var(--gold);margin-bottom:var(--s1);letter-spacing:.02em;
+}
+#power-desc{
+  font-size:var(--t-sm);color:var(--dim);line-height:1.4;
+  margin-bottom:var(--s1);min-height:40px;
+}
+#power-cost{
+  font-family:var(--f-mono);font-size:var(--t-sm);color:var(--accent);font-weight:700;
+}
+.brush-hint{font-size:var(--t-xs);color:#59637f;margin-top:var(--s1);}
 .brush-hint b{color:var(--dim);}
 
 /* ---------- Planet name chip ---------- */
 #planet-name{
-  font-family:inherit;font-size:11px;font-weight:700;
+  font-family:var(--f-ui);font-size:var(--t-sm);font-weight:700;
   color:var(--accent);margin-top:2px;white-space:nowrap;overflow:hidden;
   text-overflow:ellipsis;max-width:150px;
 }
@@ -217,18 +403,22 @@ body{
 .side-tab{
   position:relative;flex:0 0 auto;
   width:var(--tab);height:var(--tab);font-size:clamp(15px,3.4vh,19px);line-height:1;
-  background:var(--panel);border:1px solid var(--edge);border-radius:14px;
-  backdrop-filter:var(--glass);-webkit-backdrop-filter:var(--glass);
-  cursor:pointer;box-shadow:var(--shadow);transition:all .15s;
+  border-radius:var(--r-sm) 2px 2px var(--r-sm);
+  border-right-width:2px;border-right-color:transparent;
+  cursor:pointer;transition:background .14s,border-color .14s,transform .14s;
 }
-.side-tab:hover{transform:translateX(-2px);}
-.side-tab:hover{background:var(--panel2);border-color:var(--edge2);}
-.side-tab.active{border-color:var(--gold);background:#221d05;}
+.side-tab:hover{background:var(--panel2);border-color:var(--edge2);transform:translateX(-2px);}
+.side-tab.active{
+  border-color:var(--gold-dim);border-right-color:var(--gold);
+  background:linear-gradient(90deg,rgba(20,16,4,0.6),rgba(64,52,14,0.55));
+  box-shadow:var(--shadow),0 0 16px rgba(240,200,110,0.22);
+}
 .tab-badge{
-  position:absolute;top:-5px;right:-5px;min-width:16px;height:16px;
-  background:var(--bad);color:#fff;font-size:10px;font-weight:700;
-  border-radius:8px;display:flex;align-items:center;justify-content:center;
-  font-family:ui-monospace,monospace;padding:0 3px;
+  position:absolute;top:-4px;right:-4px;min-width:17px;height:17px;
+  background:var(--bad);color:#fff;font-size:var(--t-xs);font-weight:700;
+  border-radius:9px;display:flex;align-items:center;justify-content:center;
+  font-family:var(--f-mono);padding:0 4px;
+  box-shadow:0 0 10px rgba(255,90,70,0.5);
 }
 
 /* ---------- Side panels ---------- */
@@ -237,51 +427,67 @@ body{
   right:calc(var(--tab) + 16px + var(--sa-r));
   top:var(--chrome-top);
   bottom:calc(var(--gap) + var(--sa-b));
-  width:min(330px, calc(100vw - var(--tab) - 32px - var(--sa-l) - var(--sa-r)));
-  background:rgba(14,19,38,0.82);
-  backdrop-filter:var(--glass);-webkit-backdrop-filter:var(--glass);
-  border:1px solid var(--edge2);border-radius:18px;
-  box-shadow:var(--shadow);display:none;flex-direction:column;overflow:hidden;
+  width:min(340px, calc(100vw - var(--tab) - 32px - var(--sa-l) - var(--sa-r)));
+  display:none;flex-direction:column;overflow:hidden;
 }
 .side-panel.show{display:flex;animation:pop .15s ease-out;}
 .panel-head{
-  font-family:inherit;font-weight:900;font-size:14px;
-  color:var(--gold);padding:10px 12px;border-bottom:2px solid var(--edge);
+  font-family:var(--f-serif);font-weight:400;font-size:var(--t-lg);
+  letter-spacing:.06em;
+  color:var(--gold);padding:var(--s3) var(--s4);
+  border-bottom:1px solid var(--rule);
   display:flex;justify-content:space-between;align-items:center;
-  background:rgba(0,0,0,0.25);
+  background:linear-gradient(180deg,rgba(0,0,0,0.35),transparent);
+  flex:0 0 auto;
 }
 .panel-close{
-  background:none;border:none;color:var(--dim);font-size:14px;cursor:pointer;padding:2px 6px;
+  background:none;border:none;color:var(--dim);font-size:var(--t-lg);cursor:pointer;
+  /* was ~26x20px */
+  min-width:32px;min-height:32px;border-radius:var(--r-sm);
+  display:inline-flex;align-items:center;justify-content:center;
 }
-.panel-close:hover{color:var(--ink);}
+.panel-close:hover{color:var(--ink);background:rgba(120,160,240,0.12);}
 .panel-scroll{flex:1;overflow-y:auto;padding:10px 12px;scrollbar-width:thin;scrollbar-color:var(--edge2) transparent;}
 .panel-scroll::-webkit-scrollbar{width:8px;}
 .panel-scroll::-webkit-scrollbar-thumb{background:var(--edge2);border-radius:8px;}
 .panel-subtitle{
-  font-family:inherit;font-size:10px;font-weight:900;letter-spacing:2px;
-  text-transform:uppercase;color:var(--dim);margin:10px 0 6px;
-  border-bottom:1px dashed var(--edge);padding-bottom:3px;
+  font-family:var(--f-ui);font-size:var(--t-xs);font-weight:800;letter-spacing:.2em;
+  text-transform:uppercase;color:var(--dim);margin:var(--s4) 0 var(--s2);
+  border-bottom:1px solid var(--edge);padding-bottom:var(--s1);position:relative;
 }
-.panel-note{font-size:11px;color:var(--dim);line-height:1.5;margin:8px 0;}
-.empty{font-size:12px;color:var(--dim);text-align:center;padding:24px 8px;line-height:1.6;}
+.panel-subtitle::after{
+  content:'';position:absolute;left:0;bottom:-1px;width:22px;height:1px;
+  background:var(--gold);opacity:.8;
+}
+.panel-note{font-size:var(--t-sm);color:var(--dim);line-height:1.55;margin:var(--s3) 0;}
+.empty{font-size:var(--t-md);color:var(--dim);text-align:center;padding:var(--s6) var(--s2);line-height:1.6;}
 
 /* history */
-.hist-line{font-size:11px;line-height:1.45;padding:4px 0;border-bottom:1px dotted rgba(60,70,110,0.35);color:#c8d0ec;}
-.hist-year{font-family:ui-monospace,monospace;color:var(--dim);font-size:9.5px;margin-right:4px;}
+.hist-line{font-size:var(--t-sm);line-height:1.5;padding:var(--s1) 0;border-bottom:1px solid rgba(60,70,110,0.22);color:#c8d0ec;}
+.hist-year{font-family:var(--f-mono);color:var(--dim);font-size:var(--t-xs);margin-right:var(--s1);}
 .hist-war{color:#ff8a6a;} .hist-fall{color:var(--bad);} .hist-era{color:var(--accent);}
 .hist-faith{color:var(--gold);} .hist-legend{color:#ffd070;} .hist-politics{color:#b8a8f0;}
 .hist-nation{color:var(--good);}
-.nation-line{font-size:11px;line-height:1.5;padding:6px 0;border-bottom:1px dotted rgba(60,70,110,0.35);}
+.nation-line{font-size:var(--t-sm);line-height:1.5;padding:6px 0;border-bottom:1px dotted rgba(60,70,110,0.35);}
 .nation-line small{color:var(--dim);}
-.legend-line{font-size:11px;color:#ffd070;padding:3px 0;}
+.legend-line{font-size:var(--t-sm);color:#ffd070;padding:3px 0;}
 
 /* prayers */
-.prayer{background:rgba(0,0,0,0.25);border:1px solid var(--edge);border-radius:12px;padding:9px;margin-bottom:8px;}
-.prayer-text{font-size:11.5px;line-height:1.5;font-style:italic;color:#d8dff4;margin-bottom:7px;}
-.prayer-btns{display:flex;gap:6px;}
+/* a prayer is a voice: set it in the serif, indented like a quotation */
+.prayer{
+  background:rgba(3,6,14,0.45);border:1px solid var(--edge);
+  border-left:2px solid var(--gold-dim);
+  border-radius:0 var(--r-sm) var(--r-sm) 0;
+  padding:var(--s3);margin-bottom:var(--s3);
+}
+.prayer-text{
+  font-family:var(--f-serif);font-size:var(--t-md);line-height:1.55;
+  font-style:italic;color:#dee5f8;margin-bottom:var(--s2);
+}
+.prayer-btns{display:flex;gap:var(--s2);}
 .prayer-btns button{
-  flex:1;font-family:inherit;font-size:10.5px;font-weight:700;
-  padding:6px;border-radius:10px;cursor:pointer;
+  flex:1;font-family:var(--f-ui);font-size:var(--t-xs);font-weight:700;
+  padding:var(--s2);border-radius:var(--r-sm);cursor:pointer;min-height:34px;
 }
 .pr-answer{background:#221d05;border:1px solid var(--gold);color:var(--gold);}
 .pr-answer:hover{background:#332b08;}
@@ -289,68 +495,75 @@ body{
 .pr-refuse:hover{color:var(--bad);border-color:#7a2020;}
 
 /* pixelnet */
-.post{background:rgba(0,0,0,0.25);border:1px solid var(--edge);border-radius:12px;padding:8px 10px;margin-bottom:8px;}
-.post-head{font-size:11px;} .post-head span{color:var(--dim);font-size:10px;}
-.post-body{font-size:12px;line-height:1.45;margin:4px 0;}
-.post-foot{font-size:10px;color:var(--dim);font-family:ui-monospace,monospace;}
+.post{background:rgba(3,6,14,0.45);border:1px solid var(--edge);border-radius:var(--r-sm);padding:var(--s2) var(--s3);margin-bottom:var(--s3);}
+.post-head{font-size:var(--t-sm);} .post-head span{color:var(--dim);font-size:var(--t-xs);}
+.post-body{font-size:var(--t-md);line-height:1.5;margin:var(--s1) 0;}
+.post-foot{font-size:var(--t-xs);color:var(--dim);font-family:var(--f-mono);}
 
 /* souls */
-.plane{background:rgba(0,0,0,0.22);border:1px solid var(--edge);border-radius:12px;padding:8px 10px;margin-bottom:10px;}
-.plane-head{display:flex;justify-content:space-between;align-items:center;font-size:12.5px;}
+.plane{background:rgba(3,6,14,0.42);border:1px solid var(--edge);border-radius:var(--r-sm);padding:var(--s2) var(--s3);margin-bottom:var(--s4);}
+.plane-head{display:flex;justify-content:space-between;align-items:center;font-size:var(--t-md);font-family:var(--f-serif);}
 .plane-visit{
-  font-family:ui-monospace,monospace;font-size:10px;font-weight:700;background:var(--panel);
-  border:1px solid var(--edge2);color:var(--accent);border-radius:8px;padding:3px 7px;cursor:pointer;
+  font-family:var(--f-mono);font-size:var(--t-xs);font-weight:700;background:var(--panel);
+  border:1px solid var(--edge2);color:var(--accent);border-radius:var(--r-sm);
+  padding:var(--s1) var(--s2);cursor:pointer;min-height:30px;
 }
 .plane-visit:hover{background:var(--panel2);}
-.plane-desc{font-size:10.5px;color:var(--dim);margin:3px 0;}
-.plane-count{font-family:ui-monospace,monospace;font-size:10px;color:var(--gold);margin-bottom:4px;}
-.soul-line{font-size:11px;padding:3px 0;border-top:1px dotted rgba(60,70,110,0.3);display:flex;justify-content:space-between;align-items:center;}
+.plane-desc{font-size:var(--t-xs);color:var(--dim);margin:var(--s1) 0;}
+.plane-count{font-family:var(--f-mono);font-size:var(--t-xs);color:var(--gold);margin-bottom:var(--s1);}
+.soul-line{font-size:var(--t-sm);padding:var(--s1) 0;border-top:1px solid rgba(60,70,110,0.22);display:flex;justify-content:space-between;align-items:center;gap:var(--s2);}
 .soul-line small{color:var(--dim);}
+/* these were ~21x16px — the smallest controls in the app */
+.soul-btns{display:flex;gap:var(--s1);flex:0 0 auto;}
 .soul-btns button{
-  background:var(--panel);border:1px solid var(--edge);border-radius:8px;
-  font-size:11px;cursor:pointer;padding:1px 5px;margin-left:2px;
+  background:var(--panel);border:1px solid var(--edge);border-radius:var(--r-sm);
+  font-size:var(--t-sm);cursor:pointer;
+  min-width:30px;min-height:30px;padding:0 var(--s2);color:var(--ink);
 }
 .soul-btns button:hover{border-color:var(--edge2);background:var(--panel2);}
 
 /* time */
-.snap{background:rgba(0,0,0,0.22);border:1px solid var(--edge);border-radius:12px;padding:9px;margin-bottom:8px;font-size:12px;}
-.snap-btns{display:flex;gap:6px;margin-top:6px;}
+.snap{background:rgba(3,6,14,0.42);border:1px solid var(--edge);border-radius:var(--r-sm);padding:var(--s3);margin-bottom:var(--s3);font-size:var(--t-md);}
+.snap-btns{display:flex;gap:var(--s2);margin-top:var(--s2);}
 .snap-btns button{
-  flex:1;font-family:ui-monospace,monospace;font-size:10px;font-weight:700;padding:5px;
-  background:var(--panel);border:1px solid var(--edge2);color:var(--ink);border-radius:10px;cursor:pointer;
+  flex:1;font-family:var(--f-mono);font-size:var(--t-xs);font-weight:700;
+  padding:var(--s2);min-height:32px;
+  background:var(--panel);border:1px solid var(--edge2);color:var(--ink);border-radius:var(--r-sm);cursor:pointer;
 }
 .snap-btns button:hover{background:var(--panel2);border-color:var(--gold);}
 
 /* testament */
-.chapter{background:rgba(0,0,0,0.22);border:1px solid var(--edge);border-radius:12px;padding:9px 11px;margin-bottom:8px;}
-.chapter.done{opacity:0.55;}
-.chapter.current{border-color:var(--gold);}
-.chapter.locked{color:var(--dim);font-size:11px;text-align:center;padding:6px;}
-.chapter-title{font-family:inherit;font-weight:900;font-size:12px;color:var(--gold);margin-bottom:4px;}
-.chapter-text{font-size:11.5px;line-height:1.5;color:#d0d8f0;}
-.chapter-hint{font-size:11px;color:var(--good);margin-top:6px;line-height:1.45;}
+/* the Testament reads like a book, because it is one */
+.chapter{background:rgba(3,6,14,0.42);border:1px solid var(--edge);border-radius:var(--r-sm);padding:var(--s3) var(--s4);margin-bottom:var(--s3);}
+.chapter.done{opacity:0.5;}
+.chapter.current{border-color:var(--gold-dim);border-left:2px solid var(--gold);box-shadow:0 0 16px rgba(240,200,110,0.12);}
+.chapter.locked{color:var(--dim);font-size:var(--t-sm);text-align:center;padding:var(--s2);}
+.chapter-title{font-family:var(--f-serif);font-weight:400;font-size:var(--t-md);letter-spacing:.06em;color:var(--gold);margin-bottom:var(--s1);}
+.chapter-text{font-family:var(--f-serif);font-size:var(--t-md);line-height:1.6;color:#d4dcf3;}
+.chapter-hint{font-size:var(--t-sm);color:var(--good);margin-top:var(--s2);line-height:1.5;}
 .chapter-hint.hidden{display:none;}
 .hint-btn{
-  margin-top:6px;font-family:ui-monospace,monospace;font-size:10px;background:var(--panel);
-  border:1px solid var(--edge);color:var(--dim);border-radius:8px;padding:3px 8px;cursor:pointer;
+  margin-top:var(--s2);font-family:var(--f-mono);font-size:var(--t-xs);background:var(--panel);
+  border:1px solid var(--edge);color:var(--dim);border-radius:var(--r-sm);
+  padding:var(--s1) var(--s3);cursor:pointer;min-height:30px;
 }
 .hint-btn:hover{color:var(--ink);}
 
-.deed{font-size:11px;color:var(--dim);padding:3px 0;border-bottom:1px dotted rgba(60,70,110,0.3);}
-.deed b{color:var(--ink);} .deed small{font-family:ui-monospace,monospace;}
+.deed{font-size:var(--t-sm);color:var(--dim);padding:3px 0;border-bottom:1px dotted rgba(60,70,110,0.3);}
+.deed b{color:var(--ink);} .deed small{font-family:var(--f-mono);}
 .deed-done{color:#ffd070;} .deed-done b{color:#ffd070;}
 
 /* cosmos */
 #cosmos-canvas{width:100%;height:270px;display:block;border-bottom:2px solid var(--edge);image-rendering:pixelated;cursor:pointer;flex-shrink:0;}
 .cosmos-create{display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-bottom:8px;}
 .cosmos-new{
-  font-family:inherit;font-size:10.5px;font-weight:700;padding:7px 4px;
+  font-family:var(--f-ui);font-size:var(--t-xs);font-weight:700;padding:7px 4px;
   background:var(--panel);border:1px solid var(--edge2);color:var(--ink);border-radius:10px;cursor:pointer;
 }
 .cosmos-new:hover{border-color:var(--gold);background:var(--panel2);}
 .cosmos-sel-btns{display:flex;flex-direction:column;gap:6px;}
 .cosmos-sel-btns button{
-  font-family:inherit;font-size:11px;font-weight:700;padding:8px;
+  font-family:var(--f-ui);font-size:var(--t-sm);font-weight:700;padding:8px;
   background:var(--panel);border:1px solid var(--edge2);color:var(--ink);border-radius:10px;cursor:pointer;
 }
 .cosmos-sel-btns button:hover{background:var(--panel2);}
@@ -358,16 +571,16 @@ body{
 .cosmos-sel-btns .danger:hover{background:#3a1010;}
 
 /* genesis lab */
-.gen-label{display:block;font-size:11px;color:var(--dim);margin:8px 0;}
+.gen-label{display:block;font-size:var(--t-sm);color:var(--dim);margin:8px 0;}
 .gen-label input[type=text],.gen-label input:not([type]),.gen-label select{
   width:100%;margin-top:3px;background:#0a0e1a;border:1px solid var(--edge2);
-  color:var(--ink);padding:6px;border-radius:10px;font-family:ui-monospace,monospace;font-size:12px;
+  color:var(--ink);padding:6px;border-radius:10px;font-family:var(--f-mono);font-size:var(--t-md);
 }
 .gen-label input[type=range]{width:100%;margin-top:3px;accent-color:var(--gold);}
 .gen-label input[type=color]{width:100%;height:28px;margin-top:3px;border:1px solid var(--edge2);border-radius:10px;background:none;}
-.gen-label small{color:#5a648a;font-size:9.5px;}
+.gen-label small{color:#5a648a;font-size:var(--t-xs);}
 .gen-cols{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
-.gen-flags{display:grid;grid-template-columns:1fr 1fr;gap:4px;margin:10px 0;font-size:11px;color:var(--dim);}
+.gen-flags{display:grid;grid-template-columns:1fr 1fr;gap:4px;margin:10px 0;font-size:var(--t-sm);color:var(--dim);}
 .gen-flags label{cursor:pointer;}
 .gen-flags input{accent-color:var(--gold);}
 
@@ -389,28 +602,29 @@ body{
 }
 #inspect.show{display:block;animation:pop .15s ease-out;}
 @keyframes pop{from{transform:scale(.94);opacity:0;}to{transform:scale(1);opacity:1;}}
-.ins-title{font-family:inherit;font-weight:900;font-size:15px;margin-bottom:8px;}
-.ins-row{display:flex;justify-content:space-between;font-size:12px;margin:4px 0;color:var(--dim);}
+.ins-title{font-family:var(--f-serif);font-weight:400;font-size:var(--t-lg);letter-spacing:.04em;margin-bottom:var(--s3);color:var(--ink);}
+.ins-row{display:flex;justify-content:space-between;gap:var(--s3);font-size:var(--t-sm);margin:var(--s1) 0;color:var(--dim);font-family:var(--f-mono);}
 .ins-row b{color:var(--ink);font-weight:700;}
 .ins-row.war b,.ins-row.war span{color:var(--bad);}
-.ins-bar{font-size:11px;color:var(--dim);margin:5px 0;}
+.ins-bar{font-size:var(--t-sm);color:var(--dim);margin:5px 0;}
 .ins-bar span{display:block;margin-bottom:2px;}
 .bar{height:8px;background:#0a0e1a;border:1px solid var(--edge);border-radius:3px;overflow:hidden;}
 .bar-fill{height:100%;transition:width .3s;}
 .ins-actions{display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-top:8px;}
 .ins-actions button{
-  font-family:inherit;font-size:10px;font-weight:700;padding:6px 3px;
+  font-family:var(--f-ui);font-size:var(--t-xs);font-weight:700;padding:6px 3px;
   background:var(--panel);border:1px solid var(--edge2);color:var(--ink);border-radius:10px;cursor:pointer;
 }
 .ins-actions button:hover{border-color:var(--gold);background:var(--panel2);}
 .ins-smite{
   width:100%;margin-top:8px;background:#3a1010;border:1px solid #7a2020;color:#ff8a6a;
-  font-family:inherit;font-weight:700;font-size:11px;padding:6px;border-radius:10px;cursor:pointer;
+  font-family:var(--f-ui);font-weight:700;font-size:var(--t-sm);padding:var(--s2);
+  border-radius:var(--r-sm);cursor:pointer;min-height:36px;
 }
 .ins-smite:hover{background:#5a1414;}
 .ins-close{
-  width:100%;margin-top:6px;background:var(--panel);border:1px solid var(--edge);color:var(--dim);
-  font-size:10px;padding:4px;border-radius:8px;cursor:pointer;
+  width:100%;margin-top:var(--s2);background:var(--panel);border:1px solid var(--edge);color:var(--dim);
+  font-size:var(--t-xs);padding:var(--s2);border-radius:var(--r-sm);cursor:pointer;min-height:32px;
 }
 .ins-close:hover{color:var(--ink);}
 
@@ -421,14 +635,12 @@ body{
   right:calc(var(--tab) + 16px + var(--sa-r));
   bottom:calc(102px + var(--sa-b));
   width:230px;max-height:min(170px, 34vh);
-  background:rgba(14,19,38,0.7);
-  backdrop-filter:var(--glass);-webkit-backdrop-filter:var(--glass);
-  border:1px solid var(--edge);border-radius:14px;padding:10px 12px;
-  box-shadow:var(--shadow);display:flex;flex-direction:column;
+  padding:var(--s3) var(--s4);
+  display:flex;flex-direction:column;
 }
-.chron-title{font-family:inherit;font-size:10px;font-weight:900;letter-spacing:1px;color:var(--dim);margin-bottom:5px;}
-#event-log{overflow-y:auto;font-size:10.5px;line-height:1.4;scrollbar-width:thin;}
-.log-line{padding:2px 0;border-bottom:1px dotted rgba(60,70,110,0.4);color:var(--dim);}
+.chron-title{margin-bottom:var(--s2);}
+#event-log{overflow-y:auto;font-size:var(--t-xs);line-height:1.4;scrollbar-width:thin;}
+.log-line{padding:2px 0;border-bottom:1px solid rgba(60,70,110,0.25);color:var(--dim);}
 .log-found{color:var(--good);}
 .log-grow{color:var(--accent);}
 .log-war{color:#ff8a6a;}
@@ -437,10 +649,13 @@ body{
 /* ---------- Toast ---------- */
 #toast{
   position:absolute;bottom:16px;left:50%;transform:translateX(-50%) translateY(30px);
-  background:var(--panel);border:1px solid var(--gold);color:var(--gold);
-  font-family:inherit;font-weight:700;font-size:12px;
-  padding:8px 16px;border-radius:12px;z-index:40;opacity:0;pointer-events:none;
-  transition:opacity .2s,transform .2s;box-shadow:var(--shadow);
+  background:rgba(6,9,18,0.9);border:1px solid var(--gold-dim);
+  border-top:1px solid var(--gold);color:var(--gold);
+  backdrop-filter:var(--glass);-webkit-backdrop-filter:var(--glass);
+  font-family:var(--f-serif);font-weight:400;font-size:var(--t-md);letter-spacing:.05em;
+  padding:var(--s3) var(--s5);border-radius:2px;z-index:40;opacity:0;pointer-events:none;
+  clip-path:polygon(8px 0,100% 0,100% calc(100% - 8px),calc(100% - 8px) 100%,0 100%,0 8px);
+  transition:opacity .2s,transform .2s;box-shadow:var(--shadow),0 0 24px rgba(240,200,110,0.18);
 }
 #toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
 
@@ -468,41 +683,46 @@ body{
   max-height:100%;overflow-y:auto;overscroll-behavior:contain;
   margin:auto;flex:0 0 auto;
 }
-.modal-title{font-family:inherit;font-weight:900;font-size:18px;color:var(--gold);margin-bottom:14px;}
+.modal-title{font-family:var(--f-ui);font-weight:900;font-size:18px;color:var(--gold);margin-bottom:14px;}
 .big-btn{
-  margin-top:16px;font-family:inherit;font-weight:800;font-size:14px;
-  letter-spacing:1px;color:#1a1206;background:linear-gradient(120deg,#ffd257,#ff9d5c);border:none;
-  border-radius:14px;padding:13px 26px;cursor:pointer;box-shadow:0 8px 24px rgba(255,180,60,0.35);
+  margin-top:var(--s5);font-family:var(--f-serif);font-weight:400;font-size:var(--t-lg);
+  letter-spacing:.18em;text-transform:uppercase;color:#150e02;
+  background:linear-gradient(170deg,var(--gold-hi),var(--gold) 55%,#c79a3c);border:none;
+  border-radius:2px;padding:var(--s4) var(--s6);cursor:pointer;min-height:var(--hit);
+  clip-path:polygon(8px 0,100% 0,100% calc(100% - 8px),calc(100% - 8px) 100%,0 100%,0 8px);
+  box-shadow:0 10px 30px rgba(240,200,110,0.3);
 }
 .big-btn:hover{filter:brightness(1.08);}
 .big-btn:active{transform:translateY(2px);box-shadow:0 4px 12px rgba(255,180,60,0.3);}
 
 .intro-card{max-width:520px;}
 .intro-logo{font-size:34px;margin-bottom:4px;}
-.intro-sub{font-family:inherit;font-size:12px;color:var(--dim);letter-spacing:1px;margin-bottom:14px;}
+.intro-sub{font-family:var(--f-ui);font-size:var(--t-md);color:var(--dim);letter-spacing:1px;margin-bottom:14px;}
 .intro-art{font-size:26px;letter-spacing:4px;margin:8px 0 14px;filter:drop-shadow(0 2px 2px rgba(0,0,0,0.6));}
-.intro-text{font-size:13px;line-height:1.55;color:#c8d0ec;margin-bottom:12px;text-align:left;}
+.intro-text{font-size:var(--t-md);line-height:1.55;color:#c8d0ec;margin-bottom:12px;text-align:left;}
 .intro-text b{color:var(--gold);}
-.intro-tips{list-style:none;text-align:left;font-size:12px;color:var(--dim);line-height:1.7;margin-bottom:6px;}
+.intro-tips{list-style:none;text-align:left;font-size:var(--t-md);color:var(--dim);line-height:1.7;margin-bottom:6px;}
 .intro-tips b{color:var(--ink);}
 
 .off-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:14px 0;}
 .off-grid>div{background:rgba(0,0,0,0.3);border:1px solid var(--edge);border-radius:12px;padding:10px;display:flex;flex-direction:column;gap:3px;}
-.off-num{font-family:inherit;font-weight:900;font-size:22px;color:var(--gold);}
-.off-grid>div span:last-child{font-size:10.5px;color:var(--dim);}
-.off-note{font-size:11px;color:var(--dim);font-style:italic;margin-top:6px;}
-#offline-body p{font-size:13px;line-height:1.5;}
+.off-num{font-family:var(--f-ui);font-weight:900;font-size:22px;color:var(--gold);}
+.off-grid>div span:last-child{font-size:var(--t-xs);color:var(--dim);}
+.off-note{font-size:var(--t-sm);color:var(--dim);font-style:italic;margin-top:6px;}
+#offline-body p{font-size:var(--t-md);line-height:1.5;}
 
 .menu-btns{display:flex;flex-direction:column;gap:8px;margin-bottom:14px;}
 .menu-btn{
-  font-family:inherit;font-weight:700;font-size:13px;
+  font-family:var(--f-ui);font-weight:700;font-size:var(--t-md);
   background:var(--panel);border:1px solid var(--edge2);color:var(--ink);
-  padding:11px;border-radius:12px;cursor:pointer;
+  padding:var(--s4);border-radius:var(--r-sm);cursor:pointer;min-height:42px;
+  font-family:var(--f-ui);text-align:left;
+  transition:background .12s,border-color .12s;
 }
 .menu-btn:hover{background:var(--panel2);}
 .menu-btn.danger{border-color:#7a2020;color:#ff8a6a;}
 .menu-btn.danger:hover{background:#3a1010;}
-.menu-help{font-family:inherit;font-size:10.5px;color:var(--dim);line-height:1.7;text-align:left;border-top:1px solid var(--edge);padding-top:10px;}
+.menu-help{font-family:var(--f-ui);font-size:var(--t-xs);color:var(--dim);line-height:1.7;text-align:left;border-top:1px solid var(--edge);padding-top:10px;}
 .menu-help b{color:var(--gold);}
 
 #intro.hide,.modal-overlay.hide{display:none!important;}
@@ -515,10 +735,10 @@ body{
   #toolbar{width:clamp(140px, 30vw, 172px);}
   .tool-grid{grid-template-columns:1fr;}
   .tool{flex-direction:row;justify-content:flex-start;gap:6px;padding:6px;}
-  .tool-name{font-size:10px;}
+  .tool-name{font-size:var(--t-xs);}
   #inspect{width:min(200px, 46vw);}
   #chronicle{width:min(190px, 44vw);}
-  .logo{font-size:14px;}
+  .logo{font-size:var(--t-lg);}
   #planet-name{max-width:80px;font-size:9px;}
   /* keep faith and the time readout; the rest is a swipe away in the scroller */
   .hud-center .stat:not(.faith){display:none;}
@@ -535,8 +755,8 @@ body{
   .intro-logo{font-size:24px;}
   .intro-art{font-size:18px;margin:4px 0 8px;}
   .intro-sub{margin-bottom:8px;}
-  .intro-text{font-size:12px;line-height:1.4;margin-bottom:8px;}
-  .intro-tips{font-size:11px;line-height:1.45;}
+  .intro-text{font-size:var(--t-md);line-height:1.4;margin-bottom:8px;}
+  .intro-tips{font-size:var(--t-sm);line-height:1.45;}
   .big-btn{margin-top:10px;padding:10px 20px;}
   .modal-title{margin-bottom:9px;}
   .menu-btn{padding:9px;}
@@ -548,10 +768,31 @@ body{
 @media (max-height:400px){
   /* the last of the fat: the intro drops to headline + tips + the button */
   .intro-art,.intro-sub{display:none;}
-  .intro-text{font-size:11px;line-height:1.35;}
+  .intro-text{font-size:var(--t-sm);line-height:1.35;}
   .intro-tips li:nth-child(n+4){display:none;}
   #chronicle{display:none;}
   .menu-help{display:none;}
+}
+
+/* ---------- themed ask/confirm ---------- */
+#ask-body{
+  font-size:var(--t-md);line-height:1.6;color:#d0d8f0;
+  text-align:left;white-space:pre-line;margin-bottom:var(--s4);
+}
+#ask-input{
+  width:100%;background:rgba(4,7,16,0.85);border:1px solid var(--edge2);
+  color:var(--ink);font-family:var(--f-mono);font-size:var(--t-md);
+  padding:var(--s3);border-radius:var(--r-sm);min-height:40px;display:none;
+}
+#ask-modal.has-input #ask-input{display:block;}
+.ask-btns{
+  display:flex;gap:var(--s3);margin-top:var(--s4);align-items:stretch;
+}
+.ask-btns .menu-btn{flex:0 0 auto;min-width:96px;text-align:center;}
+.ask-btns .big-btn{flex:1;margin-top:0;}
+#ask-modal.danger .big-btn{
+  background:linear-gradient(170deg,#ff9a80,#e8503a 60%,#a3301f);color:#1a0604;
+  box-shadow:0 10px 30px rgba(230,80,58,0.3);
 }
 
 </style>
@@ -591,8 +832,13 @@ body{
 
   <!-- Toolbar (powers) -->
   <aside id="toolbar">
+    <div id="tool-search-wrap">
+      <input id="tool-search" type="search" placeholder="Search powers…"
+             autocomplete="off" autocorrect="off" spellcheck="false"
+             aria-label="Search divine powers">
+    </div>
     <div id="tools"></div>
-    <div id="power-info">
+    <div id="power-info" aria-live="polite">
       <div id="power-name">✋ Move Map</div>
       <div id="power-desc">Drag to pan across your world.</div>
       <div id="power-cost">Free</div>
@@ -696,13 +942,28 @@ body{
 
   <!-- Event log -->
   <section id="chronicle">
-    <div class="chron-title">📜 Chronicle</div>
-    <div id="event-log"></div>
+    <div class="chron-title rule-title">Chronicle</div>
+    <div id="event-log" aria-live="polite" aria-relevant="additions"></div>
   </section>
 
   <div id="rewind-banner"></div>
 
-  <div id="toast"></div>
+  <div id="toast" role="status" aria-live="polite"></div>
+
+  <!-- Themed ask/confirm — native confirm()/prompt() are unstyleable and
+       broke the frame every time the god did something irreversible -->
+  <div id="ask-modal" class="modal-overlay" role="dialog" aria-modal="true"
+       aria-labelledby="ask-title">
+    <div class="modal">
+      <div class="modal-title" id="ask-title">…</div>
+      <div id="ask-body"></div>
+      <input id="ask-input" type="text" autocomplete="off" spellcheck="false">
+      <div class="ask-btns">
+        <button id="ask-cancel" class="menu-btn">Cancel</button>
+        <button id="ask-ok" class="big-btn">Confirm</button>
+      </div>
+    </div>
+  </div>
 
   <!-- Intro overlay -->
   <div id="intro" class="modal-overlay show">
@@ -3034,31 +3295,44 @@ void main(){
   gl_Position = uMVP * vec4(p, 1.0);
 }`;
   const FS_PLANET = `
-precision mediump float;
+precision highp float;
 varying vec2 vUV; varying vec3 vN; varying float vLand;
 uniform sampler2D uTex; uniform sampler2D uData; uniform sampler2D uNorm;
+uniform sampler2D uClim;   // r=precip g=cloud b=snow a=wetness
 uniform vec3 uSun; uniform vec3 uEye; uniform vec3 uAtmo;
 uniform float uBlood; uniform float uDoom; uniform float uTime;
 void main(){
   vec3 base = texture2D(uTex, vUV).rgb;
   vec4 data = texture2D(uData, vUV); // r=city light g=water b=fire a=crackmask
+  vec4 clim = texture2D(uClim, vUV);
   vec3 Ns = normalize(vN);
   // tangent frame on the sphere: east (d/dlon) and south (d/dgrid-y)
   vec3 east = normalize(vec3(Ns.z, 0.0, -Ns.x) + vec3(0.0001));
   vec3 south = normalize(cross(east, Ns));
   vec3 Nt = texture2D(uNorm, vUV).xyz * 2.0 - 1.0;
   vec3 N = normalize(east * Nt.x + south * Nt.y + Ns * max(Nt.z, 0.2));
+  // snow settles on the ground, so it goes in BEFORE the light is applied
+  float snow = clim.b;
+  base = mix(base, vec3(0.92, 0.95, 1.0), snow * 0.85);
+  // wet ground is darker and much glossier — the single strongest cue that
+  // it is actually raining down there rather than on your screen
+  float wet = clim.a * (1.0 - snow);
+  base *= (1.0 - wet * 0.32);
+
   float diff = max(dot(N, uSun), 0.0);
   float terminator = max(dot(Ns, uSun), 0.0);
   float light = 0.16 + 1.05 * diff;
   vec3 col = base * light;
   // warm sunlight, cool skylight ambient
   col += base * vec3(0.10, 0.12, 0.18) * (1.0 - diff);
-  // specular: crisp on water, faint sheen on land
-  vec3 V = normalize(uEye);
+  // specular: crisp on water, faint sheen on land, mirror-bright when wet
+  vec3 V = normalize(uEye - Ns);          // true per-fragment view vector
   vec3 H = normalize(uSun + V);
-  float spec = pow(max(dot(N, H), 0.0), mix(10.0, 90.0, data.g));
-  col += vec3(1.0, 0.97, 0.9) * spec * mix(0.06, 0.55, data.g) * terminator;
+  float gloss = max(data.g, wet * 0.85);
+  float spec = pow(max(dot(N, H), 0.0), mix(10.0, 90.0, gloss));
+  col += vec3(1.0, 0.97, 0.9) * spec * mix(0.06, 0.55, gloss) * terminator;
+  // cloud shadow: the layer above is casting onto the ground
+  col *= 1.0 - clim.g * 0.45 * terminator;
   // night side: the cities are awake
   float night = 1.0 - smoothstep(0.0, 0.18, terminator);
   col += vec3(1.0, 0.82, 0.45) * data.r * night * 1.7;
@@ -3070,39 +3344,221 @@ void main(){
   col += vec3(1.0, 0.25, 0.05) * data.a * uDoom * (0.7 + 0.3 * sin(uTime * 6.0));
   // blood moon tint
   col = mix(col, col * vec3(1.5, 0.5, 0.5), uBlood * 0.45);
-  // atmosphere rim scattering
+  // aerial perspective: the air itself between you and the ground
   float rim = pow(1.0 - max(dot(Ns, V), 0.0), 2.2);
   col += uAtmo * rim * (0.22 + 0.55 * terminator);
-  // filmic-ish tonemap + gamma
-  col = col / (col + vec3(0.62)) * 1.55;
-  float lum = dot(col, vec3(0.299, 0.587, 0.114));
-  col = mix(vec3(lum), col, 1.18);            // gentle saturation lift
-  col = pow(max(col, 0.0), vec3(0.95));
-  gl_FragColor = vec4(col, 1.0);
+  // Linear HDR out — the composite pass owns tonemapping now, so the sky,
+  // the clouds and the explosions all get graded on the same curve.
+  gl_FragColor = vec4(max(col, 0.0), 1.0);
 }`;
+  // ---------- postprocess: the whole frame, graded as one image ----------
+  // Everything above used to write straight to the backbuffer, and only the
+  // planet was tonemapped (inside its own shader), so clouds, atmosphere,
+  // particles and stars clipped to flat white. Now the scene lands in a
+  // half-float target and gets bloom + a real filmic curve together.
+  const VS_QUAD = `
+attribute vec2 aPos; varying vec2 vUV;
+void main(){ vUV = aPos * 0.5 + 0.5; gl_Position = vec4(aPos, 0.0, 1.0); }`;
+
+  // isolate what is genuinely bright enough to bleed
+  const FS_BRIGHT = `
+precision highp float;
+varying vec2 vUV; uniform sampler2D uTex; uniform float uThresh;
+void main(){
+  vec3 c = texture2D(uTex, vUV).rgb;
+  float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
+  float k = max(l - uThresh, 0.0) / max(l, 0.0001);
+  gl_FragColor = vec4(c * k, 1.0);
+}`;
+
+  // separable gaussian; uDir picks the axis
+  const FS_BLUR = `
+precision highp float;
+varying vec2 vUV; uniform sampler2D uTex; uniform vec2 uDir;
+void main(){
+  vec3 s = texture2D(uTex, vUV).rgb * 0.227027;
+  s += (texture2D(uTex, vUV + uDir * 1.3846).rgb + texture2D(uTex, vUV - uDir * 1.3846).rgb) * 0.316216;
+  s += (texture2D(uTex, vUV + uDir * 3.2308).rgb + texture2D(uTex, vUV - uDir * 3.2308).rgb) * 0.070270;
+  gl_FragColor = vec4(s, 1.0);
+}`;
+
+  // ACES filmic + bloom + vignette + a whisper of chromatic aberration at the
+  // edge. uShock drives a radial shear when the god does something violent.
+  const FS_COMPOSITE = `
+precision highp float;
+varying vec2 vUV;
+uniform sampler2D uScene; uniform sampler2D uBloom;
+uniform float uBloomAmt, uExposure, uVignette, uShock, uGrain, uTime, uSat;
+uniform vec3 uTint;
+vec3 aces(vec3 x){
+  // Narkowicz fit — cheap, and it holds highlights instead of clipping them
+  const float a = 2.51, b = 0.03, c = 2.43, d = 0.59, e = 0.14;
+  return clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0, 1.0);
+}
+void main(){
+  vec2 uv = vUV;
+  vec2 fromC = uv - 0.5;
+  float r2 = dot(fromC, fromC);
+  // Chromatic split grows toward the corners, and hard with shock. The resting
+  // value must stay near-invisible — at 0.0016 it was fringing every star.
+  float ca = (0.00035 + uShock * 0.016) * r2 * 4.0;
+  vec3 col;
+  col.r = texture2D(uScene, uv + fromC * ca).r;
+  col.g = texture2D(uScene, uv).g;
+  col.b = texture2D(uScene, uv - fromC * ca).b;
+  col += texture2D(uBloom, uv).rgb * uBloomAmt;
+  col *= uExposure;
+  col *= uTint;
+  col = aces(col);
+  float lum = dot(col, vec3(0.2126, 0.7152, 0.0722));
+  col = mix(vec3(lum), col, uSat);
+  // ACES is flatter through the midtones than the old Reinhard curve; a gentle
+  // S around mid-grey puts the bite back without crushing either end
+  col = clamp((col - 0.5) * 1.10 + 0.5, 0.0, 1.0);
+  // vignette
+  col *= 1.0 - uVignette * smoothstep(0.15, 0.95, r2 * 1.9);
+  // fine sensor grain keeps the gradients from banding on 8-bit output
+  float g = fract(sin(dot(uv * 1000.0 + uTime, vec2(12.9898, 78.233))) * 43758.5453);
+  col += (g - 0.5) * uGrain;
+  gl_FragColor = vec4(pow(max(col, 0.0), vec3(0.4545)), 1.0);
+}`;
+
   const VS_CLOUD = `
 attribute vec3 aPos; attribute vec2 aUV;
 uniform mat4 uMVP; uniform float uScroll;
-varying vec2 vUV; varying vec3 vN;
-void main(){ vUV = vec2(aUV.x + uScroll, aUV.y); vN = aPos; gl_Position = uMVP * vec4(aPos * 1.035, 1.0); }`;
-  const FS_CLOUD = `
-precision mediump float;
-varying vec2 vUV; varying vec3 vN;
-uniform sampler2D uTex; uniform vec3 uSun;
+varying vec2 vUV; varying vec2 vUV0; varying vec3 vN;
 void main(){
-  float a = texture2D(uTex, vUV).r;
-  float diff = max(dot(normalize(vN), uSun), 0.0);
-  gl_FragColor = vec4(vec3(0.66 + 0.6 * diff), a * 0.5);
+  vUV = vec2(aUV.x + uScroll, aUV.y);   // the deck drifts...
+  vUV0 = aUV;                            // ...but the weather stays over its ground
+  vN = aPos;
+  gl_Position = uMVP * vec4(aPos * 1.035, 1.0);
 }`;
-  const VS_ATMO = `
-attribute vec3 aPos; uniform mat4 uMVP; varying vec3 vN;
-void main(){ vN = aPos; gl_Position = uMVP * vec4(aPos * 1.10, 1.0); }`;
-  const FS_ATMO = `
-precision mediump float;
-varying vec3 vN; uniform vec3 uEye; uniform vec3 uAtmo;
+  const FS_CLOUD = `
+precision highp float;
+varying vec2 vUV; varying vec2 vUV0; varying vec3 vN;
+uniform sampler2D uTex; uniform sampler2D uClim;
+uniform vec3 uSun; uniform vec3 uEye; uniform float uTime;
 void main(){
-  float rim = pow(1.0 - abs(dot(normalize(vN), normalize(uEye))), 2.0);
-  gl_FragColor = vec4(uAtmo, rim * 0.6);
+  vec3 Ns = normalize(vN);
+  float a = texture2D(uTex, vUV).r;
+  // The climate field MODULATES the deck — it must not add a coverage floor,
+  // or fair weather over open ocean veils the whole planet in white.
+  vec4 clim = texture2D(uClim, vUV0);
+  // fair weather thins the deck below the raw texture; rain thickens it well
+  // past — that spread is the whole point of having a climate field
+  a = clamp(a * (0.50 + clim.g * 1.20), 0.0, 1.0);
+  // ...and inside an actual storm cell the cloud builds on its own
+  a = clamp(a + max(clim.r - 0.35, 0.0) * 0.85, 0.0, 1.0);
+  float diff = max(dot(Ns, uSun), 0.0);
+  // self-shadowing: thick cloud is dark underneath, bright on top
+  vec3 lit = mix(vec3(0.28, 0.31, 0.40), vec3(1.06, 1.02, 0.96), diff);
+  lit = mix(lit, lit * 0.55, clamp(clim.r * 1.4, 0.0, 1.0));   // storm cloud is bruised
+  // silver lining where the sun grazes the edge of the deck
+  vec3 V = normalize(uEye - Ns);
+  float silver = pow(max(dot(V, uSun), 0.0), 6.0) * diff;
+  lit += vec3(1.0, 0.95, 0.85) * silver * 0.9;
+  gl_FragColor = vec4(lit, a * 0.46);
+}`;
+  // ---------- atmosphere ----------
+  // Was: pow(1 - N·V, 2) tinted flat, with the sun direction not even bound.
+  // Now: a short raymarch through a shell with an exponential density falloff,
+  // Rayleigh + Mie phase functions and optical-depth extinction. That is what
+  // buys the sunset limb, the forward-scatter glow on the day edge, and a
+  // horizon that reddens as the terminator crosses it.
+  const VS_ATMO = `
+attribute vec3 aPos; uniform mat4 uMVP; uniform float uShell;
+varying vec3 vP;
+void main(){ vP = aPos * uShell; gl_Position = uMVP * vec4(vP, 1.0); }`;
+  const FS_ATMO = `
+precision highp float;
+varying vec3 vP;
+uniform vec3 uEye; uniform vec3 uSun; uniform vec3 uAtmo;
+uniform float uShell; uniform float uDensity;
+
+// Ray vs sphere of radius R at the origin; returns (near, far), or a MISS
+// sentinel that is unambiguous. A near value of +1.0 on a miss reads as a real
+// hit just in front of the camera and silently truncates every march.
+const vec2 MISS = vec2(1e9, -1e9);
+vec2 hitSphere(vec3 o, vec3 d, float R){
+  float b = dot(o, d);
+  float c = dot(o, o) - R * R;
+  float h = b * b - c;
+  if (h < 0.0) return MISS;
+  h = sqrt(h);
+  return vec2(-b - h, -b + h);
+}
+bool hits(vec2 t){ return t.y > 0.0 && t.x < 1e8; }
+
+void main(){
+  vec3 ro = uEye;
+  vec3 rd = normalize(vP - uEye);
+
+  vec2 atm = hitSphere(ro, rd, uShell);
+  if (!hits(atm)) discard;
+  vec2 gnd = hitSphere(ro, rd, 1.0);
+  float t0 = max(atm.x, 0.0);
+  float t1 = atm.y;
+  // only shorten the column if the ground is genuinely in the way
+  bool overGround = hits(gnd) && gnd.x > 0.0 && gnd.x < t1;
+  if (overGround) t1 = gnd.x;
+  if (t1 <= t0) discard;
+
+  float mu = dot(rd, uSun);
+  // Rayleigh is symmetric-ish; Mie throws light hard forward (the sun-side haze)
+  float phaseR = 0.05968 * (1.0 + mu * mu);
+  float g = 0.76, g2 = g * g;
+  float phaseM = 0.11938 * (1.0 - g2) /
+                 max(pow(1.0 + g2 - 2.0 * g * mu, 1.5), 0.0001);
+
+  // wavelength-dependent scattering, tinted per world (hell red, heaven gold)
+  vec3 betaR = vec3(0.170, 0.400, 0.960) * uAtmo * 2.4;
+  float betaM = 0.021;
+
+  // 6x3 samples. The view march dominates cost and the density falloff is
+  // smooth, so more steps buy very little; this is the knee of the curve.
+  const int STEPS = 6;
+  float seg = (t1 - t0) / float(STEPS);
+  vec3 accR = vec3(0.0); float accM = 0.0;
+  float odR = 0.0, odM = 0.0;
+  float H = max(uShell - 1.0, 0.001);   // shell thickness sets the scale height
+
+  for (int i = 0; i < STEPS; i++){
+    vec3 p = ro + rd * (t0 + seg * (float(i) + 0.5));
+    float h = (length(p) - 1.0) / H;                 // 0 at the ground, 1 at the top
+    float dens = exp(-h * 3.2) * uDensity;
+    odR += dens * seg; odM += dens * seg;
+
+    // Is this sample lit? It is shadowed only when the ray from here TOWARD
+    // the sun actually enters the planet ahead of it.
+    vec2 ls = hitSphere(p, uSun, uShell);
+    float lightOD = 0.0;
+    vec2 lg = hitSphere(p, uSun, 1.0);
+    bool shadowed = hits(lg) && lg.x > 0.0;
+    if (!shadowed) {
+      float lseg = max(ls.y, 0.0) / 3.0;
+      for (int j = 0; j < 3; j++){
+        vec3 q = p + uSun * (lseg * (float(j) + 0.5));
+        lightOD += exp(-((length(q) - 1.0) / H) * 3.2) * uDensity * lseg;
+      }
+      vec3 trans = exp(-(betaR * (odR + lightOD) + betaM * (odM + lightOD)));
+      accR += trans * dens * seg;
+      accM += exp(-betaM * (odM + lightOD) * 1.1) * dens * seg;
+    }
+  }
+
+  // Scale: looking straight down, the column is one shell thickness (~0.1) and
+  // must read as a faint haze; at the limb the chord is ~9x longer and should
+  // glow. The falloff does that on its own — these constants only set where
+  // "faint" lands. Too high and the whole disc goes milky blue.
+  vec3 col = accR * betaR * phaseR * 3.0 + vec3(accM) * betaM * phaseM * 5.0;
+  // Physically the air in front of the ground scatters just as hard, but a
+  // fully honest aerial-perspective term buries the continents in blue haze.
+  // Hold it back over the disc; the limb and the halo stay at full strength.
+  if (overGround) col *= 0.30;
+  // a little extra glow right on the limb so the edge reads as air, not a line
+  float limb = pow(1.0 - abs(dot(normalize(vP), normalize(uEye - vP))), 3.0);
+  col += uAtmo * limb * 0.02;
+  gl_FragColor = vec4(max(col, 0.0), 1.0);
 }`;
   const VS_PTS = `
 attribute vec3 aPos; attribute vec4 aCol; attribute float aSize;
@@ -3117,12 +3573,21 @@ void main(){
   float soft = smoothstep(0.25, 0.02, r2);
   gl_FragColor = vec4(vCol.rgb * (0.85 + soft * 0.5), vCol.a * soft);
 }`;
+  // Ribbons, not lines. gl.lineWidth(>1) is a no-op in every modern browser,
+  // so lightning and shockwaves were drawing as 1px hairlines — the two most
+  // dramatic effects in the game, nearly invisible.
   const VS_LINE = `
-attribute vec3 aPos; attribute vec4 aCol; uniform mat4 uMVP; varying vec4 vCol;
-void main(){ vCol = aCol; gl_Position = uMVP * vec4(aPos, 1.0); }`;
+attribute vec3 aPos; attribute vec4 aCol; attribute float aEdge;
+uniform mat4 uMVP; varying vec4 vCol; varying float vEdge;
+void main(){ vCol = aCol; vEdge = aEdge; gl_Position = uMVP * vec4(aPos, 1.0); }`;
   const FS_LINE = `
-precision mediump float; varying vec4 vCol;
-void main(){ gl_FragColor = vCol; }`;
+precision highp float; varying vec4 vCol; varying float vEdge;
+void main(){
+  // hot core, soft shoulder — reads as light rather than as geometry
+  float f = 1.0 - abs(vEdge);
+  float core = pow(f, 0.35);
+  gl_FragColor = vec4(vCol.rgb * (0.55 + 1.7 * core * core), vCol.a * core);
+}`;
 
   function compile(gl, vsSrc, fsSrc) {
     function sh(type, src) {
@@ -3259,7 +3724,18 @@ void main(){ gl_FragColor = vCol; }`;
     const overlay = document.getElementById('overlay');
     const octx = overlay ? overlay.getContext('2d') : null;
 
-    const cam = { lon: 0.6, lat: 0.45, dist: 2.6, min: 1.25, max: 6.5, idle: 0 };
+    // The camera keeps a target and chases it. Every input used to set lon/lat/
+    // dist directly, so every gesture was a hard step and nothing could ever
+    // be framed. `s*` are the smoothed values the matrices are actually built
+    // from; `shake` is a real eye-space offset, not a CSS transform on the DOM
+    // canvas (which used to desync picking).
+    const cam = {
+      lon: 0.6, lat: 0.45, dist: 2.6, min: 1.25, max: 6.5, idle: 0,
+      sLon: 0.6, sLat: 0.45, sDist: 2.6,
+      fov: 0.9, fovT: 0.9,
+      shake: 0, shakeX: 0, shakeY: 0,
+      flyT: 0, flyDur: 0, from: null, to: null
+    };
 
     const r = {
       gl, canvas, world, terra, tctx, cam, headless,
@@ -3267,6 +3743,13 @@ void main(){ gl_FragColor = vCol; }`;
       w: 0, h: 0, dpr: 1,
       weather: 'clear', rainDrops: [], snowFlakes: [],
       lastPick: null, texDirty: true,
+      // the film stock. Per-world modes push this around in draw().
+      // ACES is darker through the midtones than the old Reinhard, so exposure
+      // sits above 1 to land in the same place with far better highlights.
+      grade: {
+        exposure: 1.25, bloom: 0.5, bloomCut: 1.7,
+        vignette: 0.42, sat: 1.2, grain: 0.006, tint: [1, 1, 1]
+      },
       resize() {
         this.dpr = Math.min(2, global.devicePixelRatio || 1);
         this.w = canvas.clientWidth || 800; this.h = canvas.clientHeight || 600;
@@ -3277,7 +3760,10 @@ void main(){ gl_FragColor = vCol; }`;
           overlay.height = Math.floor(this.h * this.dpr);
           if (octx) octx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
         }
-        if (gl && !headless) gl.viewport(0, 0, canvas.width, canvas.height);
+        if (gl && !headless) {
+          gl.viewport(0, 0, canvas.width, canvas.height);
+          resizePost(this);
+        }
         this.initWeather();
       },
       initWeather() {
@@ -3564,6 +4050,14 @@ void main(){ gl_FragColor = vCol; }`;
     r.progAtmo = compile(gl, VS_ATMO, FS_ATMO);
     r.progPts = compile(gl, VS_PTS, FS_PTS);
     r.progLine = compile(gl, VS_LINE, FS_LINE);
+    r.progBright = compile(gl, VS_QUAD, FS_BRIGHT);
+    r.progBlur = compile(gl, VS_QUAD, FS_BLUR);
+    r.progComp = compile(gl, VS_QUAD, FS_COMPOSITE);
+
+    // fullscreen triangle-pair for the postprocess passes
+    r.bufQuad = glBuf(gl, new Float32Array([-1, -1, 3, -1, -1, 3]));
+
+    initPost(r);
 
     // sphere geometry
     const nv = (SEG_LON + 1) * (SEG_LAT + 1);
@@ -3607,29 +4101,48 @@ void main(){ gl_FragColor = vCol; }`;
     r.texNorm = glTex(gl, true);
     r.texData = glTex(gl, true);
     r.dataBuf = new Uint8Array(r.world.W * r.world.H * 4);
-    // clouds: bake once from fBm noise
+    // climate field: r=precipitation g=cloud density b=snow cover a=wetness.
+    // texData's four channels were already spoken for (city/water/fire/crack).
+    r.texClim = glTex(gl, true);
+    r.climBuf = new Uint8Array(r.world.W * r.world.H * 4);
+    r.climT = 0;
+    // Clouds. This used to be one map on a hardcoded seed, so every planet in
+    // the multiverse wore the same weather, forever. Now it is per-world and
+    // domain-warped, and it WRAPS (it was CLAMP_TO_EDGE while being scrolled
+    // in U, which smeared the deck along one meridian).
     const cw = 1024, ch = 512, cnv = document.createElement('canvas');
     cnv.width = cw; cnv.height = ch;
     const cctx = cnv.getContext('2d');
     const img = cctx.createImageData(cw, ch);
-    const noise = PD.makeNoise(1234567);
-    for (let y = 0; y < ch; y++) for (let x = 0; x < cw; x++) {
-      // seamless in x by crossfading
-      const t = x / cw;
-      const n1 = noise.fbm(x * 0.012, y * 0.012, 6), n2 = noise.fbm((x - cw) * 0.012, y * 0.012, 6);
-      const w1 = noise.fbm(x * 0.045 + 91, y * 0.045, 4), w2 = noise.fbm((x - cw) * 0.045 + 91, y * 0.045, 4);
-      const v = (n1 * (1 - t) + n2 * t) * 0.7 + (w1 * (1 - t) + w2 * t) * 0.3;
+    const noise = PD.makeNoise((r.world.seed ^ 0x51F0D5) >>> 0);
+    const warp = PD.makeNoise((r.world.seed ^ 0x9E3779B9) >>> 0);
+    for (let y = 0; y < ch; y++) {
+      const lat = (y / ch) * Math.PI;
       // trade-wind banding: dense at the equator and mid-latitudes, clear
       // over the horse latitudes — weather systems, not a blanket
-      const lat = (y / ch) * Math.PI;
       const band = 0.42 + 0.58 * Math.pow(Math.abs(Math.sin(lat * 3.0)), 1.5);
-      const a = Math.pow(PD.clamp((v - 0.60) * 5.0, 0, 1), 1.35) * band * 255;
-      const o = (y * cw + x) * 4;
-      img.data[o] = a; img.data[o + 1] = a; img.data[o + 2] = a; img.data[o + 3] = 255;
+      // bands shear with latitude, the way real circulation does
+      const shear = Math.cos(lat * 2.0) * 26;
+      for (let x = 0; x < cw; x++) {
+        const t = x / cw;
+        // domain warp: pushes the fBm around so cells curl instead of blob
+        const wx = warp.fbm(x * 0.006, y * 0.006, 3) * 46 + shear;
+        const wy = warp.fbm(x * 0.006 + 53, y * 0.006, 3) * 30;
+        const sx = x + wx, sy = y + wy;
+        const n1 = noise.fbm(sx * 0.012, sy * 0.012, 6);
+        const n2 = noise.fbm((sx - cw) * 0.012, sy * 0.012, 6);
+        const w1 = noise.fbm(sx * 0.045 + 91, sy * 0.045, 4);
+        const w2 = noise.fbm((sx - cw) * 0.045 + 91, sy * 0.045, 4);
+        const v = (n1 * (1 - t) + n2 * t) * 0.7 + (w1 * (1 - t) + w2 * t) * 0.3;
+        const a = Math.pow(PD.clamp((v - 0.63) * 4.4, 0, 1), 1.35) * band * 255;
+        const o = (y * cw + x) * 4;
+        img.data[o] = a; img.data[o + 1] = a; img.data[o + 2] = a; img.data[o + 3] = 255;
+      }
     }
     cctx.putImageData(img, 0, 0);
     r.texCloud = glTex(gl, true);
     gl.bindTexture(gl.TEXTURE_2D, r.texCloud);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, cnv);
 
     // starfield points
@@ -3658,6 +4171,137 @@ void main(){ gl_FragColor = vCol; }`;
     // crack mask (for doomed planets) baked into data texture alpha
     r.crackNoise = PD.makeNoise(r.world.seed ^ 0xC0FFEE);
   }
+  // ---------- HDR targets ----------
+  // Half-float where the device allows it, RGBA8 where it does not. The game
+  // ships to a phone WebView, so this must degrade rather than fail: with an
+  // 8-bit target the highlights clamp early but everything still renders.
+  function initPost(r) {
+    const gl = r.gl;
+    const gl2 = !!(global.WebGL2RenderingContext && gl instanceof global.WebGL2RenderingContext);
+    let type = gl.UNSIGNED_BYTE, internal = gl.RGBA;
+    if (gl2) {
+      // WebGL2 needs the sized internal format AND the render extension
+      if (gl.getExtension('EXT_color_buffer_half_float') || gl.getExtension('EXT_color_buffer_float')) {
+        type = gl.HALF_FLOAT; internal = gl.RGBA16F;
+      }
+    } else if (gl.getExtension('OES_texture_half_float')) {
+      const hf = gl.getExtension('OES_texture_half_float');
+      type = hf.HALF_FLOAT_OES; internal = gl.RGBA;
+      gl.getExtension('OES_texture_half_float_linear');
+    }
+    r.hdrType = type; r.hdrInternal = internal;
+    r.hdr = { fbo: null, tex: null, depth: null, w: 0, h: 0 };
+    r.bloom = [
+      { fbo: null, tex: null, w: 0, h: 0 },
+      { fbo: null, tex: null, w: 0, h: 0 }
+    ];
+    r.postOK = true;
+  }
+
+  function makeTarget(r, t, w, h, withDepth) {
+    const gl = r.gl;
+    if (t.tex) gl.deleteTexture(t.tex);
+    if (t.fbo) gl.deleteFramebuffer(t.fbo);
+    if (t.depth) gl.deleteRenderbuffer(t.depth);
+    t.w = w; t.h = h;
+    t.tex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, t.tex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, r.hdrInternal, w, h, 0, gl.RGBA, r.hdrType, null);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    t.fbo = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, t.fbo);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, t.tex, 0);
+    if (withDepth) {
+      t.depth = gl.createRenderbuffer();
+      gl.bindRenderbuffer(gl.RENDERBUFFER, t.depth);
+      gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT16, w, h);
+      gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, t.depth);
+    }
+    const ok = gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    return ok;
+  }
+
+  function resizePost(r) {
+    if (!r.gl || r.headless || !r.hdr) return;
+    const w = Math.max(2, r.gl.drawingBufferWidth), h = Math.max(2, r.gl.drawingBufferHeight);
+    if (r.hdr.w === w && r.hdr.h === h) return;
+    let ok = makeTarget(r, r.hdr, w, h, true);
+    // half-float depth combos fail on some drivers — fall back rather than
+    // render nothing at all
+    if (!ok && r.hdrType !== r.gl.UNSIGNED_BYTE) {
+      r.hdrType = r.gl.UNSIGNED_BYTE; r.hdrInternal = r.gl.RGBA;
+      ok = makeTarget(r, r.hdr, w, h, true);
+    }
+    const bw = Math.max(2, w >> 2), bh = Math.max(2, h >> 2);
+    ok = makeTarget(r, r.bloom[0], bw, bh, false) && ok;
+    ok = makeTarget(r, r.bloom[1], bw, bh, false) && ok;
+    r.postOK = ok;
+    if (!ok) console.warn('HDR targets unavailable — drawing direct');
+  }
+
+  function drawQuad(r, prog) {
+    const gl = r.gl;
+    gl.useProgram(prog.p);
+    gl.bindBuffer(gl.ARRAY_BUFFER, r.bufQuad);
+    gl.enableVertexAttribArray(prog.a.aPos);
+    gl.vertexAttribPointer(prog.a.aPos, 2, gl.FLOAT, false, 0, 0);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+  }
+
+  // scene target -> bright pass -> two blurs -> ACES composite to the screen
+  function postprocess(r) {
+    const gl = r.gl;
+    gl.disable(gl.DEPTH_TEST);
+    gl.disable(gl.BLEND);
+    gl.disable(gl.CULL_FACE);
+
+    const b0 = r.bloom[0], b1 = r.bloom[1];
+    gl.bindFramebuffer(gl.FRAMEBUFFER, b0.fbo);
+    gl.viewport(0, 0, b0.w, b0.h);
+    gl.useProgram(r.progBright.p);
+    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, r.hdr.tex);
+    gl.uniform1i(r.progBright.u.uTex, 0);
+    // Sunlit ground peaks around 1.1 in linear HDR, so a threshold of 1.0 made
+    // the TERRAIN bloom and washed the whole planet milky. Only genuinely hot
+    // things — fire, lightning, city lights, the sun — should bleed.
+    gl.uniform1f(r.progBright.u.uThresh, r.grade.bloomCut);
+    drawQuad(r, r.progBright);
+
+    for (let pass = 0; pass < 2; pass++) {
+      const src = pass === 0 ? b0 : b1, dst = pass === 0 ? b1 : b0;
+      gl.bindFramebuffer(gl.FRAMEBUFFER, dst.fbo);
+      gl.viewport(0, 0, dst.w, dst.h);
+      gl.useProgram(r.progBlur.p);
+      gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, src.tex);
+      gl.uniform1i(r.progBlur.u.uTex, 0);
+      gl.uniform2f(r.progBlur.u.uDir, pass === 0 ? 1 / dst.w : 0, pass === 0 ? 0 : 1 / dst.h);
+      drawQuad(r, r.progBlur);
+    }
+
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
+    const pc = r.progComp;
+    gl.useProgram(pc.p);
+    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, r.hdr.tex);
+    gl.uniform1i(pc.u.uScene, 0);
+    gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, b0.tex);
+    gl.uniform1i(pc.u.uBloom, 1);
+    const G = global.G || {};
+    gl.uniform1f(pc.u.uBloomAmt, r.grade.bloom);
+    gl.uniform1f(pc.u.uExposure, r.grade.exposure);
+    gl.uniform1f(pc.u.uVignette, r.grade.vignette);
+    gl.uniform1f(pc.u.uSat, r.grade.sat);
+    gl.uniform1f(pc.u.uShock, Math.min(1, (G.shake || 0) / 22));
+    gl.uniform1f(pc.u.uGrain, r.grade.grain);
+    gl.uniform1f(pc.u.uTime, (performance.now() % 10000) * 0.001);
+    gl.uniform3fv(pc.u.uTint, r.grade.tint);
+    drawQuad(r, pc);
+  }
+
   function glBuf(gl, arr) {
     const b = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, b);
@@ -3690,6 +4334,84 @@ void main(){ gl_FragColor = vCol; }`;
     r.heightsDirty = false;
   }
 
+  // ---------- climate ----------
+  // The weather used to be a string the renderer read once to decide whether
+  // to draw a 2D sheet of rain over the entire viewport. This makes it a field
+  // ON the planet: precipitation pools where the storm is, cloud thickens over
+  // it, ground goes wet and then dries, snow settles by latitude and altitude
+  // and melts back. Advanced on a slow cadence — it is weather, not physics.
+  function updateClim(r, sim, dt) {
+    const w = r.world, gl = r.gl, c = r.climBuf;
+    const G = global.G || {};
+    const global_ = G.weather || 'clear';
+    const raining = global_ === 'rain', snowing = global_ === 'snow';
+    const storm = G.storm;
+    const k = Math.min(1, dt / 900);          // approach rate per update
+    const season = sim && sim.season != null ? sim.season : 0;
+    const winter = season === 3 ? 1 : season === 2 ? 0.45 : 0;
+
+    for (let y = 0; y < w.H; y++) {
+      // latitude: -1 at the north pole, +1 at the south
+      const lat = Math.abs((y / (w.H - 1)) * 2 - 1);
+      const rowBase = y * w.W;
+      for (let x = 0; x < w.W; x++) {
+        const i = rowBase + x, o = i * 4;
+        const elev = w.elev[i];
+        const water = W.isWater(w.biome[i]);
+
+        // --- precipitation target ---
+        let precip = 0;
+        if (raining || snowing) precip = 0.55;
+        if (storm) {
+          const dx = Math.abs(x - storm.x), dxw = Math.min(dx, w.W - dx);
+          const d = Math.hypot(dxw, y - storm.y);
+          if (d < storm.r) precip = Math.max(precip, 1 - (d / storm.r) * 0.6);
+        }
+        // oceans and warm coasts feed cloud even in fair weather
+        const humid = water ? 0.30 : (w.moist ? w.moist[i] * 0.22 : 0.1);
+
+        // --- integrate ---
+        const cp = c[o] / 255, cc = c[o + 1] / 255, cs = c[o + 2] / 255, cw = c[o + 3] / 255;
+        const np = cp + (precip - cp) * k;
+        // cloud follows precipitation but lingers, and always has a fair-weather floor
+        const cloudTarget = Math.min(1, np * 0.85 + humid);
+        const nc = cc + (cloudTarget - cc) * k * 0.7;
+        // snow: cold means high latitude, high ground, or winter
+        const cold = lat * 0.75 + Math.max(0, elev - 0.62) * 2.2 + winter * 0.30;
+        const snowTarget = water ? 0 : PD.clamp((cold - 0.72) * 3.2, 0, 1) *
+          (snowing ? 1 : 0.55);
+        const ns = cs + (snowTarget - cs) * k * 0.35;    // snow is slow both ways
+        // wetness rises with rain, dries in sun
+        const nw = water ? 0 : PD.clamp(cw + (np > 0.15 ? np * 0.8 - cw : -0.35) * k * 1.6, 0, 1);
+
+        c[o] = np * 255; c[o + 1] = nc * 255; c[o + 2] = ns * 255; c[o + 3] = nw * 255;
+      }
+    }
+
+    // The field is one texel per TILE but the albedo is 8x that, so straight
+    // bilinear magnification shows the tile grid — snowlines came out as
+    // 5px blocks. A wrap-aware box blur turns them into weather fronts.
+    if (!r.climBlur || r.climBlur.length !== c.length) r.climBlur = new Uint8Array(c.length);
+    const b = r.climBlur;
+    for (let y = 0; y < w.H; y++) {
+      const yUp = y > 0 ? y - 1 : 0, yDn = y < w.H - 1 ? y + 1 : w.H - 1;
+      for (let x = 0; x < w.W; x++) {
+        const xL = (x - 1 + w.W) % w.W, xR = (x + 1) % w.W;   // longitude wraps
+        const o = (y * w.W + x) * 4;
+        for (let ch = 0; ch < 4; ch++) {
+          b[o + ch] = (
+            c[(yUp * w.W + xL) * 4 + ch] + c[(yUp * w.W + x) * 4 + ch] * 2 + c[(yUp * w.W + xR) * 4 + ch] +
+            c[(y * w.W + xL) * 4 + ch] * 2 + c[o + ch] * 4 + c[(y * w.W + xR) * 4 + ch] * 2 +
+            c[(yDn * w.W + xL) * 4 + ch] + c[(yDn * w.W + x) * 4 + ch] * 2 + c[(yDn * w.W + xR) * 4 + ch]
+          ) / 16;
+        }
+      }
+    }
+    gl.bindTexture(gl.TEXTURE_2D, r.texClim);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, w.W, w.H, 0, gl.RGBA, gl.UNSIGNED_BYTE, b);
+  }
+
   // city lights / water mask / fire / crack mask, rebuilt cheaply per frame
   function updateDataTex(r, sim) {
     const w = r.world, gl = r.gl, d = r.dataBuf;
@@ -3710,8 +4432,64 @@ void main(){ gl_FragColor = vCol; }`;
   }
 
   function camEye(cam) {
-    const cl = Math.cos(cam.lat);
-    return [cam.dist * cl * Math.sin(cam.lon), cam.dist * Math.sin(cam.lat), cam.dist * cl * Math.cos(cam.lon)];
+    // built from the SMOOTHED values, so the picture never snaps
+    const lo = cam.sLon != null ? cam.sLon : cam.lon;
+    const la = cam.sLat != null ? cam.sLat : cam.lat;
+    const di = cam.sDist != null ? cam.sDist : cam.dist;
+    const cl = Math.cos(la);
+    return [di * cl * Math.sin(lo), di * Math.sin(la), di * cl * Math.cos(lo)];
+  }
+
+  // shortest way round the sphere — never spin the long way to get somewhere
+  function angLerp(a, b, t) {
+    let d = ((b - a + Math.PI) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2) - Math.PI;
+    return a + d * t;
+  }
+
+  // Critically-damped chase. dt-corrected so the feel is frame-rate independent.
+  function stepCam(r, dt) {
+    const cam = r.cam;
+    const f = 1 - Math.pow(0.0015, Math.min(dt, 50) / 1000);   // ~fast but soft
+
+    if (cam.flyDur > 0) {
+      cam.flyT = Math.min(1, cam.flyT + dt / cam.flyDur);
+      // ease-in-out: leave slowly, arrive slowly
+      const e = cam.flyT < 0.5 ? 4 * cam.flyT * cam.flyT * cam.flyT
+        : 1 - Math.pow(-2 * cam.flyT + 2, 3) / 2;
+      cam.lon = angLerp(cam.from.lon, cam.to.lon, e);
+      cam.lat = cam.from.lat + (cam.to.lat - cam.from.lat) * e;
+      cam.dist = cam.from.dist + (cam.to.dist - cam.from.dist) * e;
+      if (cam.flyT >= 1) cam.flyDur = 0;
+    }
+
+    cam.sLon = angLerp(cam.sLon, cam.lon, f);
+    cam.sLat += (cam.lat - cam.sLat) * f;
+    cam.sDist += (cam.dist - cam.sDist) * f;
+    cam.fov += (cam.fovT - cam.fov) * f * 0.6;
+
+    // shake decays, and drives a real jitter of the eye
+    const G = global.G || {};
+    cam.shake = Math.max(0, (G.shake || 0));
+    if (cam.shake > 0.01) {
+      const a = cam.shake * 0.0016;
+      cam.shakeX = (Math.random() - 0.5) * a;
+      cam.shakeY = (Math.random() - 0.5) * a;
+    } else { cam.shakeX = cam.shakeY = 0; }
+  }
+
+  // Frame something. Used by inspect, prayers and Genesis so the game can
+  // point at its own drama instead of leaving you to find it.
+  function flyTo(r, tx, ty, dist, ms) {
+    const cam = r.cam, w = r.world;
+    const lon = (tx / w.W) * Math.PI * 2 + Math.PI;
+    const lat = (0.5 - ty / w.H) * Math.PI * 0.98;
+    cam.from = { lon: cam.lon, lat: cam.lat, dist: cam.dist };
+    cam.to = {
+      lon, lat: PD.clamp(lat, -1.45, 1.45),
+      dist: PD.clamp(dist || 1.7, cam.min, cam.max)
+    };
+    cam.flyT = 0; cam.flyDur = Math.max(120, ms || 900);
+    cam.idle = 0;
   }
 
   // ---------- picking ----------
@@ -3720,7 +4498,7 @@ void main(){ gl_FragColor = vCol; }`;
     const cam = r.cam;
     const eye = camEye(cam);
     // build ray in world space from screen point
-    const aspect = r.w / r.h, fov = 0.9;
+    const aspect = r.w / r.h, fov = cam.fov || 0.9;   // must match the draw matrix
     const ndcX = (sx / r.w) * 2 - 1, ndcY = 1 - (sy / r.h) * 2;
     const tanF = Math.tan(fov / 2);
     // camera basis
@@ -3777,9 +4555,13 @@ void main(){ gl_FragColor = vCol; }`;
     if (r.headless) return;
 
     const gl = r.gl, cam = r.cam, world = r.world;
+    const nowT = performance.now();
+    const camDt = Math.min(50, nowT - (r._camT || nowT - 16));
+    r._camT = nowT;
     // idle auto-spin: the world turns beneath the god's gaze
     cam.idle++;
-    if (cam.idle > 300) cam.lon += 0.0006;
+    if (cam.idle > 300 && cam.flyDur <= 0) cam.lon += 0.0006;
+    stepCam(r, camDt);
 
     if (r.texDirty) {
       const Wp = world.W * HD, Hp = world.H * HD;
@@ -3814,11 +4596,21 @@ void main(){ gl_FragColor = vCol; }`;
       r.texDirty = false;
     }
     if (r.heightsDirty) updateHeights(r);
-    updateDataTex(r, sim);
+
+    // These were both full-grid JS loops running EVERY frame for data that
+    // changes on the order of once every few ticks. City lights and fire only
+    // need catching up a few times a second; the climate is slower still.
+    const nowMs = performance.now();
+    if (nowMs - (r._dataT || 0) > 90) { updateDataTex(r, sim); r._dataT = nowMs; }
+    if (nowMs - (r.climT || 0) > 220) {
+      updateClim(r, sim, nowMs - (r.climT || nowMs - 220));
+      r.climT = nowMs;
+    }
 
     const eye = camEye(cam);
-    const proj = mat4Persp(0.9, r.w / r.h, 0.05, 100);
-    const view = mat4LookAt(eye, [0, 0, 0], [0, 1, 0]);
+    const proj = mat4Persp(cam.fov, r.w / r.h, 0.05, 100);
+    // shake displaces the LOOK TARGET — a real camera kick, in eye space
+    const view = mat4LookAt(eye, [cam.shakeX, cam.shakeY, 0], [0, 1, 0]);
     const vp = mat4Mul(proj, view);
     r._vp = vp;
 
@@ -3845,6 +4637,30 @@ void main(){ gl_FragColor = vCol; }`;
     const doom = (p && p.meta && p.meta.doom != null && r.world === p.world)
       ? PD.clamp(1 - p.meta.doom / 4800, 0.15, 1) : 0;
 
+    // ---- the grade: each world is lit like a different film ----
+    const gd = r.grade;
+    const bloodOn = sim.bloodMoonT > 0;
+    gd.exposure = world.mode === 'deep' ? 0.70 : world.mode === 'nothing' ? 0.45
+      : world.mode === 'hell' ? 1.38 : world.mode === 'heaven' ? 1.5 : 1.25;
+    gd.bloom = world.mode === 'heaven' ? 1.0 : world.mode === 'hell' ? 0.75
+      : doom > 0 ? 0.5 + doom * 0.5 : 0.5;
+    gd.sat = world.mode === 'nothing' ? 0.15 : world.mode === 'deep' ? 0.55 : 1.2;
+    gd.vignette = 0.42 + doom * 0.2;
+    gd.tint = bloodOn ? [1.22, 0.72, 0.66]
+      : world.mode === 'hell' ? [1.14, 0.88, 0.80]
+      : world.mode === 'heaven' ? [1.06, 1.02, 0.90]
+      : [1, 1, 1];
+    if (global.G && global.G.speed < 0) {           // reversal grades cold
+      gd.tint = [gd.tint[0] * 0.82, gd.tint[1] * 0.94, gd.tint[2] * 1.18];
+      gd.sat *= 0.75;
+    }
+
+    // everything below renders into the HDR target, not the screen
+    const post = r.postOK && r.hdr && r.hdr.fbo;
+    if (post) {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, r.hdr.fbo);
+      gl.viewport(0, 0, r.hdr.w, r.hdr.h);
+    }
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
     // stars — they go out as the last of creation is unmade
@@ -3852,9 +4668,17 @@ void main(){ gl_FragColor = vCol; }`;
     gl.disable(gl.DEPTH_TEST);
     if (dissolve < 0.98) drawPoints(r, vp, r.bufStars, r.bufStarCol, r.bufStarSize, r.nStars);
     gl.enable(gl.DEPTH_TEST);
-    if (dissolve >= 1) { drawOverlay2D(r, sim, ui); return; }  // nothing left to draw
+    if (dissolve >= 1) {                                // nothing left to draw
+      if (post) postprocess(r);
+      drawOverlay2D(r, sim, ui);
+      return;
+    }
 
-    // planet
+    // planet — front faces only. CULL_FACE was never enabled, so every sphere
+    // pass was shading the far hemisphere too and throwing it away.
+    gl.enable(gl.CULL_FACE);
+    gl.cullFace(gl.BACK);
+    gl.frontFace(gl.CCW);
     const pp = r.progPlanet;
     gl.useProgram(pp.p);
     bindAttr(gl, pp.a.aPos, r.bufPos, 3);
@@ -3872,22 +4696,19 @@ void main(){ gl_FragColor = vCol; }`;
     gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, r.texTerra); gl.uniform1i(pp.u.uTex, 0);
     gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, r.texData); gl.uniform1i(pp.u.uData, 1);
     gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D, r.texNorm); gl.uniform1i(pp.u.uNorm, 2);
+    gl.activeTexture(gl.TEXTURE3); gl.bindTexture(gl.TEXTURE_2D, r.texClim); gl.uniform1i(pp.u.uClim, 3);
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, r.bufIdx);
     gl.drawElements(gl.TRIANGLES, r.nIdx, r.idxType, 0);
 
     // units as living embers on the surface
     drawUnits(r, sim, vp);
 
-    // particles / rings / bolts
-    gl.enable(gl.BLEND);
-    gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
-    gl.depthMask(false);
-    drawFXPoints(r, vp);
-    drawFXLines(r, vp);
-
-    // clouds (normal blending)
+    // clouds (normal blending) — BEFORE the fx, so explosions and lightning
+    // read in front of the weather instead of being dimmed by it
     if (world.mode !== 'hell' && world.mode !== 'void') {
+      gl.enable(gl.BLEND);
       gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+      gl.depthMask(false);
       const pc = r.progCloud;
       gl.useProgram(pc.p);
       bindAttr(gl, pc.a.aPos, r.bufPos, 3);
@@ -3895,25 +4716,49 @@ void main(){ gl_FragColor = vCol; }`;
       gl.uniformMatrix4fv(pc.u.uMVP, false, vp);
       gl.uniform1f(pc.u.uScroll, performance.now() * 0.0000045);
       gl.uniform3fv(pc.u.uSun, sun);
+      gl.uniform3fv(pc.u.uEye, eye);
+      gl.uniform1f(pc.u.uTime, performance.now() * 0.001);
       gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, r.texCloud); gl.uniform1i(pc.u.uTex, 0);
+      gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, r.texClim); gl.uniform1i(pc.u.uClim, 1);
       gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, r.bufIdx);
       gl.drawElements(gl.TRIANGLES, r.nIdx, r.idxType, 0);
     }
 
-    // atmosphere halo
+    // particles / rings / bolts. Culling MUST be off here: ribbon quads are
+    // built facing the camera, so their winding is arbitrary and half of every
+    // bolt would be culled away.
+    gl.enable(gl.BLEND);
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
-    gl.cullFace && gl.disable(gl.CULL_FACE);
+    gl.depthMask(false);
+    gl.disable(gl.CULL_FACE);
+    drawFXPoints(r, vp);
+    drawFXLines(r, vp);
+    gl.enable(gl.CULL_FACE);
+
+    // Atmosphere. FRONT faces only: the near side of the shell is always in
+    // front of the planet, so it passes the depth test everywhere and the
+    // raymarch can integrate either to the ground or out through the far side.
+    // (Back faces fail depth over the disc, so the aerial-perspective term
+    // would never run; drawing both double-counts the limb.)
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
     const pa = r.progAtmo;
+    const shell = 1.10;
     gl.useProgram(pa.p);
     bindAttr(gl, pa.a.aPos, r.bufPos, 3);
     gl.uniformMatrix4fv(pa.u.uMVP, false, vp);
     gl.uniform3fv(pa.u.uEye, eye);
+    gl.uniform3fv(pa.u.uSun, sun);
     gl.uniform3fv(pa.u.uAtmo, atmo);
+    gl.uniform1f(pa.u.uShell, shell);
+    gl.uniform1f(pa.u.uDensity, unlit ? 0.15 : 1.0);
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, r.bufIdx);
     gl.drawElements(gl.TRIANGLES, r.nIdx, r.idxType, 0);
 
     gl.depthMask(true);
     gl.disable(gl.BLEND);
+    gl.disable(gl.CULL_FACE);
+
+    if (post) postprocess(r);
 
     // ---- 2D overlay: labels, cursor, weather, minimap ----
     drawOverlay2D(r, sim, ui);
@@ -3990,9 +4835,42 @@ void main(){ gl_FragColor = vCol; }`;
   }
 
   const _rtmp = [0, 0, 0];
+  // Expand a segment into a camera-facing quad of constant apparent width.
+  // Exported for tests: this is pure geometry and must not need a GPU to check.
+  // Appends 6 verts (2 triangles) to out.verts / out.cols / out.edges.
+  function ribbonQuad(out, a, b, eye, col, alpha, wpx) {
+    const mx = (a[0] + b[0]) * 0.5, my = (a[1] + b[1]) * 0.5, mz = (a[2] + b[2]) * 0.5;
+    const vx = eye[0] - mx, vy = eye[1] - my, vz = eye[2] - mz;
+    const vl = Math.hypot(vx, vy, vz) || 1;
+    const dx = b[0] - a[0], dy = b[1] - a[1], dz = b[2] - a[2];
+    // side = dir x view, normalised — perpendicular to both, so the quad
+    // always presents its face to the camera
+    let sx = dy * vz - dz * vy, sy = dz * vx - dx * vz, sz = dx * vy - dy * vx;
+    const sl = Math.hypot(sx, sy, sz);
+    if (!(sl > 1e-9)) return false;            // degenerate or view-aligned
+    const hw = wpx * vl * 0.0011;              // width grows with distance
+    sx = sx / sl * hw; sy = sy / sl * hw; sz = sz / sl * hw;
+    const q = [
+      a[0] - sx, a[1] - sy, a[2] - sz, a[0] + sx, a[1] + sy, a[2] + sz,
+      b[0] - sx, b[1] - sy, b[2] - sz, b[0] + sx, b[1] + sy, b[2] + sz
+    ];
+    const E = [-1, 1, -1, 1];
+    const tri = [0, 1, 2, 2, 1, 3];
+    for (let i = 0; i < 6; i++) {
+      const k = tri[i];
+      out.verts.push(q[k * 3], q[k * 3 + 1], q[k * 3 + 2]);
+      out.cols.push(col[0], col[1], col[2], alpha);
+      out.edges.push(E[k]);
+    }
+    return true;
+  }
+
   function drawFXLines(r, vp) {
     const gl = r.gl;
-    const verts = [], cols = [];
+    const eye = camEye(r.cam);
+    const verts = [], cols = [], edges = [];
+    const out = { verts, cols, edges };
+    const ribbon = (a, b, col, alpha, wpx) => ribbonQuad(out, a, b, eye, col, alpha, wpx);
     // shock rings: circles traced on the sphere surface
     for (const ring of FX.rings) {
       const alpha = ring.life / ring.max2;
@@ -4012,10 +4890,7 @@ void main(){ gl_FragColor = vCol; }`;
         const oy = (ty2 * Math.cos(a) + by * Math.sin(a)) * Math.sin(rad);
         const oz = (tz * Math.cos(a) + bz * Math.sin(a)) * Math.sin(rad);
         const px = (nx * Math.cos(rad) + ox) * 1.015, py = (ny * Math.cos(rad) + oy) * 1.015, pz = (nz * Math.cos(rad) + oz) * 1.015;
-        if (prev) {
-          verts.push(prev[0], prev[1], prev[2], px, py, pz);
-          for (let k = 0; k < 2; k++) cols.push(ring.col[0], ring.col[1], ring.col[2], alpha * ring.col[3]);
-        }
+        if (prev) ribbon(prev, [px, py, pz], ring.col, alpha * ring.col[3], 5.5);
         prev = [px, py, pz];
       }
     }
@@ -4032,8 +4907,8 @@ void main(){ gl_FragColor = vCol; }`;
         const px = top[0] + (surf[0] - top[0]) * tt + (Math.random() - 0.5) * 0.05 * (1 - tt);
         const py = top[1] + (surf[1] - top[1]) * tt + (Math.random() - 0.5) * 0.05 * (1 - tt);
         const pz = top[2] + (surf[2] - top[2]) * tt + (Math.random() - 0.5) * 0.05 * (1 - tt);
-        verts.push(prev[0], prev[1], prev[2], px, py, pz);
-        for (let k = 0; k < 2; k++) cols.push(0.85, 0.93, 1, alpha);
+        // the bolt tapers as it reaches the ground, and is hottest at the tip
+        ribbon(prev, [px, py, pz], [0.88, 0.95, 1], alpha, 9 - tt * 4);
         prev = [px, py, pz];
       }
     }
@@ -4044,9 +4919,11 @@ void main(){ gl_FragColor = vCol; }`;
     gl.enableVertexAttribArray(pr.a.aPos); gl.vertexAttribPointer(pr.a.aPos, 3, gl.FLOAT, false, 0, 0);
     gl.bindBuffer(gl.ARRAY_BUFFER, r.bufLineCol); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(cols), gl.DYNAMIC_DRAW);
     gl.enableVertexAttribArray(pr.a.aCol); gl.vertexAttribPointer(pr.a.aCol, 4, gl.FLOAT, false, 0, 0);
+    if (!r.bufLineEdge) r.bufLineEdge = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, r.bufLineEdge); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(edges), gl.DYNAMIC_DRAW);
+    gl.enableVertexAttribArray(pr.a.aEdge); gl.vertexAttribPointer(pr.a.aEdge, 1, gl.FLOAT, false, 0, 0);
     gl.uniformMatrix4fv(pr.u.uMVP, false, vp);
-    gl.lineWidth && gl.lineWidth(2);
-    gl.drawArrays(gl.LINES, 0, verts.length / 3);
+    gl.drawArrays(gl.TRIANGLES, 0, verts.length / 3);
   }
 
   // ---------- overlay (labels / cursor / weather / minimap) ----------
@@ -4104,24 +4981,38 @@ void main(){ gl_FragColor = vCol; }`;
       }
     }
 
-    // weather (screen-space over the globe)
-    if (r.weather === 'rain') {
-      ctx.strokeStyle = 'rgba(150,180,220,0.35)'; ctx.lineWidth = 1;
-      ctx.beginPath();
-      for (const d of r.rainDrops) {
-        d.y += d.s * 4; d.x += 1.2;
-        if (d.y > r.h) { d.y = -5; d.x = Math.random() * r.w; }
-        if (d.x > r.w) d.x = 0;
-        ctx.moveTo(d.x, d.y); ctx.lineTo(d.x - 2, d.y - 6);
+    // Weather is on the planet now — cloud, wetness and snow live in the
+    // climate texture. Falling precipitation is only drawn when you are close
+    // enough for it to make sense, and only over the lit, near hemisphere,
+    // instead of a sheet across the entire viewport regardless of where the
+    // world even is.
+    const nearGround = r.cam.dist < 2.2;
+    if (nearGround && (r.weather === 'rain' || r.weather === 'snow')) {
+      const closeness = PD.clamp((2.2 - r.cam.dist) / 0.9, 0, 1);
+      // keep it inside the disc the planet occupies on screen
+      const cx = r.w / 2, cy = r.h / 2, rad = Math.min(r.w, r.h) * (0.62 + 0.5 * closeness);
+      ctx.save();
+      ctx.beginPath(); ctx.arc(cx, cy, rad, 0, 6.2832); ctx.clip();
+      if (r.weather === 'rain') {
+        ctx.strokeStyle = 'rgba(160,190,230,' + (0.30 * closeness).toFixed(3) + ')';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        for (const d of r.rainDrops) {
+          d.y += d.s * 4; d.x += 1.2;
+          if (d.y > r.h) { d.y = -5; d.x = Math.random() * r.w; }
+          if (d.x > r.w) d.x = 0;
+          ctx.moveTo(d.x, d.y); ctx.lineTo(d.x - 2, d.y - 6);
+        }
+        ctx.stroke();
+      } else {
+        ctx.fillStyle = 'rgba(255,255,255,' + (0.7 * closeness).toFixed(3) + ')';
+        for (const f of r.snowFlakes) {
+          f.d += 0.03; f.y += f.s * 1.2; f.x += Math.sin(f.d) * 0.6;
+          if (f.y > r.h) { f.y = -5; f.x = Math.random() * r.w; }
+          ctx.fillRect(f.x, f.y, 2, 2);
+        }
       }
-      ctx.stroke();
-    } else if (r.weather === 'snow') {
-      ctx.fillStyle = 'rgba(255,255,255,0.8)';
-      for (const f of r.snowFlakes) {
-        f.d += 0.03; f.y += f.s * 1.2; f.x += Math.sin(f.d) * 0.6;
-        if (f.y > r.h) { f.y = -5; f.x = Math.random() * r.w; }
-        ctx.fillRect(f.x, f.y, 2, 2);
-      }
+      ctx.restore();
     }
 
     // the sun itself, with a soft flare when it swings into view
@@ -4147,12 +5038,8 @@ void main(){ gl_FragColor = vCol; }`;
     }
 
     drawMinimap(r, sim, ctx);
-
-    // vignette
-    const g = ctx.createRadialGradient(r.w / 2, r.h / 2, Math.min(r.w, r.h) * 0.4, r.w / 2, r.h / 2, Math.max(r.w, r.h) * 0.8);
-    g.addColorStop(0, 'rgba(0,0,0,0)');
-    g.addColorStop(1, 'rgba(0,0,0,0.45)');
-    ctx.fillStyle = g; ctx.fillRect(0, 0, r.w, r.h);
+    // (the vignette moved into the composite pass, where it grades the whole
+    // image rather than painting a black ring over the finished frame)
   }
 
   function drawMinimap(r, sim, ctx) {
@@ -4218,7 +5105,7 @@ void main(){ gl_FragColor = vCol; }`;
 
   PD.FX = FX;
   PD.Render = {
-    createRenderer, draw, renderTerrain, setWorld,
+    createRenderer, draw, renderTerrain, setWorld, flyTo, ribbonQuad,
     worldToScreen, screenToWorld, screenToWorldRaw, centerTile,
     TILE, FX, hexToRgb: R2.hexToRgb
   };
@@ -6288,14 +7175,58 @@ void main(){ gl_FragColor = vCol; }`;
   }
 
   // ---- Transcendence (prestige): trade a multiverse for permanent power
+  // ================= Themed ask / confirm =================
+  // Native confirm() and prompt() are unstyleable, and they broke the frame
+  // at exactly the moments that should feel weightiest — unmaking a world,
+  // transcending, starting over. Promise-based so the call sites read the
+  // same way they did.
+  function ask(opts) {
+    return new Promise((resolve) => {
+      const m = $('#ask-modal');
+      if (!m) { resolve(opts.input != null ? global.prompt(opts.body, opts.input) : global.confirm(opts.body)); return; }
+      const input = $('#ask-input'), okBtn = $('#ask-ok'), cancel = $('#ask-cancel');
+      $('#ask-title').textContent = opts.title || 'Are you certain?';
+      $('#ask-body').textContent = opts.body || '';
+      okBtn.textContent = opts.ok || 'Confirm';
+      cancel.textContent = opts.cancel || 'Cancel';
+      m.classList.toggle('has-input', opts.input != null);
+      m.classList.toggle('danger', !!opts.danger);
+      if (opts.input != null) { input.value = opts.input; }
+      m.classList.add('show');
+      if (opts.input != null) setTimeout(() => { try { input.focus(); input.select(); } catch (e) {} }, 30);
+
+      const done = (val) => {
+        m.classList.remove('show');
+        okBtn.removeEventListener('click', onOk);
+        cancel.removeEventListener('click', onCancel);
+        document.removeEventListener('keydown', onKey, true);
+        resolve(val);
+      };
+      const onOk = () => done(opts.input != null ? input.value : true);
+      const onCancel = () => done(opts.input != null ? null : false);
+      const onKey = (e) => {
+        if (e.key === 'Escape') { e.stopPropagation(); onCancel(); }
+        else if (e.key === 'Enter' && opts.input != null) { e.stopPropagation(); onOk(); }
+      };
+      okBtn.addEventListener('click', onOk);
+      cancel.addEventListener('click', onCancel);
+      document.addEventListener('keydown', onKey, true);
+    });
+  }
+
   function transcendCost() { return 2000 * Math.pow(3, G.divinity); }
-  function transcend() {
+  async function transcend() {
     const cost = transcendCost();
     if (G.faithTotal < cost) {
       flashToast(`Transcendence needs ${Math.floor(cost)} total faith earned (you: ${Math.floor(G.faithTotal)})`);
       Audio8.sfx('error'); return;
     }
-    if (!confirm(`TRANSCEND?\n\nYour multiverse dissolves into pure divinity. You begin again — but every future world yields ${25}% more faith, forever, per transcendence.\n\nCurrent Divinity: ${G.divinity} → ${G.divinity + 1}`)) return;
+    const yes = await ask({
+      title: 'Transcend',
+      body: `Your multiverse dissolves into pure divinity. You begin again — but every world you make from now on yields 25% more faith, forever, for each transcendence.\n\nDivinity: ${G.divinity} → ${G.divinity + 1}`,
+      ok: 'Dissolve it all', danger: true
+    });
+    if (!yes) return;
     G.divinity++;
     ach('transcends');
     const d = G.divinity;
@@ -7225,10 +8156,9 @@ void main(){ gl_FragColor = vCol; }`;
     if (G.flash > 0) G.flash = Math.max(0, G.flash - dt / 300);
     if (G.shake > 0) G.shake = Math.max(0, G.shake - dt / 30);
 
-    const sc = G.shake;
-    const jitter = sc > 0 ? `translate(${((Math.random() - 0.5) * sc).toFixed(1)}px,${((Math.random() - 0.5) * sc).toFixed(1)}px)` : '';
-    G.r.canvas.style.transform = jitter;
-    if (G.r.overlay) G.r.overlay.style.transform = jitter;
+    // Shake is a real camera kick now (render3d stepCam), not a CSS transform
+    // on the DOM canvas — which used to move the element out from under the
+    // pointer and desync picking against getBoundingClientRect.
     Render.draw(G.r, G.sim, G.ui);
     drawOverlays();
     if (G.flash > 0 && G.r.octx) { const c = G.r.octx; c.fillStyle = `rgba(255,255,255,${G.flash * 0.5})`; c.fillRect(0, 0, G.r.w, G.r.h); }
@@ -7452,8 +8382,18 @@ void main(){ gl_FragColor = vCol; }`;
       dragging = false; touchPanning = false;
     });
 
+    // Typing into any field must never fire a hotkey — 'r' should not reverse
+    // time while you are naming a race in the Genesis Lab.
+    const inField = (e) => {
+      const t = e.target;
+      if (!t || !t.tagName) return false;
+      const tag = t.tagName.toLowerCase();
+      return tag === 'input' || tag === 'textarea' || tag === 'select' || t.isContentEditable;
+    };
+
     // keyboard
     global.addEventListener('keydown', (e) => {
+      if (inField(e)) return;
       const k = e.key.toLowerCase(); keys[k] = true;
       if (k === ' ') { e.preventDefault(); togglePause(); }
       else if (k === '1') setSpeedIdx(IDX_NORMAL);
@@ -7570,10 +8510,17 @@ void main(){ gl_FragColor = vCol; }`;
     wrap.innerHTML = html;
   }
 
+  // which categories the player has folded away, remembered across rebuilds
+  const collapsedCats = {};
+  G.toolQuery = '';
+
   function buildToolbar() {
     const wrap = $('#tools');
     wrap.innerHTML = '';
     const creating = G.creationStage != null;
+    const q = (G.toolQuery || '').trim().toLowerCase();
+    let shown = 0;
+
     for (const cat of Powers.CATEGORIES) {
       let powers = Powers.POWERS.filter(x => x.cat === cat.id);
       if (cat.id === 'genesis') {
@@ -7584,11 +8531,30 @@ void main(){ gl_FragColor = vCol; }`;
         // nothing else can be done to a world that does not yet exist
         powers = powers.filter(x => x.cat === 'god');
       }
+      // search matches name, description and category — 59 powers is too many
+      // to find anything in by scrolling
+      if (q) {
+        powers = powers.filter(x =>
+          x.name.toLowerCase().includes(q) ||
+          (x.desc || '').toLowerCase().includes(q) ||
+          cat.name.toLowerCase().includes(q));
+      }
       if (!powers.length) continue;
+      shown += powers.length;
+
       const group = document.createElement('div');
-      group.className = 'tool-group';
-      const h = document.createElement('div'); h.className = 'tool-group-title'; h.textContent = cat.name;
+      group.className = 'tool-group' + (!q && collapsedCats[cat.id] ? ' collapsed' : '');
+      // a real button: keyboard-reachable, and it announces its own state
+      const h = document.createElement('button');
+      h.className = 'tool-group-title';
+      h.textContent = cat.name + '  (' + powers.length + ')';
+      h.setAttribute('aria-expanded', String(!collapsedCats[cat.id]));
+      h.addEventListener('click', () => {
+        collapsedCats[cat.id] = !collapsedCats[cat.id];
+        buildToolbar();
+      });
       group.appendChild(h);
+
       const grid = document.createElement('div'); grid.className = 'tool-grid';
       for (const p of powers) {
         const btn = document.createElement('button');
@@ -7596,13 +8562,26 @@ void main(){ gl_FragColor = vCol; }`;
         btn.innerHTML = `<span class="tool-ico">${p.icon}</span><span class="tool-name">${p.name}</span>` +
           (p.cost > 0 ? `<span class="tool-cost">✦${p.cost}</span>` : '');
         btn.title = p.desc;
+        btn.setAttribute('aria-label', p.name + (p.cost > 0 ? ', costs ' + p.cost + ' faith' : ', free'));
+        // Hover previews the power. On a touch screen mouseenter never fires,
+        // so without the pointerdown/focus paths you had to SELECT a power to
+        // find out what it did or cost — on the platform this ships to.
         btn.addEventListener('mouseenter', () => updatePowerInfo(p));
         btn.addEventListener('mouseleave', () => updatePowerInfo(G.power));
+        btn.addEventListener('pointerdown', () => updatePowerInfo(p));
+        btn.addEventListener('focus', () => updatePowerInfo(p));
         btn.addEventListener('click', () => setPower(p.id));
         grid.appendChild(btn);
       }
       group.appendChild(grid);
       wrap.appendChild(group);
+    }
+
+    if (!shown) {
+      const none = document.createElement('div');
+      none.className = 'tool-empty';
+      none.textContent = q ? 'No power by that name.' : 'Nothing can be done yet.';
+      wrap.appendChild(none);
     }
     highlightPower(G.power ? G.power.id : 'pan');
   }
@@ -8069,7 +9048,7 @@ void main(){ gl_FragColor = vCol; }`;
       }
       renderCosmosControls();
     });
-    $('#cosmos-controls').addEventListener('click', (e) => {
+    $('#cosmos-controls').addEventListener('click', async (e) => {
       const b = e.target.closest('button'); if (!b) return;
       if (b.classList.contains('cosmos-new')) {
         if (G.faith < 150) { flashToast('Creating a world needs ✦150'); Audio8.sfx('error'); return; }
@@ -8086,12 +9065,12 @@ void main(){ gl_FragColor = vCol; }`;
         gotoPlanet(cosmosSel); closePanel();
       } else if (b.id === 'cosmos-rename' && cosmosSel >= 0) {
         const p = Cosmos.getPlanet(cosmosSel);
-        const name = prompt('Name this world:', p.name);
+        const name = await ask({ title: 'Name this world', body: 'What shall it be called?', input: p.name, ok: 'Name it' });
         if (name) { p.name = name; p.sim.planetName = name; refreshHUD(); renderCosmosControls(); }
       } else if (b.id === 'cosmos-destroy' && cosmosSel >= 0) {
         if (Cosmos.C.planets.length <= 1) { flashToast('You cannot unmake the last world'); return; }
         if (G.faith < 100) { flashToast('Unmaking needs ✦100'); return; }
-        if (confirm('Unmake this world and every soul on it?')) {
+        if (await ask({ title: 'Unmake this world', body: 'This world and every soul on it will cease to have been. There is no undo for this one.', ok: 'Unmake it', danger: true })) {
           G.faith -= 100;
           ach('unmade');
           Cosmos.destroyPlanet(cosmosSel);
@@ -8177,6 +9156,15 @@ void main(){ gl_FragColor = vCol; }`;
     });
     $('#btn-menu').addEventListener('click', toggleMenu);
     $('#btn-save').addEventListener('click', () => save());
+    const search = $('#tool-search');
+    if (search) {
+      search.addEventListener('input', () => { G.toolQuery = search.value; buildToolbar(); });
+      // typing in the box must not drive the game's hotkeys
+      search.addEventListener('keydown', (e) => {
+        e.stopPropagation();
+        if (e.key === 'Escape') { search.value = ''; G.toolQuery = ''; buildToolbar(); search.blur(); }
+      });
+    }
     $('#btn-labels').addEventListener('click', toggleLabels);
     $('#btn-sound').addEventListener('click', () => {
       const on = !Audio8.isEnabled(); Audio8.setEnabled(on); Audio8.setMusic(on);
@@ -8184,16 +9172,16 @@ void main(){ gl_FragColor = vCol; }`;
       if (on) Audio8.unlock();
     });
 
-    $('#menu-new').addEventListener('click', () => {
-      if (confirm('Begin a NEW multiverse? Everything will be overwritten.')) {
+    $('#menu-new').addEventListener('click', async () => {
+      if (await ask({ title: 'A new multiverse', body: 'Everything you have made will be overwritten. Your transcendences are kept.', ok: 'Begin again', danger: true })) {
         wipeSave(); newMultiverse(); Render.FX.clear(); $('#menu-modal').classList.remove('show'); flashToast('In the beginning…');
       }
     });
     $('#menu-resume').addEventListener('click', () => $('#menu-modal').classList.remove('show'));
     $('#menu-transcend').addEventListener('click', transcend);
     $('#menu-save').addEventListener('click', () => { save(); });
-    $('#menu-regen-seed').addEventListener('click', () => {
-      const s = prompt('Enter a world seed (any text):', G.world.seedStr);
+    $('#menu-regen-seed').addEventListener('click', async () => {
+      const s = await ask({ title: 'A world from a word', body: 'Any text becomes a world. The same word always makes the same world.', input: G.world.seedStr, ok: 'Make it' });
       if (s != null) { wipeSave(); newMultiverse(s); Render.FX.clear(); $('#menu-modal').classList.remove('show'); flashToast('World seed: ' + s); }
     });
 
