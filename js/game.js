@@ -569,9 +569,15 @@
       G.view = (d.view && d.view.kind === 'planet' && Cosmos.getPlanet(d.view.id)) ? d.view : { kind: 'planet', id: Cosmos.C.activeId };
       bindView();
       if (d.cam && d.cam.lon != null && G.r) { G.r.cam.lon = d.cam.lon; G.r.cam.lat = d.cam.lat; G.r.cam.dist = d.cam.dist; }
+      // Quitting while paused used to mean no offline progress at all, and
+      // nothing said so — you came back to a world that had not moved and no
+      // explanation. Time you deliberately stopped stays stopped, but say it.
       if (G.speed !== 0) {
         const off = runOffline((Date.now() - (d.t || Date.now())) / 1000);
         if (off) showOffline(off);
+      } else {
+        const away = (Date.now() - (d.t || Date.now())) / 1000;
+        if (away > 120) setTimeout(() => flashToast('You left with time paused, so nothing moved while you were gone.'), 900);
       }
       return true;
     } catch (e) {
@@ -1048,6 +1054,21 @@
   // recorder cannot share that name.
   G.deed = ach;
 
+  // Something happened on a world you are not looking at.
+  //
+  // The rocket, the starchild and the shattering — the set-piece the intro
+  // card leads with — reported only through Society.hist(), which writes into
+  // ONE planet's History panel. If you were gazing elsewhere, an entire world
+  // could burn and you would never learn of it. This reaches you wherever you
+  // are: the chronicle of the world you are watching, plus a toast.
+  G.announce = function (text, kind, sfx) {
+    try {
+      if (G.sim) Sim.logEvent(G.sim, text, kind || 'event');
+      flashToast(text);
+      if (sfx) Audio8.sfx(sfx);
+    } catch (e) {}
+  };
+
   // Sabbath: the world holds still, but the god does not.
   G.setSabbath = function (on) {
     if (on) { G._preSabbathIdx = G.speedIdx; setSpeedIdx(IDX_PAUSE, true); }
@@ -1055,19 +1076,32 @@
   };
 
   // ================= Testament story =================
+  // Every world-shaped check used to read G.sim — the world you happen to be
+  // GAZING at. Build a Modern-era civilisation on planet A, go look at planet
+  // B, and chapter XII could never complete no matter how long you waited.
+  // The chapters are about your works, not about your current view, so they
+  // ask every planet.
+  function anyWorld(fn) {
+    try { if (fn(G.sim)) return true; } catch (e) {}
+    for (const p of Cosmos.C.planets) {
+      if (!p.sim || p.sim === G.sim) continue;
+      try { if (fn(p.sim)) return true; } catch (e) {}
+    }
+    return false;
+  }
   const CHAPTERS = [
     { id: 'genesis', title: 'I. The Shaping', text: 'In the beginning you hovered over the face of the waters. Shape the land. Raise mountains, plant forests.', hint: 'Use Raise Land or Grow Forest anywhere.', check: () => G._usedTerra },
-    { id: 'life', title: 'II. Breath of Life', text: 'Breathe life into the dust. Let peoples walk your world.', hint: 'Spawn any sentient race from the Life tab.', check: () => { let n = 0; for (const k of Sim.SENTIENT) n += G.sim.counts[k] || 0; return n >= 10; } },
-    { id: 'watch', title: 'III. The Watchers', text: 'They build without your hand. Watch a village become a town.', hint: 'Wait, or feed a village with Bless/Miracle. A village must reach level 2.', check: () => G.sim.villages.some(v => v.level >= 2) },
+    { id: 'life', title: 'II. Breath of Life', text: 'Breathe life into the dust. Let peoples walk your world.', hint: 'Spawn any sentient race from the Life tab.', check: () => anyWorld(s => { let n = 0; for (const k of Sim.SENTIENT) n += s.counts[k] || 0; return n >= 10; }) },
+    { id: 'watch', title: 'III. The Watchers', text: 'They build without your hand. Watch a village become a town.', hint: 'Wait, or feed a village with Bless/Miracle. A village must reach level 2.', check: () => anyWorld(s => s.villages.some(v => v.level >= 2)) },
     { id: 'prayer', title: 'IV. The First Prayer', text: 'They are starting to look up. Answer them.', hint: 'Open the Prayers tab (🙏) and answer 3 prayers.', check: () => (G._prayersAnswered || 0) >= 3 },
-    { id: 'faith', title: 'V. Organized Faith', text: 'Let them build a church around the answering.', hint: 'A faith forms on its own once temples exist — or use Anoint Prophet.', check: () => PD.Society && PD.Society.ensure(G.sim).faiths.length > 0 },
-    { id: 'law', title: 'VI. The Law', text: 'Faith without law is a fire without a hearth. Hand down commandments.', hint: 'Use the Commandments power (Testament tab).', check: () => PD.Society && PD.Society.ensure(G.sim).faiths.some(f => f.commandments > 0) },
+    { id: 'faith', title: 'V. Organized Faith', text: 'Let them build a church around the answering.', hint: 'A faith forms on its own once temples exist — or use Anoint Prophet.', check: () => !!PD.Society && anyWorld(s => PD.Society.ensure(s).faiths.length > 0) },
+    { id: 'law', title: 'VI. The Law', text: 'Faith without law is a fire without a hearth. Hand down commandments.', hint: 'Use the Commandments power — the Testament group in the power sidebar, not the 📖 tab.', check: () => !!PD.Society && anyWorld(s => PD.Society.ensure(s).faiths.some(f => f.commandments > 0)) },
     { id: 'wrath', title: 'VII. Wrath', text: 'They must know both sides of you. Show them judgement.', hint: 'Use Lightning, Meteor, Plague, or the Great Flood.', check: () => G._usedWrath },
-    { id: 'hero', title: 'VIII. The Chosen', text: 'Raise up a mortal as your champion against the dark.', hint: 'Use Empower Hero (Godhead tab) on any citizen.', check: () => PD.Society && PD.Society.ensure(G.sim).heroes.length > 0 },
+    { id: 'hero', title: 'VIII. The Chosen', text: 'Raise up a mortal as your champion against the dark.', hint: 'Use Empower Hero — the Godhead group in the power sidebar — on any citizen.', check: () => !!PD.Society && anyWorld(s => PD.Society.ensure(s).heroes.length > 0) },
     { id: 'beyond', title: 'IX. The Beyond', text: 'Where do they go when they die? Walk your own heavens and hells.', hint: 'Open the Souls tab (👻) and Visit any plane.', check: () => G._visitedPlane },
     { id: 'return', title: 'X. Resurrection', text: 'Death answers to you. Bring one back.', hint: 'In the Souls tab, resurrect any soul.', check: () => G._resurrected },
     { id: 'cosmos', title: 'XI. Many Worlds', text: 'One world is a garden. Many is a cosmos. Create a second planet.', hint: 'Open the Cosmos tab (🪐) and create a planet.', check: () => Cosmos.C.planets.length >= 2 },
-    { id: 'modern', title: 'XII. The Wired Age', text: 'Let a nation grow until it wires itself together and posts about you.', hint: 'A nation must reach the Modern era. Prosperous big nations advance faster.', check: () => PD.Society && PD.Society.ensure(G.sim).internetOn },
+    { id: 'modern', title: 'XII. The Wired Age', text: 'Let a nation grow until it wires itself together and posts about you.', hint: 'A nation must reach the Modern era. Prosperous big nations advance faster.', check: () => !!PD.Society && anyWorld(s => PD.Society.ensure(s).internetOn) },
     // The dial goes the other way too — and nothing in the game said so.
     { id: 'turnback', title: 'XIII. Turn Back', text: 'Time has only ever run one way for them. It has never had to, for you. Take an hour of history back.', hint: 'The time dial runs left of the pause bar: ◀ ⧏ ⧏⧏ ⧏⧏⧏. Press R, or tap any arrow left of ❚❚.', check: () => G._reversed },
     { id: 'before', title: 'XIV. Before the Beginning', text: 'Keep going. Past the first city, past the first breath, past the first morning — to the night that had no evening before it.', hint: 'Hold the leftmost notch (⧏⧏⧏ · Unmaking) once the record runs out. The works undo, the land unshapes, the deep goes dark. Press U at any point to take it all back.', check: () => G._sawNothing },
@@ -2069,6 +2103,7 @@
     $('#chronicle').style.display = '';
     G.openPanel = null;
   }
+  let lastDeedSig = '';
   function refreshOpenPanel(force) {
     if (!G.openPanel) return;
     switch (G.openPanel) {
@@ -2077,7 +2112,17 @@
       case 'feed': renderFeed(); break;
       case 'souls': renderSouls(force); break;
       case 'time': renderTime(force); break;
-      case 'testament': if (force) renderTestament(); break;
+      // Deeds count progress ("7/25 lightning bolts") and only ever redrew on
+      // force, so casting with the panel open left the counter frozen. Redraw
+      // only when a count actually moves: renderTestament replaces innerHTML,
+      // and doing that every 250ms would re-hide a hint the moment you
+      // revealed it.
+      case 'testament': {
+        const sig = ACHIEVEMENTS.map(a => G.ach[a.id] || 0).join(',') + '|' + G.story.active +
+                    '|' + Object.keys(G.story.done).length + '|' + G.divinity;
+        if (force || sig !== lastDeedSig) { lastDeedSig = sig; renderTestament(); }
+        break;
+      }
       case 'cosmos': if (force) renderCosmosControls(); break;
       case 'genesis': break; // static form
     }

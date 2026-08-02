@@ -119,6 +119,10 @@
         PD.Society.hist(sim, `${parent.name} seals their child into a rocket as the core fails. It rises on a pillar of fire toward ${dest.name}.`, 'legend');
         PD.Society.hist(dest.sim, `A tiny rocket falls from the sky. Inside: a child of doomed ${p.name}. They seem… unusual.`, 'legend');
       }
+      // hist() reaches one planet's History panel. This is the thing the
+      // intro card leads with; it should reach you wherever you are looking.
+      if (PD.Game && PD.Game.announce)
+        PD.Game.announce(`🚀 A rocket leaves dying ${p.name}, bound for ${dest.name}.`, 'legend', 'levelup');
       if (PD.FX && dest.id === C.activeId) PD.FX.explosion(spot.x, spot.y, false);
     }
   }
@@ -131,6 +135,8 @@
     if (u.age > u.adultAt && !u.paragon) {
       PD.Society.empower(sim, u, 3);
       PD.Society.hist(sim, `${u.name}, the child from the stars, discovers what they can do.`, 'legend');
+      if (PD.Game && PD.Game.announce)
+        PD.Game.announce(`✨ ${u.name}, the child from the stars, comes into their power.`, 'legend', 'levelup');
       sim._starchild = null;
     }
   }
@@ -153,6 +159,9 @@
     if (PD.Society) PD.Society.hist(sim, `${p.name} HAS SHATTERED. ${p.name} is no more. The Beyond weeps with new souls.`, 'fall');
     if (p.id === C.activeId && global.G) { global.G.flash = 1; global.G.shake = 30; }
     if (PD.Audio8) PD.Audio8.sfx('meteor');
+    // a world can end while you are looking at another one
+    if (PD.Game && PD.Game.announce)
+      PD.Game.announce(`☄ ${p.name} HAS SHATTERED. It is no more.`, 'fall');
   }
 
   // "Stabilize Core" — the god's mercy (called by a power)

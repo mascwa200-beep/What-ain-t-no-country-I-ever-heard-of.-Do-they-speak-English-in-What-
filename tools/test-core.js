@@ -193,6 +193,39 @@ perrs += aerrs + arestore;
 if (refused < adone) { console.error('SOME GREATER FORMS FIRED WITHOUT PAYING'); perrs++; }
 console.log('genesis hooks fired:', genesisCalls, '| sabbath toggles:', sabbathCalls, '| unmaking undos:', undoCalls);
 
+// ---- every people must have a way into the world ----
+// Nine of the thirteen sentient races had no spawn power. The only other
+// route was evolution stage 4 picking one of thirteen at random, behind a
+// Primordial planet and five advances — so Fairies and Giants were a lottery
+// most players would never win, while the intro card promised sixteen
+// peoples. Custom races are excluded: they get their power at registration.
+{
+  const spawnable = new Set();
+  for (const p of PD.Powers.POWERS) if (p.race) spawnable.add(p.race);
+  const unreachable = PD.Sim.SENTIENT.filter(k => !spawnable.has(k) && !PD.Sim.RACES[k].custom);
+  console.log('sentient races:', PD.Sim.SENTIENT.length, '| with a spawn power:',
+    PD.Sim.SENTIENT.filter(k => spawnable.has(k)).length,
+    '| unreachable:', unreachable.join(', ') || '(none)');
+  if (unreachable.length) {
+    console.error('REACH ERR: no power can create ' + unreachable.join(', '));
+    perrs++;
+  }
+  // and each one must actually place a living unit, not merely not throw
+  let placed = 0, failed = [];
+  for (const p of PD.Powers.POWERS) {
+    if (!p.race || !PD.Sim.RACES[p.race] || !PD.Sim.RACES[p.race].sentient) continue;
+    const before = pp.sim.units.filter(u => !u.dead && u.race === p.race).length;
+    fakeG.world = pp.world; fakeG.sim = pp.sim; fakeG.faith = 1e6;
+    const spot = PD.World.nearestLand(pp.world, 90, 60, 25);
+    if (spot) p.apply(fakeG, spot.x, spot.y);
+    const after = pp.sim.units.filter(u => !u.dead && u.race === p.race).length;
+    if (after > before) placed++; else failed.push(p.race);
+  }
+  fakeG.world = p1.world; fakeG.sim = p1.sim;
+  console.log('spawn powers that placed a living soul:', placed, failed.length ? '| failed: ' + failed.join(', ') : '');
+  if (failed.length) { console.error('REACH ERR: these powers placed nobody: ' + failed.join(', ')); perrs++; }
+}
+
 // ---- toggles must toggle ONCE ----
 // Sabbath and Omniscience flip a flag. Their greater forms carried reps:3,
 // so invokeAwe fired apply() three times and the flag landed exactly where a
