@@ -102,17 +102,21 @@ You are the One True God of a **3D pixel multiverse**:
   moving.
 - **Time actually runs backwards** — hold reverse and the world un-happens:
   cities unbuild, the dead rise out of the Beyond, fires un-burn, the sun
-  crosses the sky the wrong way. Keep going and you pass the first moment
-  into **un-creation** — the works undone, the land unshaped, then **the
-  formless Deep** (one lightless ocean, no sun) and finally **Nothing**: the
-  planet dissolves, the stars go out, and time itself stops.
+  crosses the sky the wrong way. Rewind to the edge of the record and it stops
+  there — unless you hold the leftmost notch, **⧏⧏⧏ Unmaking**, through a
+  two-second arming hold. Then you pass the first moment into **un-creation**:
+  the works undone, the land unshaped, then **the formless Deep** (one
+  lightless ocean, no sun) and finally **Nothing** — the planet dissolves, the
+  stars go out, and time itself stops. Press **U** at any point in it to take
+  the whole thing back.
 - **Then you create it again** — from Nothing, the **Genesis** suite gives
   you the seven words, one at a time: light, firmament, dry land, grass,
   the lights that start time moving, life, and rest.
 - **Time travel** — the chronicle also snapshots your world; rewind it, or
   **branch a parallel universe** from any recorded moment.
-- **A story, if you want it** — the **Testament tab** unfolds 12 chapters
-  (Genesis → the Wired Age → Eternity) with hints hidden behind a button.
+- **A story, if you want it** — the **Testament tab** unfolds 15 chapters
+  (The Shaping → the Wired Age → Turn Back → Before the Beginning → Let There
+  Be Light → Eternity) with hints hidden behind a button.
 - **Idle to the bone** — faith from worshippers, temples, faiths, wonders,
   and answered prayers; autosave every 20s; true offline progression with an
   away report; nothing ever ends.
@@ -137,7 +141,7 @@ You are the One True God of a **3D pixel multiverse**:
 | **Testament** | Great Flood · Ten Plagues · Anoint Prophet · Commandments · Confusion of Tongues |
 | **Omnipotence** | Midas Touch · Black Hole · Heaven's Host · Hell's Legion · Armageddon · Necropolis · Polymorph · Fountain of Youth · Fertility Rite · Rapture · Divine Aegis · Titanize |
 | **Godhead** | Divine Voice · Empower Hero · Miracle · Calm the Core · Guide Evolution · **Judgment Day** · **Omniscience** · **Unmake From History** · **Breath of Life** · **Sabbath** |
-| **Genesis** | Let There Be Light · Separate the Waters · Let Dry Land Appear · Bring Forth Grass · Lights in the Firmament · Bring Forth Life · Rest |
+| **Genesis** | Let There Be Light · Separate the Waters · Let Dry Land Appear · Bring Forth Grass · Lights in the Firmament · Bring Forth Life · Rest · **Undo the Unmaking** |
 
 Plus panel-driven powers: create/destroy/rename planets (Cosmos), answer or
 refuse prayers, resurrect/ascend/condemn souls (the Beyond), rewind or branch
@@ -154,7 +158,8 @@ time, and the Genesis Lab race designer.
 | `Space` · `0` | Pause |
 | `1`–`5` | Forward speeds (1× → 1000×) |
 | `,` `.` | Step the time dial down / up |
-| `R` | Reverse time |
+| `R` | Reverse time (hold `⧏⧏⧏` past the record to un-create the world) |
+| `U` | Undo the unmaking |
 | `[` `]` | Brush size |
 | `L` | Toggle town labels |
 | `Esc` | Close panel / deselect |

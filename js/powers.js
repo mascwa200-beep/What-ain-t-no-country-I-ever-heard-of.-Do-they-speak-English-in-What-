@@ -701,6 +701,12 @@
     // ---- Genesis: spoken over the face of the deep ----
     // These appear one at a time, only after time has been reversed past
     // the beginning. An empty world earns no faith, so creation is free.
+    // Offered beside the first word, for as long as the void lasts: the way
+    // back. Un-creation is the only act in the game with no other reverse.
+    { id: 'gen_undo', name: 'Undo the Unmaking', icon: '↩️', cat: 'genesis', cost: 0, radius: 0, cont: false,
+      color: 'rgba(150,210,255,1)', stage: 0,
+      desc: 'Think better of it. The world returns exactly as it stood the moment before it began to come apart.',
+      apply(G) { return typeof G.undoUnmaking === 'function' ? (G.undoUnmaking(), 0) : (snd('error'), 0); } },
     { id: 'gen_light', name: 'Let There Be Light', icon: '☀️', cat: 'genesis', cost: 0, radius: 0, cont: false,
       color: 'rgba(255,250,220,1)', stage: 0,
       desc: 'The first word. Stars kindle, a sun ignites, and the darkness upon the face of the deep is parted.',

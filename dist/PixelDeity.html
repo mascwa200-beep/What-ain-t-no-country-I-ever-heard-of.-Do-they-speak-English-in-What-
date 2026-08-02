@@ -89,7 +89,7 @@ body{
 .speed-btn.sep{pointer-events:none;opacity:0.35;padding:5px 2px;}
 #time-scale{font-family:ui-monospace,monospace;font-size:11px;}
 #time-stat .reversing{color:#ff8a6a;}
-#time-stat:has(.reversing){border-color:#7a2a20;}
+#time-stat.reversing{border-color:#7a2a20;}
 
 /* rewind: the world running backwards */
 #rewind-banner{
@@ -624,6 +624,7 @@ body{
         <li>🖱 <b>Left-drag / tap</b> uses your selected power · ✋ pan · wheel/pinch zoom</li>
         <li>🪐 The <b>Cosmos tab</b> holds your planets · 👻 the <b>Souls tab</b>, your afterlife</li>
         <li>📖 The <b>Testament tab</b> is your story — hints inside if you want them</li>
+        <li>⧏ The time dial runs <b>backwards</b> too (<b>R</b>) — far enough back and the world <b>un-creates</b>, and you speak it into being again</li>
         <li>💾 <b>Autosaves</b>; the world keeps turning while you're away</li>
       </ul>
       <button id="intro-start" class="big-btn">▶ LET THERE BE LIGHT</button>
@@ -653,7 +654,8 @@ body{
       <div class="menu-help">
         <b>Controls</b><br>
         WASD / arrows — pan · Wheel / pinch — zoom · worlds wrap around<br>
-        Space — pause · 1 / 2 / 3 — speed · 0 — pause<br>
+        Space — pause · 1–5 — forward speeds · 0 — pause<br>
+        , . — step the time dial · <b>R — run time backwards</b> · U — undo the unmaking<br>
         [ ] — brush size · L — labels · Esc — close/deselect<br>
         C — cosmos · P — prayers · H — history · M — menu<br><br>
         <b>Need help?</b> Hints live in the 📖 Testament tab.
@@ -5857,6 +5859,12 @@ void main(){ gl_FragColor = vCol; }`;
     // ---- Genesis: spoken over the face of the deep ----
     // These appear one at a time, only after time has been reversed past
     // the beginning. An empty world earns no faith, so creation is free.
+    // Offered beside the first word, for as long as the void lasts: the way
+    // back. Un-creation is the only act in the game with no other reverse.
+    { id: 'gen_undo', name: 'Undo the Unmaking', icon: '↩️', cat: 'genesis', cost: 0, radius: 0, cont: false,
+      color: 'rgba(150,210,255,1)', stage: 0,
+      desc: 'Think better of it. The world returns exactly as it stood the moment before it began to come apart.',
+      apply(G) { return typeof G.undoUnmaking === 'function' ? (G.undoUnmaking(), 0) : (snd('error'), 0); } },
     { id: 'gen_light', name: 'Let There Be Light', icon: '☀️', cat: 'genesis', cost: 0, radius: 0, cont: false,
       color: 'rgba(255,250,220,1)', stage: 0,
       desc: 'The first word. Stars kindle, a sun ignites, and the darkness upon the face of the deep is parted.',
@@ -6071,8 +6079,14 @@ void main(){ gl_FragColor = vCol; }`;
     { v: 1000,  label: '▶▶▶', name: 'Millennia' }
   ];
   const IDX_PAUSE = 4, IDX_NORMAL = 7;
+  const IDX_UNMAKING = 0;   // only this notch may un-create the world
   // ticks per displayed year (the HUD has always divided by 120)
   const TICKS_PER_YEAR = 120;
+
+  // A world remembers how un-created it is; the god's own progress through
+  // creation does not survive a reload on its own. This maps one back to the
+  // other so a save can always be resumed at the right word.
+  const CREATION_STAGE_BY_MODE = { nothing: 0, deep: 1, firmament: 2 };
   const $ = (s) => document.querySelector(s);
 
   const BIOME_NAMES = ['Deep Ocean', 'Water', 'Sand', 'Grassland', 'Forest', 'Dirt', 'Mountain', 'Snow', 'Desert', 'Jungle', 'Swamp', 'Ash', 'Hellrock', 'Lava', 'Cloudfield', 'Golden Meadow', 'Primordial Ooze', 'Voidstone'];
@@ -6431,6 +6445,11 @@ void main(){ gl_FragColor = vCol; }`;
       // stops on reload, and a mid-flood save loses _preFlood forever
       armageddon: G.armageddon, storm: G.storm, tornado: G.tornado,
       weather: G.weather, weatherT: G.weatherT,
+      // where we are in un-creation / creation. packPlanet already persists
+      // world.mode, so without these a save taken in the Deep or in Nothing
+      // reloads as a black empty sphere with the Genesis powers hidden.
+      speedIdx: G.speedIdx, creationStage: G.creationStage, dissolve: G.dissolve,
+      omniscient: !!G.omniscient, sabbath: !!G.sabbath, preSabbathIdx: G._preSabbathIdx,
       cam: G.r ? { lon: G.r.cam.lon, lat: G.r.cam.lat, dist: G.r.cam.dist } : null,
       cosmos: { nextId: Cosmos.C.nextId, activeId: Cosmos.C.activeId, customRaces: Cosmos.customRaces },
       planets: Cosmos.C.planets.map(packPlanet),
@@ -6472,8 +6491,33 @@ void main(){ gl_FragColor = vCol; }`;
       G.faith = d.faith != null ? d.faith : 60;
       G.faithTotal = d.faithTotal || 0;
       G.lastRace = d.lastRace || 'human';
-      // never resume a save mid-rewind
-      G.speed = (typeof d.speed === 'number') ? Math.max(0, d.speed) : 1;
+
+      // ---- creation state, and the guard that rescues soft-locked saves ----
+      G.creationStage = (d.creationStage != null) ? d.creationStage : null;
+      G.dissolve = d.dissolve || 0;
+      G.omniscient = !!d.omniscient;
+      G.sabbath = !!d.sabbath;
+      G._preSabbathIdx = d.preSabbathIdx;
+      // Builds before this one never stored creationStage, so their saves can
+      // come back as an un-created world with no way to create it again. The
+      // world's own mode is the one witness that survived — trust it over the
+      // absent field, and hand the player back the right word to speak.
+      const lp = Cosmos.getPlanet(Cosmos.C.activeId) || Cosmos.C.planets[0];
+      const lw = lp && lp.world;
+      if (G.creationStage == null && lw && CREATION_STAGE_BY_MODE[lw.mode] != null) {
+        G.creationStage = CREATION_STAGE_BY_MODE[lw.mode];
+        if (lw.mode === 'nothing') G.dissolve = 1;
+      }
+      // a restored game must never rewind against whatever buffer was lying
+      // around from the boot world
+      initRewind();
+
+      // never resume a save mid-rewind. Route through setSpeedIdx so the dial,
+      // G.speed and G.paused can't disagree — and so creation still holds time.
+      let si = (typeof d.speedIdx === 'number') ? d.speedIdx : null;
+      if (si == null) si = nearestScaleIdx(typeof d.speed === 'number' ? d.speed : 1);
+      setSpeedIdx(Math.max(IDX_PAUSE, si), true);
+
       G.stats = d.stats || G.stats;
       G.story = d.story || G.story;
       G.divinity = d.divinity || 0;
@@ -6552,9 +6596,38 @@ void main(){ gl_FragColor = vCol; }`;
     fullCap: 24        // ~7.5MB worst case
   };
 
+  // How long the ⧏⧏⧏ notch must be held, once the record runs out, before
+  // the world actually starts coming apart. Un-creation is the one act in the
+  // game that can't be walked back tile by tile, so it asks first.
+  const UNMAKE_ARM_MS = 2000;
+
   function initRewind() {
-    G.rewind = { fine: [], full: [], undo: null, stage: 0, prog: 0 };
+    G.rewind = {
+      fine: [], full: [], stage: 0, prog: 0,
+      undo: null,      // the last moment before the unmaking — the way home
+      armed: false,    // un-creation has actually begun
+      arm: 0,          // 0..1 progress through the arming hold
+      atFloor: false   // the record is exhausted; only ⧏⧏⧏ goes further
+    };
   }
+
+  // Put the world back the way it was the instant before it started to come
+  // apart. Reachable by key, and as the first power offered in the void.
+  function undoUnmaking() {
+    const rw = G.rewind;
+    if (!rw || !rw.undo) { flashToast('There is nothing to undo'); Audio8.sfx('error'); return false; }
+    restoreFull(rw.undo);
+    rw.undo = null; rw.armed = false; rw.arm = 0; rw.stage = 0; rw.prog = 0;
+    rw.atFloor = false; rw.fine.length = 0; rw.full.length = 0;
+    G.creationStage = null; G.dissolve = 0;
+    setSpeedIdx(IDX_PAUSE, true);
+    buildToolbar();
+    if (PD.Society) PD.Society.hist(G.sim, 'You thought better of it. The world is as it was.', 'legend');
+    flashToast('The unmaking is undone');
+    Audio8.sfx('levelup');
+    return true;
+  }
+  G.undoUnmaking = undoUnmaking;
 
   // Motion-only frame: ids + positions + hp as typed arrays (no JSON).
   function captureFine(sim) {
@@ -6650,6 +6723,7 @@ void main(){ gl_FragColor = vCol; }`;
   // Driven from loop() whenever G.speed < 0.
   function stepRewind(dt) {
     const rw = G.rewind; if (!rw) return;
+    G._reversed = true;   // the Testament notices, however you got here
     if (G.view.kind !== 'planet') { flashToast('Only living worlds can be rewound'); setSpeedIdx(IDX_PAUSE); return; }
     const p = Cosmos.active(); if (!p) return;
     const rate = Math.abs(G.speed);
@@ -6670,7 +6744,25 @@ void main(){ gl_FragColor = vCol; }`;
       budget -= REWIND.fineEvery;
     }
     if (!rw.fine.length) {
-      // past the beginning of the record — un-create the world itself
+      // Past the beginning of the record. This is where the world itself comes
+      // apart — so it takes a deliberate act, not the tail end of a scrub.
+      rw.atFloor = true;
+      if (!rw.armed) {
+        if (G.speedIdx !== IDX_UNMAKING) {
+          // any other reverse speed simply stops at the oldest recorded moment
+          rw.arm = 0;
+          p.world.dirtyMini = true;
+          return;
+        }
+        rw.arm = Math.min(1, rw.arm + dt / UNMAKE_ARM_MS);
+        if (rw.arm < 1) { p.world.dirtyMini = true; return; }
+        // the point of no return — take the one snapshot that can undo it
+        rw.armed = true;
+        rw.undo = captureFull(p);
+        if (PD.Society) PD.Society.hist(p.sim, 'The unmaking begins.', 'legend');
+        flashToast('The unmaking begins — press U to undo');
+        Audio8.sfx('quake');
+      }
       stepUncreate(p, dt, rate);
     }
     p.world.dirtyMini = true;
@@ -6738,6 +6830,7 @@ void main(){ gl_FragColor = vCol; }`;
       if (G.dissolve >= 1) {
         // time itself stops; only Genesis can start it again
         G.creationStage = 0;
+        G._sawNothing = true;
         setSpeedIdx(IDX_PAUSE, true);
         buildToolbar();
         flashToast('In the beginning…');
@@ -6749,8 +6842,17 @@ void main(){ gl_FragColor = vCol; }`;
     const rw = G.rewind;
     if (!rw) return null;
     if (rw.fine.length) return { t: '⟲ REWINDING', s: 'Year ' + Math.floor(G.sim.tick / TICKS_PER_YEAR) };
+    if (!rw.armed) {
+      // the record is spent. Say so honestly — this is not the whole of history
+      // running backwards, it is the edge of what was written down.
+      if (G.speedIdx !== IDX_UNMAKING) {
+        return { t: '⟲ THE RECORD BEGINS HERE', s: 'to go back further, hold ⧏⧏⧏ · the Unmaking' };
+      }
+      const bar = '█'.repeat(Math.round(rw.arm * 12)).padEnd(12, '░');
+      return { t: 'UNMAKING', s: bar + '  release to stop' };
+    }
     const st = UNCREATE_STAGES[Math.min(rw.stage, UNCREATE_STAGES.length - 1)];
-    return { t: st.name, s: st.sub };
+    return { t: st.name, s: st.sub + '  ·  press U to undo' };
   }
 
   // ================= Genesis: creation, step by step =================
@@ -6811,6 +6913,7 @@ void main(){ gl_FragColor = vCol; }`;
     } else if (stage === 6) {       // Rest
       G.faith += 500;
       G.creationStage = null;
+      G._recreated = true;          // a whole creation, spoken start to finish
       p.type = 'verdant';
       if (PD.Society) PD.Society.hist(sim, 'And on the seventh day: rest. It is good. +500 ✦', 'legend');
       flashToast('Creation complete · +500 ✦');
@@ -6840,7 +6943,7 @@ void main(){ gl_FragColor = vCol; }`;
 
   // ================= Testament story =================
   const CHAPTERS = [
-    { id: 'genesis', title: 'I. Genesis', text: 'In the beginning you hovered over the face of the waters. Shape the land. Raise mountains, plant forests.', hint: 'Use Raise Land or Grow Forest anywhere.', check: () => G._usedTerra },
+    { id: 'genesis', title: 'I. The Shaping', text: 'In the beginning you hovered over the face of the waters. Shape the land. Raise mountains, plant forests.', hint: 'Use Raise Land or Grow Forest anywhere.', check: () => G._usedTerra },
     { id: 'life', title: 'II. Breath of Life', text: 'Breathe life into the dust. Let peoples walk your world.', hint: 'Spawn any sentient race from the Life tab.', check: () => { let n = 0; for (const k of Sim.SENTIENT) n += G.sim.counts[k] || 0; return n >= 10; } },
     { id: 'watch', title: 'III. The Watchers', text: 'They build without your hand. Watch a village become a town.', hint: 'Wait, or feed a village with Bless/Miracle. A village must reach level 2.', check: () => G.sim.villages.some(v => v.level >= 2) },
     { id: 'prayer', title: 'IV. The First Prayer', text: 'They are starting to look up. Answer them.', hint: 'Open the Prayers tab (🙏) and answer 3 prayers.', check: () => (G._prayersAnswered || 0) >= 3 },
@@ -6852,6 +6955,10 @@ void main(){ gl_FragColor = vCol; }`;
     { id: 'return', title: 'X. Resurrection', text: 'Death answers to you. Bring one back.', hint: 'In the Souls tab, resurrect any soul.', check: () => G._resurrected },
     { id: 'cosmos', title: 'XI. Many Worlds', text: 'One world is a garden. Many is a cosmos. Create a second planet.', hint: 'Open the Cosmos tab (🪐) and create a planet.', check: () => Cosmos.C.planets.length >= 2 },
     { id: 'modern', title: 'XII. The Wired Age', text: 'Let a nation grow until it wires itself together and posts about you.', hint: 'A nation must reach the Modern era. Prosperous big nations advance faster.', check: () => PD.Society && PD.Society.ensure(G.sim).internetOn },
+    // The dial goes the other way too — and nothing in the game said so.
+    { id: 'turnback', title: 'XIII. Turn Back', text: 'Time has only ever run one way for them. It has never had to, for you. Take an hour of history back.', hint: 'The time dial runs left of the pause bar: ◀ ⧏ ⧏⧏ ⧏⧏⧏. Press R, or tap any arrow left of ❚❚.', check: () => G._reversed },
+    { id: 'before', title: 'XIV. Before the Beginning', text: 'Keep going. Past the first city, past the first breath, past the first morning — to the night that had no evening before it.', hint: 'Hold the leftmost notch (⧏⧏⧏ · Unmaking) once the record runs out. The works undo, the land unshapes, the deep goes dark. Press U at any point to take it all back.', check: () => G._sawNothing },
+    { id: 'recreate', title: 'XV. Let There Be Light', text: 'There is nothing, and you are still here. That was always the difference between you and everything else. Now say it again, from the first word.', hint: 'From Nothing, the Genesis powers appear one at a time: light, firmament, dry land, grass, the lights, life — then rest.', check: () => G._recreated },
     { id: 'eternity', title: '∞. Eternity', text: 'There is no ending. Shatter worlds, fork time, seed primordial oceans, and watch it all rise again. You are what remains.', hint: 'Everything. Forever.', check: () => false }
   ];
   function stepStory() {
@@ -6960,7 +7067,10 @@ void main(){ gl_FragColor = vCol; }`;
     if (G.hudTimer > 250) {
       refreshHUD(); if (G.selected) refreshPanelSel();
       refreshOpenPanel();
-      if (G.speed > 0) stepStory();
+      // the story advances whichever way time is running — the chapters about
+      // reversal and un-creation would otherwise only land once you went
+      // forward again, long after the moment they describe
+      stepStory();
       G.hudTimer = 0;
     }
 
@@ -6999,11 +7109,15 @@ void main(){ gl_FragColor = vCol; }`;
         const txt = rewindBannerText();
         if (txt) {
           ban.classList.add('show');
-          ban.innerHTML = `<div class="rw-title">${txt.t}</div><div class="rw-sub">${txt.s}</div>`;
+          // only touch the DOM when the words actually change — this used to
+          // rewrite innerHTML on every single frame of a rewind
+          const html = `<div class="rw-title">${txt.t}</div><div class="rw-sub">${txt.s}</div>`;
+          if (html !== G._banHtml) { ban.innerHTML = html; G._banHtml = html; }
         }
       }
     } else if (ban && ban.classList.contains('show')) {
       ban.classList.remove('show');
+      G._banHtml = null;
     }
     // tornado funnel: a rising spiral of dust in true 3D
     if (G.tornado) {
@@ -7181,6 +7295,7 @@ void main(){ gl_FragColor = vCol; }`;
       else if (k === ',') setSpeedIdx(G.speedIdx - 1);
       else if (k === '.') setSpeedIdx(G.speedIdx + 1);
       else if (k === 'r') setSpeedIdx(G.speed < 0 ? Math.max(0, G.speedIdx - 1) : IDX_PAUSE - 1);
+      else if (k === 'u') undoUnmaking();
       else if (k === '=' || k === '+') zoomBy(1.2);
       else if (k === '-' || k === '_') zoomBy(1 / 1.2);
       else if (k === 'escape') {
@@ -7226,21 +7341,26 @@ void main(){ gl_FragColor = vCol; }`;
     G.speed = TIME_SCALES[i].v;
     G.paused = (G.speed === 0);
     if (G.speed <= 0) G.acc = 0;
+    if (G.speed < 0) G._reversed = true;   // the Testament notices
+    // letting go of reverse abandons a half-finished arming hold
+    if (G.speed >= 0 && G.rewind) { G.rewind.arm = 0; G.rewind.atFloor = false; }
     document.querySelectorAll('.speed-btn').forEach(b => b.classList.toggle('active', +b.dataset.idx === i));
     // audio follows the arrow of time
     if (Audio8.setTimeDirection && (prev < 0) !== (G.speed < 0)) Audio8.setTimeDirection(G.speed < 0 ? -1 : 1);
     if (!quiet) Audio8.sfx('click');
     refreshHUD();
   }
-  // numeric entry point (hotkeys, saves): snap to the nearest scale stop
-  function setSpeed(v) {
+  // snap a raw multiplier to the nearest stop on the dial
+  function nearestScaleIdx(v) {
     let best = IDX_PAUSE, bd = Infinity;
     for (let i = 0; i < TIME_SCALES.length; i++) {
       const d = Math.abs(TIME_SCALES[i].v - v);
       if (d < bd) { bd = d; best = i; }
     }
-    setSpeedIdx(best);
+    return best;
   }
+  // numeric entry point (hotkeys, saves): snap to the nearest scale stop
+  function setSpeed(v) { setSpeedIdx(nearestScaleIdx(v)); }
   function togglePause() {
     if (G.paused) setSpeedIdx(G._lastIdx || IDX_NORMAL);
     else { G._lastIdx = G.speedIdx; setSpeedIdx(IDX_PAUSE); }
@@ -7273,8 +7393,9 @@ void main(){ gl_FragColor = vCol; }`;
     for (const cat of Powers.CATEGORIES) {
       let powers = Powers.POWERS.filter(x => x.cat === cat.id);
       if (cat.id === 'genesis') {
-        // one word at a time, in order
-        powers = creating ? powers.filter(x => x.stage === G.creationStage) : [];
+        // one word at a time, in order — plus the way back, while there is one
+        powers = creating ? powers.filter(x => x.stage === G.creationStage &&
+          (x.id !== 'gen_undo' || (G.rewind && G.rewind.undo))) : [];
       } else if (creating) {
         // nothing else can be done to a world that does not yet exist
         powers = powers.filter(x => x.cat === 'god');
@@ -7348,6 +7469,10 @@ void main(){ gl_FragColor = vCol; }`;
         (yps >= 1 ? yps.toFixed(0) + ' yr/s' : (1 / yps).toFixed(0) + ' s/yr');
       ts.textContent = sc.name + ' · ' + rate;
       ts.classList.toggle('reversing', sc.v < 0);
+      // mark the container too, so the border can be styled without :has()
+      // (unsupported on the older WebViews this ships down to)
+      const tstat = $('#time-stat');
+      if (tstat) tstat.classList.toggle('reversing', sc.v < 0);
     }
     const c = G.sim.counts;
     const rc = $('#race-counts'); rc.innerHTML = '';
