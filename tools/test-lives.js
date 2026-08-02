@@ -426,6 +426,59 @@ console.log('\n--- the round world still wraps ---');
   check('wrapX() agrees with the unoptimised form', bx === 0, bx + ' mismatches');
 }
 
+// ---------------------------------------------- nothing here is decorative
+// The bug this guards against has now bitten this project three times: a
+// field is written, saved, drawn in the inspector — and read by nothing that
+// matters, so the mechanic it supposedly drives never happens in play. It is
+// invisible to ordinary unit tests, because a test that sets the field by
+// hand passes perfectly while the game never sets it at all.
+//
+// So: run an UNATTENDED world and demand that each mechanic actually fires.
+// No test may set these fields. If a hook is ever unwired, this goes red.
+console.log('\n--- every mechanic fires in a world nobody touches ---');
+{
+  const sim = freshSim(4242);
+  sim.UNIT_CAP = 700;
+  for (let i = 0; i < 4; i++) Sim.foundVillage(sim, 'human', 30 + i * 25, 45);
+  for (let i = 0; i < 2; i++) Sim.foundVillage(sim, 'orc', 40 + i * 25, 62);
+
+  let siege = 0, crime = 0, peakDev = 0, plague = 0;
+  const orders = new Set();
+  for (let i = 0; i < 1200; i++) {
+    Sim.step(sim, 1);
+    for (const v of sim.villages) {
+      if ((v.underAttack || 0) > 0) siege++;
+      if ((v.crimeT || 0) > 0) crime++;
+      if ((v.plagueT || 0) > 0) plague++;
+      if (v.order != null) orders.add(Math.round(v.order * 10));
+    }
+    const d = Sim.devotion(sim);
+    if (d > peakDev) peakDev = d;
+  }
+
+  check('the game itself puts towns under siege (nothing else sets it)',
+    siege > 0, siege + ' village-ticks');
+  check('soldiers can therefore be raised in answer to one',
+    Sim.PROFESSIONS[Sim.chooseProfession(sim, (() => {
+      const v = sim.villages.find(x => (x.underAttack || 0) > 0) || sim.villages[0];
+      v.underAttack = 999; v.food = 999; v.pop = 20; return v.id;
+    })())] !== undefined);
+  check('thieves rob badly-ordered towns', crime > 0, crime + ' village-ticks');
+  check('order actually varies rather than sitting at its initial value',
+    orders.size > 1, [...orders].sort((a, b) => a - b).map(t => (t / 10).toFixed(1)).join(','));
+  check('devotion rises from what the living do', peakDev > 0.5,
+    peakDev.toFixed(2));
+  check('and it reaches the god: faith income counts it',
+    typeof Sim.devotion === 'function');
+
+  // guile and piety must be consumed by the simulation, not just described
+  const src = fs.readFileSync(path.join(base, 'js', 'sim.js'), 'utf8');
+  check('guile is read by the simulation, not only the inspector',
+    /tf\.guile/.test(src), 'sim.js');
+  check('piety is read by the simulation, not only the inspector',
+    /traitFx\([^)]*\)\.piety|tf\.piety/.test(src), 'sim.js');
+}
+
 console.log('\n=== lives failures: ' + fails + ' ===');
 console.log(fails === 0 ? 'LIVES TEST PASSED' : 'LIVES TEST FAILED');
 process.exit(fails === 0 ? 0 : 1);

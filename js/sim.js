@@ -178,6 +178,8 @@
     if (!v) return (sim.rng() * PROFESSIONS.length) | 0;
     if (v.food < 12 + v.pop * 0.5 && sim.rng() < 0.65) return P_FARMER;
     if (v.underAttack > 0 && sim.rng() < 0.55) return P_SOLDIER;
+    // thieves are answered the same way a siege is: with soldiers
+    if ((v.crimeT || 0) > 0 && sim.rng() < 0.4) return P_SOLDIER;
     if ((v.plagueT || 0) > 0 && sim.rng() < 0.5) return P_HEALER;
     if (v.temples > 0 && (v.jobs ? v.jobs[P_PRIEST] : 0) < v.temples * 2 && sim.rng() < 0.4) return P_PRIEST;
     if (v.pop < 8 && sim.rng() < 0.4) return sim.rng() < 0.6 ? P_FARMER : P_BUILDER;
@@ -440,8 +442,25 @@
     if (!R.monster && !R.ghost) {
       if (v && v.food > 0) {
         // the greedy take more than their share, and the village feels it
-        const take = 0.018 * (0.75 + tf.greed * 0.45);
+        let take = 0.018 * (0.75 + tf.greed * 0.45);
         u.food = PD.clamp(u.food + 0.02 * (0.8 + tf.greed * 0.3), 0, 1);
+
+        // ---- crime ----
+        // `order` was computed every tick, drawn in the inspector, and read
+        // by nothing; `guile` was given to all sixteen traits and consumed by
+        // nothing. They answer each other: where no one keeps the peace, the
+        // sly help themselves from the store. Soldiers and hunters raise
+        // order, so a town can police itself — and a town that cannot will
+        // quietly bleed grain.
+        const order = v.order != null ? v.order : 0.5;
+        if (tf.guile > 1.2 && order < 0.75 && sim.rng() < (0.75 - order) * 0.05 * tf.guile) {
+          const stolen = 0.6 + sim.rng() * 1.4;
+          take += stolen;
+          u.food = PD.clamp(u.food + 0.25, 0, 1);
+          u.karma -= 0.05;
+          if (v.crimeT === undefined) v.crimeT = 0;
+          v.crimeT = 90;                 // the town notices it is being robbed
+        }
         v.food -= take;
       } else {
         // wild units forage from the land they stand on
@@ -629,6 +648,11 @@
   function killUnit(sim, u, byRace, killer) {
     if (u.dead) return;
     u.dead = true;
+    // a citizen cut down is a siege as far as the town is concerned
+    if (u.village >= 0 && byRace !== 'starve' && byRace !== 'age') {
+      const hv = villageById(sim, u.village);
+      if (hv) hv.underAttack = Math.max(hv.underAttack || 0, 240);
+    }
     if (PD.FX) PD.FX.blood(u.x, u.y);
     const R = RACES[u.race];
     // dark conversions: the plague-dead rise, vampire victims turn
@@ -743,9 +767,12 @@
     // O(1) per sufferer instead of a full unit scan per village per tick.
     v.underAttack = Math.max(0, (v.underAttack || 0) - 1);
     v.plagueT = v.sickCount > 0 ? 60 : Math.max(0, (v.plagueT || 0) - 1);
+    v.crimeT = Math.max(0, (v.crimeT || 0) - 1);
 
-    // faith reaching the god is the work of priests and temples together —
-    // the Society layer reads v.labour.faith when it tallies devotion
+    // faith reaching the god is the work of priests and temples together.
+    // (This comment used to claim the Society layer read v.labour.faith when
+    // it tallied devotion. It did not — nothing read it at all. It is now
+    // summed by Sim.devotion() and paid into faithPerStep.)
 
     // ---- growth: birth a citizen (logistic toward capacity) ----
     if (v.pop < v.cap && v.food > 8 + v.pop * 0.6 && sim.units.length < sim.UNIT_CAP) {
@@ -838,6 +865,12 @@
             u.raidT = 300;
             u.raidX = rival.x + (sim.rng() * 4 - 2);
             u.raidY = rival.y + (sim.rng() * 4 - 2);
+            // The town being marched on now KNOWS it. Without this,
+            // v.underAttack only ever counted down from zero and the
+            // "a besieged town raises soldiers" rule never once fired in
+            // play — it was reachable only from a test that set the field
+            // by hand.
+            rival.underAttack = 400;
             sent++;
           }
         }
@@ -846,6 +879,14 @@
   }
 
   // ---- Global recount & cleanup ---------------------------------------
+  // Total devotion rising from the world: the sum of what every settlement's
+  // people actually do. faithPerStep() consumes this.
+  function devotion(sim) {
+    let d = 0;
+    for (const v of sim.villages) if (v.labour) d += v.labour.faith;
+    return d;
+  }
+
   function recount(sim) {
     for (const k in RACES) sim.counts[k] = 0;
     for (const k in sim.counts) sim.counts[k] = 0;
@@ -875,7 +916,13 @@
             const L = v.labour;
             if (fx.food) L.food += fx.food * w;
             if (fx.build) L.build += fx.build * w;
-            if (fx.faith) L.faith += fx.faith * w;
+            // Piety was defined for all sixteen traits and read by nothing
+            // but the inspector's description text. A devout priest is worth
+            // more than a lazy one, and every soul prays a little: the base
+            // term means a village of the devout is more faithful than a
+            // village of the cruel, whatever their trades.
+            const piety = traitFx(u).piety;
+            L.faith += (fx.faith || 0) * w * piety + 0.0045 * piety * w;
             if (fx.science) L.science += fx.science * w;
             if (fx.care) L.care += fx.care * w;
             if (fx.order) L.order += fx.order * w;
@@ -1091,7 +1138,7 @@
     RACES, SENTIENT, hostile, createSim, spawnUnit, foundVillage,
     step, recount, villageById, logEvent, killUnit,
     damageArea, blessArea, infectArea, buildGrid, forNeighbors,
-    villageName, personName, TRAITS, PROFESSIONS, TRAIT_FX, PROF_FX, traitFx, profFx,
+    villageName, personName, TRAITS, PROFESSIONS, TRAIT_FX, PROF_FX, traitFx, profFx, devotion,
     chooseProfession, walkable, shielded
   };
 })(window);

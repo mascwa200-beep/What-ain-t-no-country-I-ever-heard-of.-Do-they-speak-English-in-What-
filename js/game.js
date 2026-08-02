@@ -141,6 +141,11 @@
     let temples = 0, wonders = 0;
     for (const v of G.sim.villages) { temples += v.temples; wonders += v.wonders || 0; }
     let f = 0.04 + pop * 0.014 + temples * 0.22 + wonders * 0.8;
+    // What the living actually do. Priests, temples and the piety of every
+    // ordinary soul are summed by the labour census; before this, faith was
+    // a function of headcount and buildings alone, and a world of devout
+    // priests paid a god exactly what a world of cruel merchants did.
+    if (Sim.devotion) f += Sim.devotion(G.sim) * 0.22;
     if (PD.Society) f += PD.Society.faithBonus(G.sim);
     // Divinity: each transcendence permanently multiplies the flow of faith
     return f * (1 + G.divinity * 0.25);
@@ -1767,7 +1772,10 @@
     return `<div class="ins-row"><span>Trades</span><b style="text-align:right">${roster}</b></div>` +
       `<div class="ins-row"><span>Harvest</span><b>+${(L.food || 0).toFixed(2)}/t</b></div>` +
       (L.science > 0.01 ? `<div class="ins-row"><span>Study</span><b>${(L.science || 0).toFixed(2)}/t</b></div>` : '') +
-      (v.order != null ? `<div class="ins-bar"><span>Order</span>${bar(v.order, '#7aa0e0')}</div>` : '') +
+      (v.order != null ? `<div class="ins-bar"><span>Order</span>${bar(v.order, v.order < 0.35 ? '#e07a7a' : '#7aa0e0')}</div>` : '') +
+      ((v.underAttack || 0) > 0 ? `<div class="ins-row war"><span>⚔ Under attack</span><b>raising soldiers</b></div>` : '') +
+      ((v.crimeT || 0) > 0 ? `<div class="ins-row war"><span>🗝 Thieves</span><b>the store is being robbed</b></div>` : '') +
+      ((v.plagueT || 0) > 0 ? `<div class="ins-row war"><span>☣ Sickness</span><b>${v.sickCount || 0} afflicted</b></div>` : '') +
       (v.morale != null ? `<div class="ins-bar"><span>Morale</span>${bar(v.morale, '#c48ae0')}</div>` : '');
   }
 
