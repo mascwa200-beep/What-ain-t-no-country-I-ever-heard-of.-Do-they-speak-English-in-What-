@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <meta name="theme-color" content="#0a0e1a">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -20,9 +20,25 @@
   --good:#57d977; --bad:#ff6752; --accent:#8ab2ff;
   --shadow:0 10px 30px rgba(0,0,0,0.45);
   --glass:blur(18px) saturate(1.3);
+
+  /* ---- layout metrics -------------------------------------------------
+     Everything that positions chrome derives from these. Before this, every
+     offset was a magic px literal and nothing knew how tall the screen was,
+     so on a landscape phone the HUD painted over the canvas and the intro
+     card's start button sat below the fold with no way to scroll to it. */
+  --sa-t:env(safe-area-inset-top, 0px);
+  --sa-r:env(safe-area-inset-right, 0px);
+  --sa-b:env(safe-area-inset-bottom, 0px);
+  --sa-l:env(safe-area-inset-left, 0px);
+  --hud-h:clamp(40px, 7.5vh, 54px);      /* the top bar, shorter on short screens */
+  --tab:clamp(34px, 8.2vh, 44px);        /* tab-rail button size */
+  --gap:clamp(6px, 1.2vh, 10px);
+  --chrome-top:calc(var(--hud-h) + var(--sa-t) + var(--gap));
 }
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
 html,body{height:100%;overflow:hidden;background:var(--bg);}
+/* dvh where supported: the URL bar collapsing must not clip the chrome */
+@supports (height:100dvh){ html,body{height:100dvh;} }
 body{
   font-family:'Inter','SF Pro Display','Segoe UI',system-ui,sans-serif;
   color:var(--ink);user-select:none;
@@ -44,21 +60,40 @@ body{
 
 /* ---------- Top HUD ---------- */
 #hud-top{
-  position:absolute;top:0;left:0;right:0;height:54px;z-index:20;
-  display:flex;align-items:center;justify-content:space-between;
-  padding:0 12px;gap:10px;
+  position:absolute;top:0;left:0;right:0;z-index:20;
+  height:calc(var(--hud-h) + var(--sa-t));
+  padding:var(--sa-t) calc(12px + var(--sa-r)) 0 calc(12px + var(--sa-l));
+  display:flex;align-items:center;justify-content:space-between;gap:10px;
   background:rgba(8,11,22,0.6);
   border-bottom:1px solid var(--edge);
   backdrop-filter:var(--glass);-webkit-backdrop-filter:var(--glass);
+  /* a fixed-height bar must never let its contents paint outside it */
+  overflow:hidden;
 }
 .logo,.intro-logo{
   font-weight:800;letter-spacing:3px;
   font-size:19px;background:linear-gradient(120deg,#ffd257,#ff9d5c);-webkit-background-clip:text;background-clip:text;color:transparent;filter:drop-shadow(0 2px 6px rgba(255,180,60,0.35));
 }
 .logo span,.intro-logo span{background:linear-gradient(120deg,#8ab2ff,#c48aff);-webkit-background-clip:text;background-clip:text;color:transparent;}
-.hud-center{display:flex;align-items:center;gap:8px;flex:1;justify-content:center;flex-wrap:wrap;}
-.hud-left{min-width:120px;}
-.hud-right{display:flex;align-items:center;gap:6px;}
+/* One row, always. Wrapping inside a fixed-height bar is what painted the
+   stats over the canvas; overflowing sideways is scrollable and honest. */
+.hud-center{
+  display:flex;align-items:center;gap:8px;flex:1 1 auto;justify-content:center;
+  flex-wrap:nowrap;min-width:0;overflow-x:auto;overflow-y:hidden;
+  scrollbar-width:none;-ms-overflow-style:none;
+}
+.hud-center::-webkit-scrollbar{display:none;}
+.hud-left{min-width:0;flex:0 1 auto;overflow:hidden;}
+/* The dial alone is ~380px; on a narrow screen the whole right cluster used to
+   run off the edge and take the save/menu buttons with it. Let it shrink and
+   scroll rather than escape. */
+.hud-right{
+  display:flex;align-items:center;gap:6px;flex:0 1 auto;
+  min-width:0;overflow-x:auto;overflow-y:hidden;
+  scrollbar-width:none;-ms-overflow-style:none;
+}
+.hud-right::-webkit-scrollbar{display:none;}
+.hud-right > *{flex:0 0 auto;}
 
 .stat{
   font-family:inherit;font-size:13px;font-weight:700;
@@ -69,7 +104,7 @@ body{
 .stat.faith{color:var(--gold);border-color:#6a5a1a;background:#1a1806;}
 .stat.faith .stat-ico{font-size:14px;}
 .stat.faith small{color:#b09a40;font-size:10px;font-weight:400;}
-.race-counts{display:flex;gap:4px;flex-wrap:wrap;}
+.race-counts,#race-counts{display:flex;gap:4px;flex-wrap:nowrap;flex:0 0 auto;}
 .race-chip{
   font-family:inherit;font-size:12px;font-weight:700;
   background:var(--panel);border:1px solid var(--edge);border-radius:8px;
@@ -114,7 +149,11 @@ body{
 
 /* ---------- Toolbar ---------- */
 #toolbar{
-  position:absolute;left:10px;top:62px;bottom:10px;width:200px;z-index:15;
+  position:absolute;z-index:15;
+  left:calc(10px + var(--sa-l));
+  top:var(--chrome-top);
+  bottom:calc(var(--gap) + var(--sa-b));
+  width:clamp(150px, 22vw, 200px);
   background:var(--panel);
   backdrop-filter:var(--glass);-webkit-backdrop-filter:var(--glass);
   border:1px solid var(--edge);border-radius:18px;
@@ -163,12 +202,21 @@ body{
 }
 
 /* ---------- Right tab rail ---------- */
+/* Bounded and scrollable. It needed 458px of height and never asked whether
+   the screen had it — Testament and Time simply fell off the bottom. */
 #tab-rail{
-  position:absolute;right:8px;top:64px;z-index:18;
-  display:flex;flex-direction:column;gap:6px;
+  position:absolute;z-index:18;
+  right:calc(8px + var(--sa-r));
+  top:var(--chrome-top);
+  max-height:calc(100% - var(--chrome-top) - var(--gap) - var(--sa-b));
+  display:flex;flex-direction:column;gap:var(--gap);
+  overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;
+  scrollbar-width:none;-ms-overflow-style:none;padding:1px;
 }
+#tab-rail::-webkit-scrollbar{display:none;}
 .side-tab{
-  position:relative;width:44px;height:44px;font-size:19px;line-height:1;
+  position:relative;flex:0 0 auto;
+  width:var(--tab);height:var(--tab);font-size:clamp(15px,3.4vh,19px);line-height:1;
   background:var(--panel);border:1px solid var(--edge);border-radius:14px;
   backdrop-filter:var(--glass);-webkit-backdrop-filter:var(--glass);
   cursor:pointer;box-shadow:var(--shadow);transition:all .15s;
@@ -185,7 +233,11 @@ body{
 
 /* ---------- Side panels ---------- */
 .side-panel{
-  position:absolute;right:60px;top:62px;bottom:10px;width:330px;z-index:17;
+  position:absolute;z-index:17;
+  right:calc(var(--tab) + 16px + var(--sa-r));
+  top:var(--chrome-top);
+  bottom:calc(var(--gap) + var(--sa-b));
+  width:min(330px, calc(100vw - var(--tab) - 32px - var(--sa-l) - var(--sa-r)));
   background:rgba(14,19,38,0.82);
   backdrop-filter:var(--glass);-webkit-backdrop-filter:var(--glass);
   border:1px solid var(--edge2);border-radius:18px;
@@ -320,8 +372,16 @@ body{
 .gen-flags input{accent-color:var(--gold);}
 
 /* ---------- Inspect panel ---------- */
+/* The one panel outside the (correct) .panel-scroll system: it had no bottom,
+   no max-height and no overflow, so a village dossier ran straight off the
+   bottom edge with no way to reach the buttons. */
 #inspect{
-  position:absolute;right:60px;top:62px;width:230px;z-index:15;
+  position:absolute;z-index:15;
+  right:calc(var(--tab) + 16px + var(--sa-r));
+  top:var(--chrome-top);
+  width:230px;
+  max-height:calc(100% - var(--chrome-top) - var(--gap) - var(--sa-b));
+  overflow-y:auto;overscroll-behavior:contain;
   background:rgba(14,19,38,0.85);
   backdrop-filter:var(--glass);-webkit-backdrop-filter:var(--glass);
   border:1px solid var(--edge2);border-radius:16px;padding:14px;
@@ -357,7 +417,10 @@ body{
 /* ---------- Chronicle / event log ---------- */
 #chronicle{
   /* sits above the canvas-drawn minimap, left of the tab rail */
-  position:absolute;right:60px;bottom:112px;width:230px;max-height:170px;z-index:14;
+  position:absolute;z-index:14;
+  right:calc(var(--tab) + 16px + var(--sa-r));
+  bottom:calc(102px + var(--sa-b));
+  width:230px;max-height:min(170px, 34vh);
   background:rgba(14,19,38,0.7);
   backdrop-filter:var(--glass);-webkit-backdrop-filter:var(--glass);
   border:1px solid var(--edge);border-radius:14px;padding:10px 12px;
@@ -382,18 +445,28 @@ body{
 #toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
 
 /* ---------- Modals ---------- */
+/* A centred flex child taller than its container clips at BOTH ends and
+   cannot be scrolled to — which put "LET THERE BE LIGHT" 51px below the fold
+   on a landscape phone, unreachable. Scroll the overlay, and never let the
+   card exceed the viewport. */
 .modal-overlay{
   position:absolute;inset:0;z-index:50;display:none;
-  align-items:center;justify-content:center;padding:16px;
+  align-items:center;justify-content:center;
+  padding:calc(12px + var(--sa-t)) calc(12px + var(--sa-r))
+          calc(12px + var(--sa-b)) calc(12px + var(--sa-l));
   background:rgba(4,6,14,0.82);backdrop-filter:blur(3px);
+  overflow-y:auto;overscroll-behavior:contain;
 }
 .modal-overlay.show{display:flex;animation:fade .2s;}
 @keyframes fade{from{opacity:0;}to{opacity:1;}}
 .modal{
   background:rgba(16,22,42,0.9);
   backdrop-filter:var(--glass);-webkit-backdrop-filter:var(--glass);
-  border:1px solid var(--edge2);border-radius:22px;padding:26px;
+  border:1px solid var(--edge2);border-radius:22px;
+  padding:clamp(14px, 3.4vh, 26px);
   max-width:440px;width:100%;box-shadow:0 8px 0 rgba(0,0,0,0.5);text-align:center;
+  max-height:100%;overflow-y:auto;overscroll-behavior:contain;
+  margin:auto;flex:0 0 auto;
 }
 .modal-title{font-family:inherit;font-weight:900;font-size:18px;color:var(--gold);margin-bottom:14px;}
 .big-btn{
@@ -434,25 +507,51 @@ body{
 
 #intro.hide,.modal-overlay.hide{display:none!important;}
 
-/* ---------- Responsive ---------- */
+/* ---------- Responsive ----------
+   Width was the only axis handled before. On a landscape phone the screen is
+   WIDE and SHORT — height is what actually runs out, so it gets its own
+   queries here. */
 @media (max-width:760px){
-  #toolbar{width:150px;top:56px;}
+  #toolbar{width:clamp(140px, 30vw, 172px);}
   .tool-grid{grid-template-columns:1fr;}
   .tool{flex-direction:row;justify-content:flex-start;gap:6px;padding:6px;}
   .tool-name{font-size:10px;}
-  #inspect{width:170px;}
-  #chronicle{width:170px;max-height:140px;}
-  .hud-center .stat:not(.faith){display:none;}
+  #inspect{width:min(200px, 46vw);}
+  #chronicle{width:min(190px, 44vw);}
   .logo{font-size:14px;}
-  .hud-left{min-width:70px;}
-  .side-panel{width:calc(100vw - 66px);max-width:320px;}
-  .side-tab{width:38px;height:38px;font-size:16px;}
   #planet-name{max-width:80px;font-size:9px;}
+  /* keep faith and the time readout; the rest is a swipe away in the scroller */
+  .hud-center .stat:not(.faith){display:none;}
+  .speed-btn{padding:5px 5px;}
 }
 @media (max-width:520px){
   #chronicle{display:none;}
   #power-info #power-desc{min-height:auto;}
-  #tab-rail{top:58px;}
+}
+
+/* Short screens: shed vertical bulk so the content fits instead of clipping.
+   A 851x373 landscape phone hits every one of these. */
+@media (max-height:520px){
+  .intro-logo{font-size:24px;}
+  .intro-art{font-size:18px;margin:4px 0 8px;}
+  .intro-sub{margin-bottom:8px;}
+  .intro-text{font-size:12px;line-height:1.4;margin-bottom:8px;}
+  .intro-tips{font-size:11px;line-height:1.45;}
+  .big-btn{margin-top:10px;padding:10px 20px;}
+  .modal-title{margin-bottom:9px;}
+  .menu-btn{padding:9px;}
+  .menu-help{line-height:1.5;}
+  #power-info{padding:6px 8px;}
+  #power-desc{min-height:0;}
+  .brush-hint{display:none;}
+}
+@media (max-height:400px){
+  /* the last of the fat: the intro drops to headline + tips + the button */
+  .intro-art,.intro-sub{display:none;}
+  .intro-text{font-size:11px;line-height:1.35;}
+  .intro-tips li:nth-child(n+4){display:none;}
+  #chronicle{display:none;}
+  .menu-help{display:none;}
 }
 
 </style>
@@ -7386,7 +7485,21 @@ void main(){ gl_FragColor = vCol; }`;
       if (e.key === ']') { G.power.radius = Math.min(14, G.power.radius + 1); G.ui.brushRadius = G.power.radius; }
     });
 
-    global.addEventListener('resize', () => G.r.resize());
+    // Resize was the only hook, and it fires neither on an orientation flip nor
+    // when the system bars slide in and change the usable height. Coalesce all
+    // three into one rAF-debounced pass so a drag-resize can't thrash the
+    // weather particle reallocation inside resize().
+    let resizeRaf = 0;
+    const onViewportChange = () => {
+      if (resizeRaf) return;
+      resizeRaf = requestAnimationFrame(() => { resizeRaf = 0; G.r.resize(); });
+    };
+    global.addEventListener('resize', onViewportChange);
+    global.addEventListener('orientationchange', onViewportChange);
+    if (global.visualViewport) {
+      global.visualViewport.addEventListener('resize', onViewportChange);
+      global.visualViewport.addEventListener('scroll', onViewportChange);
+    }
     global.addEventListener('blur', () => { keys = {}; });
     global.addEventListener('beforeunload', () => { try { save(); } catch (e) {} });
     document.addEventListener('visibilitychange', () => {
