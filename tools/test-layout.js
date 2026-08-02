@@ -105,6 +105,11 @@ fs.writeFileSync(probeFile, fs.readFileSync(path.join(base, 'index.html'), 'utf8
   .replace('</body>', PROBE));
 
 let failures = 0;
+// The chrome the browser reserves is a property of the BUILD, not of the
+// window — so measure it once and reuse it. Without this the convergence
+// below doubles every launch, which took the CI layout step from ~4 minutes
+// to 9 and put the job within two minutes of its own timeout.
+let chromeOff = null;
 try {
   for (const s of SIZES) {
     // Ask for a window, see what viewport we actually got, correct, ask
@@ -133,16 +138,21 @@ try {
 
     let dom;
     try {
-      let winW = s.w, winH = s.h;
+      // apply the known offset up front; only re-shoot if we still missed
+      let winW = s.w + (chromeOff ? chromeOff.w : 0);
+      let winH = s.h + (chromeOff ? chromeOff.h : 0);
       dom = shoot(winW, winH);
       const first = peek(dom);
       if (first && (first.vw !== s.w || first.vh !== s.h)) {
-        winW += s.w - first.vw;
-        winH += s.h - first.vh;
+        const dw = s.w - first.vw, dh = s.h - first.vh;
+        chromeOff = { w: (winW - s.w) + dw, h: (winH - s.h) + dh };
+        winW += dw; winH += dh;
         if (winW > 0 && winH > 0) {
           const again = shoot(winW, winH);
           if (peek(again)) dom = again;
         }
+      } else if (first && !chromeOff) {
+        chromeOff = { w: winW - s.w, h: winH - s.h };
       }
     } catch (e) {
       console.log('  SKIP ' + s.name + ' — browser unavailable (' + e.code + ')');
