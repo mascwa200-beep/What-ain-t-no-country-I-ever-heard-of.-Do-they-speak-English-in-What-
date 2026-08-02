@@ -80,10 +80,21 @@ const PROBE = `
   // they can never block anything. They are still checked as victims.
   var NEVER_CULPRIT = { '#toast': 1, '#rewind-banner': 1 };
 
+  // setTimeout ONLY — never requestAnimationFrame.
+  //
+  // Under --virtual-time-budget, headless Chrome produces no animation
+  // frames at all: there is no compositor driving them. A settle that awaits
+  // a double-rAF therefore never resolves, the probe emits nothing, and the
+  // run is indistinguishable from a browser that failed to launch. Verified
+  // directly: a page that awaits setTimeout reaches its next statement, and
+  // the identical page awaiting rAF does not.
+  //
+  // The same fact means the game's own rAF loop never runs here either, so
+  // the DOM is naturally stable between setup and measurement. G.running is
+  // still set false below — belt and braces, and it keeps this correct if
+  // the suite ever moves off virtual time.
   function settle(ms) {
-    return new Promise(function (r) {
-      setTimeout(function () { requestAnimationFrame(function () { requestAnimationFrame(r); }); }, ms || 0);
-    });
+    return new Promise(function (r) { setTimeout(r, ms || 0); });
   }
   function $(s) { return document.querySelector(s); }
   function shown(e) {
@@ -165,6 +176,27 @@ const PROBE = `
   // stacking contexts — it handles z-index, transforms, clip-path and
   // pointer-events for free, and its answer IS the product question ("can
   // the user press this?").
+  // The part of an element that is actually on show: its own box clipped to
+  // every scrolling ancestor's client box. A .tool halfway out of #tools has
+  // its lower half behind #power-info, and sampling there says "unclickable"
+  // when the honest answer is "scroll two pixels". Sample only the visible
+  // part, or not at all if none of it is showing.
+  function visibleRect(e) {
+    var r = { left: e.getBoundingClientRect().left, top: e.getBoundingClientRect().top,
+              right: e.getBoundingClientRect().right, bottom: e.getBoundingClientRect().bottom };
+    for (var p = e.parentElement; p && p !== document.documentElement; p = p.parentElement) {
+      var cs = getComputedStyle(p);
+      if (!/(auto|scroll|hidden|clip)/.test(cs.overflowY) &&
+          !/(auto|scroll|hidden|clip)/.test(cs.overflowX)) continue;
+      var pr = p.getBoundingClientRect();
+      var bl = pr.left + p.clientLeft, bt = pr.top + p.clientTop;
+      r.left = Math.max(r.left, bl); r.top = Math.max(r.top, bt);
+      r.right = Math.min(r.right, bl + p.clientWidth);
+      r.bottom = Math.min(r.bottom, bt + p.clientHeight);
+    }
+    r.width = r.right - r.left; r.height = r.bottom - r.top;
+    return r;
+  }
   function samplePoints(r) {
     // never the corners: the panels carry a 10px clip-path chamfer, and
     // chamfered corners legitimately do not hit-test
@@ -217,8 +249,8 @@ const PROBE = `
       for (var ci = 0; ci < ctrls.length; ci++) {
         var c = ctrls[ci];
         if (!shown(c) || scrolledAway(c)) continue;
-        var cr = rectOf(c);
-        if (cr.width < 1 || cr.height < 1) continue;
+        var cr = visibleRect(c);
+        if (cr.width < 4 || cr.height < 4) continue;   // only a sliver on show
         var pts = samplePoints(cr), blocked = 0, by = null;
         for (var pi = 0; pi < pts.length; pi++) {
           var h = hitBlocked(c, pts[pi][0], pts[pi][1]);
@@ -373,8 +405,20 @@ const PROBE = `
     vp.style.cssText = 'position:fixed;left:0;top:0;opacity:0.01;font-size:1px;pointer-events:none;';
     document.body.appendChild(vp);
 
+    window.addEventListener('error', function (ev) {
+      report.errors.push('window.onerror: ' + (ev && ev.message));
+    });
+
     setTimeout(async function () {
-      try { if (document.fonts && document.fonts.ready) await document.fonts.ready; } catch (e) {}
+      // Everything below runs inside try/finally so the report is emitted no
+      // matter what. A probe that dies silently is indistinguishable from a
+      // browser that never launched, and that ambiguity cost several rounds.
+      try {
+      // No await on document.fonts.ready: under --virtual-time-budget that
+      // promise can simply never settle, and an awaited promise that never
+      // resolves is a hang no try/catch can rescue — the probe emits nothing
+      // and the run is indistinguishable from a browser that never launched.
+      // The stylesheet loads no webfonts, so there is nothing to wait for.
 
       // 1. the intro, exactly as the suite has always measured it
       await state('intro', null, 'as loaded');
@@ -506,11 +550,16 @@ const PROBE = `
         return 'ellipsis exemption';
       });
 
-      var d = document.createElement('div');
-      d.id = 'layout' + '-probe';
-      d.textContent = btoa(unescape(encodeURIComponent(JSON.stringify(report))));
-      d.style.cssText = 'position:fixed;left:0;top:0;opacity:0.01;font-size:1px;pointer-events:none;';
-      document.body.appendChild(d);
+      } catch (e) {
+        report.errors.push('machine died: ' + (e && e.message) + ' @ ' +
+          String((e && e.stack) || '').split('\\n').slice(0, 3).join(' | '));
+      } finally {
+        var d = document.createElement('div');
+        d.id = 'layout' + '-probe';
+        d.textContent = btoa(unescape(encodeURIComponent(JSON.stringify(report))));
+        d.style.cssText = 'position:fixed;left:0;top:0;opacity:0.01;font-size:1px;pointer-events:none;';
+        document.body.appendChild(d);
+      }
     }, 1200);
   });
 })();
@@ -616,14 +665,19 @@ try {
                   'this run tested something other than what was asked for');
       failures++;
     }
-    if (rep.boot && !rep.boot.frozen) {
-      console.log('    WARN — the game loop was not frozen; boot: ' + JSON.stringify(rep.boot));
+    // A syntax error in game.js made every state unreachable, every state
+    // report SKIP, and the whole run report PASSED — a completely broken game
+    // came out green. An assertion that cannot run is a failure, not a pass.
+    if (!rep.boot || !rep.boot.pixelDeity || !rep.boot.introHidden || !rep.boot.frozen) {
+      console.log('    FAIL — the game did not come up; boot: ' + JSON.stringify(rep.boot || null));
+      failures++;
     }
 
     for (const st of rep.states) {
       const bits = [];
       if (!st.reached) {
-        console.log('    SKIP ' + st.id + ' — ' + st.note);
+        console.log('    FAIL ' + st.id + ' — could not be reached: ' + st.note);
+        failures++;
         continue;
       }
       let bad = 0;

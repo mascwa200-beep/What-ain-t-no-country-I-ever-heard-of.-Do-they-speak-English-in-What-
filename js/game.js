@@ -1091,6 +1091,9 @@
 
   // ================= Selection =================
   G.selectAt = function (wx, wy) {
+    // the inspector and the open panel share a column; asking to inspect
+    // something is asking for that column
+    if (G.openPanel) closePanel();
     let best = null, bd = 2.2;
     for (const u of G.sim.units) {
       if (u.dead) continue;
@@ -2048,7 +2051,14 @@
     G.openPanel = name;
     $('#panel-' + name).classList.add('show');
     $('#tab-' + name) && $('#tab-' + name).classList.add('active');
-    $('#chronicle').style.display = 'none'; // panels own that corner
+    // Three things want that column: the panel (z17), the inspector (z15) and
+    // the chronicle (z14). Only the topmost was reachable, so opening a panel
+    // silently buried the inspector's action buttons under .panel-scroll —
+    // you could see a dossier you could not press. The panel takes the column
+    // outright; selecting something while a panel is open closes the panel
+    // instead (see selectAt).
+    $('#chronicle').style.display = 'none';
+    $('#inspect').classList.remove('show');
     refreshOpenPanel(true);
     Audio8.sfx('select');
   }
