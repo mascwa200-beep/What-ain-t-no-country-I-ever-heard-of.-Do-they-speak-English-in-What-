@@ -441,9 +441,69 @@
     };
   })();
 
+  // ================= Prof =================
+  // There was no timing instrumentation anywhere in this project. Every
+  // performance claim ever made about it — including several of mine — was an
+  // argument rather than a measurement, and the renderer work ahead adds load
+  // to a frame nobody has ever measured. So: measure first.
+  //
+  // Cost is a performance.now() pair per span, tens of nanoseconds. It stays
+  // on in shipping builds because a profiler you have to enable is a profiler
+  // that is off when you need it.
+  const Prof = (function () {
+    const acc = {}, ema = {}, count = {}, stack = [];
+    let frames = 0, lastFrame = 0, fps = 0;
+    const now = () => (global.performance && global.performance.now)
+      ? global.performance.now() : Date.now();
+    return {
+      begin(k) { stack.push(k, now()); },
+      end() {
+        if (stack.length < 2) return;
+        const t = stack.pop(), k = stack.pop();
+        acc[k] = (acc[k] || 0) + (now() - t);
+      },
+      // a plain counter: patches live, tiles in flight, draw calls, bytes
+      n(k, v) { count[k] = v; },
+      add(k, v) { count[k] = (count[k] || 0) + (v == null ? 1 : v); },
+      // call once per frame; folds this frame's spans into a smoothed view so
+      // a readout does not flicker and a single slow frame does not dominate
+      frame() {
+        const t = now();
+        if (lastFrame) {
+          const dt = t - lastFrame;
+          ema.frame = ema.frame ? ema.frame * 0.9 + dt * 0.1 : dt;
+          fps = ema.frame > 0 ? 1000 / ema.frame : 0;
+        }
+        lastFrame = t; frames++;
+        for (const k in acc) {
+          ema[k] = (ema[k] == null) ? acc[k] : ema[k] * 0.9 + acc[k] * 0.1;
+          acc[k] = 0;
+        }
+      },
+      reset() {
+        for (const k in acc) delete acc[k];
+        for (const k in ema) delete ema[k];
+        for (const k in count) delete count[k];
+        stack.length = 0; frames = 0; lastFrame = 0; fps = 0;
+      },
+      get fps() { return fps; },
+      get frames() { return frames; },
+      ema, count,
+      // one line per span, slowest first — what a debug overlay or a headless
+      // assertion actually reads
+      lines() {
+        const out = [];
+        const keys = Object.keys(ema).filter((k) => k !== 'frame');
+        keys.sort((a, b) => ema[b] - ema[a]);
+        for (const k of keys) out.push(k + ' ' + ema[k].toFixed(2) + 'ms');
+        return out;
+      }
+    };
+  })();
+
   global.PD = global.PD || {};
   Object.assign(global.PD, {
-    makeRNG, hashSeed, makeNoise, Audio8,
+    makeRNG, hashSeed, makeNoise, Audio8, Prof,
     clamp, lerp, smooth, dist, dist2, store
   });
 })(window);
