@@ -65,6 +65,10 @@
   --tab:clamp(34px, 8.2vh, 44px);        /* tab-rail button size */
   --gap:clamp(6px, 1.2vh, 10px);
   --chrome-top:calc(var(--hud-h) + var(--sa-t) + var(--gap));
+  /* the toolbar's width lives here so the side panels can subtract it: at
+     500px wide a 340px panel reached back across 64px of the toolbar, leaving
+     tool buttons visible and unpressable */
+  --tool-w:clamp(154px, 23vw, 206px);
 }
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
 html,body{height:100%;overflow:hidden;background:var(--bg);}
@@ -215,6 +219,15 @@ body{
 .stat.faith .stat-ico{font-size:var(--t-lg);}
 .stat.faith small{color:#b09a40;font-size:var(--t-xs);font-weight:400;}
 .race-counts,#race-counts{display:flex;gap:var(--s1);flex-wrap:nowrap;flex:0 0 auto;}
+/* standing toggles, shown in the HUD only while one is held */
+#toggle-chips{display:flex;gap:var(--s1);align-items:center;}
+.tgl-chip{
+  font-family:var(--f-ui);font-size:var(--t-xs);font-weight:800;
+  letter-spacing:.1em;
+  color:var(--accent);background:rgba(20,40,70,0.55);
+  border:1px solid var(--accent);border-radius:var(--r-sm);
+  padding:var(--s1) var(--s2);white-space:nowrap;
+}
 .race-chip{
   font-family:var(--f-mono);font-size:var(--t-sm);font-weight:600;
   font-variant-numeric:tabular-nums;
@@ -290,7 +303,7 @@ body{
   left:calc(10px + var(--sa-l));
   top:var(--chrome-top);
   bottom:calc(var(--gap) + var(--sa-b));
-  width:clamp(154px, 23vw, 206px);
+  width:var(--tool-w);
   display:flex;flex-direction:column;
   overflow:hidden;
 }
@@ -348,6 +361,17 @@ body{
   background:linear-gradient(180deg,rgba(70,56,16,0.7),rgba(28,22,6,0.7));
   box-shadow:0 0 0 1px var(--gold) inset,0 0 14px rgba(240,200,110,0.3);
 }
+/* a power holding a state, as opposed to a power merely selected: Sabbath and
+   Omniscience are toggles, and nothing used to show that they were on */
+.tool.tool-on{
+  border-color:var(--accent);
+  box-shadow:0 0 0 1px var(--accent) inset,0 0 12px rgba(120,200,255,0.28);
+}
+.tool.tool-on::after{
+  content:'';position:absolute;top:2px;left:2px;width:5px;height:5px;
+  border-radius:50%;background:var(--accent);
+  box-shadow:0 0 6px var(--accent);
+}
 .tool-ico{font-size:clamp(15px,3.2vh,19px);line-height:1;}
 .tool-name{
   font-family:var(--f-ui);font-size:var(--t-xs);font-weight:700;
@@ -362,10 +386,21 @@ body{
 .tool-empty{
   font-size:var(--t-sm);color:var(--dim);text-align:center;padding:var(--s4) var(--s2);
 }
+/* #toolbar is overflow:hidden and cannot scroll. #power-info was flex:0 0
+   auto, so it refused to shrink, and once the greater-form block was added to
+   it the whole thing ran out of the bottom of the toolbar on a short screen —
+   76px of it cut off with nothing able to scroll to it, and painting outside
+   the viewport on the way. It shrinks now, and scrolls what it cannot show;
+   the cap keeps it from eating the power grid it sits under. */
 #power-info{
   border-top:1px solid var(--rule);padding:var(--s3);
-  background:rgba(2,4,10,0.55);flex:0 0 auto;
+  background:rgba(2,4,10,0.55);
+  flex:0 1 auto;min-height:0;max-height:46%;
+  overflow-y:auto;overscroll-behavior:contain;
+  scrollbar-width:thin;scrollbar-color:var(--edge2) transparent;
 }
+#power-info::-webkit-scrollbar{width:5px;}
+#power-info::-webkit-scrollbar-thumb{background:var(--edge2);border-radius:6px;}
 #power-name{
   font-family:var(--f-serif);font-weight:400;font-size:var(--t-lg);
   color:var(--gold);margin-bottom:var(--s1);letter-spacing:.02em;
@@ -427,7 +462,9 @@ body{
   right:calc(var(--tab) + 16px + var(--sa-r));
   top:var(--chrome-top);
   bottom:calc(var(--gap) + var(--sa-b));
-  width:min(340px, calc(100vw - var(--tab) - 32px - var(--sa-l) - var(--sa-r)));
+  /* never back across the toolbar — see --tool-w */
+  width:min(340px, calc(100vw - var(--tab) - 26px - var(--sa-r) - var(--sa-l)
+                        - var(--tool-w) - var(--gap)));
   display:none;flex-direction:column;overflow:hidden;
 }
 .side-panel.show{display:flex;animation:pop .15s ease-out;}
@@ -460,6 +497,17 @@ body{
   background:var(--gold);opacity:.8;
 }
 .panel-note{font-size:var(--t-sm);color:var(--dim);line-height:1.55;margin:var(--s3) 0;}
+/* the faith-income breakdown, opened by tapping the ✦ stat */
+.fb{font-family:var(--f-mono);font-size:var(--t-sm);}
+.fb-row{
+  display:grid;grid-template-columns:1fr auto;align-items:baseline;
+  gap:var(--s2);padding:var(--s1) 0;border-bottom:1px solid rgba(60,70,110,0.25);
+  color:var(--dim);
+}
+.fb-row b{color:var(--ink);font-weight:700;}
+.fb-row small{grid-column:1/-1;color:#5a668c;font-size:var(--t-xs);}
+.fb-row.fb-sum{border-bottom:none;border-top:1px solid var(--gold-dim);color:var(--gold);}
+.fb-row.fb-sum b{color:var(--gold);}
 .empty{font-size:var(--t-md);color:var(--dim);text-align:center;padding:var(--s6) var(--s2);line-height:1.6;}
 
 /* history */
@@ -470,6 +518,19 @@ body{
 .hist-nation{color:var(--good);}
 .nation-line{font-size:var(--t-sm);line-height:1.5;padding:6px 0;border-bottom:1px dotted rgba(60,70,110,0.35);}
 .nation-line small{color:var(--dim);}
+.nat-war{color:#ff8a6a;}
+/* progress to the next era — the quantity the whole tech tree turns on */
+.nat-era{
+  display:flex;align-items:center;gap:var(--s2);margin-top:3px;
+  font-size:var(--t-xs);color:var(--dim);
+}
+.nat-era .bar{flex:1;min-width:40px;height:5px;}
+.nat-era small{font-family:var(--f-mono);white-space:nowrap;}
+/* what the nations privately think of each other — omniscience only */
+.nat-intent{
+  font-size:var(--t-xs);line-height:1.5;margin-top:3px;
+  padding-left:var(--s2);border-left:1px solid var(--accent);
+}
 .legend-line{font-size:var(--t-sm);color:#ffd070;padding:3px 0;}
 
 /* prayers */
@@ -483,6 +544,12 @@ body{
 .prayer-text{
   font-family:var(--f-serif);font-size:var(--t-md);line-height:1.55;
   font-style:italic;color:#dee5f8;margin-bottom:var(--s2);
+}
+/* what answering this one actually grants — the effects range from a heal to
+   a free Paragon, and the two buttons looked identical for all of them */
+.prayer-grant{
+  font-family:var(--f-mono);font-size:var(--t-xs);color:var(--accent);
+  margin-bottom:var(--s2);line-height:1.4;
 }
 .prayer-btns{display:flex;gap:var(--s2);}
 .prayer-btns button{
@@ -554,7 +621,16 @@ body{
 .deed-done{color:#ffd070;} .deed-done b{color:#ffd070;}
 
 /* cosmos */
-#cosmos-canvas{width:100%;height:270px;display:block;border-bottom:2px solid var(--edge);image-rendering:pixelated;cursor:pointer;flex-shrink:0;}
+/* A rigid 270px orrery inside a panel that is 165px tall on a landscape
+   phone: the canvas overflowed its own panel by 158px and pushed
+   #cosmos-controls — every "create a world" button there is — completely off
+   the screen, inside an overflow:hidden box with nothing able to scroll to
+   it. The whole panel was unusable at that height. It yields now. */
+#cosmos-canvas{
+  width:100%;display:block;border-bottom:2px solid var(--edge);
+  image-rendering:pixelated;cursor:pointer;
+  flex:0 1 auto;height:min(270px, 38vh);min-height:64px;
+}
 .cosmos-create{display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-bottom:8px;}
 .cosmos-new{
   font-family:var(--f-ui);font-size:var(--t-xs);font-weight:700;padding:7px 4px;
@@ -581,19 +657,28 @@ body{
 .gen-label small{color:#5a648a;font-size:var(--t-xs);}
 .gen-cols{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
 .gen-flags{display:grid;grid-template-columns:1fr 1fr;gap:4px;margin:10px 0;font-size:var(--t-sm);color:var(--dim);}
-.gen-flags label{cursor:pointer;}
+.gen-flags label{cursor:pointer;display:block;line-height:1.3;}
 .gen-flags input{accent-color:var(--gold);}
+.gen-flags small{display:block;padding-left:18px;font-size:var(--t-xs);color:#5a668c;}
+/* the one irreversible choice on the panel, marked as one */
+.gen-flags label.gen-warn small{color:#d8896a;}
 
 /* ---------- Inspect panel ---------- */
 /* The one panel outside the (correct) .panel-scroll system: it had no bottom,
    no max-height and no overflow, so a village dossier ran straight off the
-   bottom edge with no way to reach the buttons. */
+   bottom edge with no way to reach the buttons.
+   It then had a max-height that let it reach the bottom edge — straight over
+   #chronicle, which lives in the same column at bottom:102px. A real village
+   dossier clears that threshold easily, and the event log vanished under it.
+   --chron-h is the room the chronicle needs; the media queries that hide the
+   chronicle zero it, so the inspector gets the space back. */
+:root{--chron-h:calc(102px + min(170px, 34vh) + var(--gap));}
 #inspect{
   position:absolute;z-index:15;
   right:calc(var(--tab) + 16px + var(--sa-r));
   top:var(--chrome-top);
   width:230px;
-  max-height:calc(100% - var(--chrome-top) - var(--gap) - var(--sa-b));
+  max-height:calc(100% - var(--chrome-top) - var(--chron-h) - var(--gap) - var(--sa-b));
   overflow-y:auto;overscroll-behavior:contain;
   background:rgba(14,19,38,0.85);
   backdrop-filter:var(--glass);-webkit-backdrop-filter:var(--glass);
@@ -606,6 +691,16 @@ body{
 .ins-row{display:flex;justify-content:space-between;gap:var(--s3);font-size:var(--t-sm);margin:var(--s1) 0;color:var(--dim);font-family:var(--f-mono);}
 .ins-row b{color:var(--ink);font-weight:700;}
 .ins-row.war b,.ins-row.war span{color:var(--bad);}
+/* population against the land that feeds it — the cap was silent, so a town
+   that stopped growing gave no reason */
+.ins-cap{font-family:var(--f-mono);color:var(--dim);font-weight:400;}
+.ins-cap.ins-capped{color:#e0a860;}
+/* why a town has no scholars, and therefore why its nation cannot advance */
+.ins-note{
+  font-size:var(--t-xs);line-height:1.5;color:var(--dim);
+  margin:var(--s2) 0;padding-left:var(--s2);border-left:1px solid var(--edge2);
+}
+.ins-note.ins-gate{color:#c8a86a;border-left-color:var(--gold-dim);}
 .ins-bar{font-size:var(--t-sm);color:var(--dim);margin:5px 0;}
 .ins-bar span{display:block;margin-bottom:2px;}
 .bar{height:8px;background:#0a0e1a;border:1px solid var(--edge);border-radius:3px;overflow:hidden;}
@@ -732,7 +827,9 @@ body{
    WIDE and SHORT — height is what actually runs out, so it gets its own
    queries here. */
 @media (max-width:760px){
-  #toolbar{width:clamp(140px, 30vw, 172px);}
+  /* set the variable, not the width: .side-panel subtracts --tool-w to stay
+     off the toolbar, and overriding #toolbar directly would break that link */
+  :root{--tool-w:clamp(140px, 30vw, 172px);}
   .tool-grid{grid-template-columns:1fr;}
   .tool{flex-direction:row;justify-content:flex-start;gap:6px;padding:6px;}
   .tool-name{font-size:var(--t-xs);}
@@ -745,7 +842,9 @@ body{
   .speed-btn{padding:5px 5px;}
 }
 @media (max-width:520px){
+  /* the chronicle steps aside here, so the inspector may have its room */
   #chronicle{display:none;}
+  :root{--chron-h:0px;}
   #power-info #power-desc{min-height:auto;}
 }
 
@@ -771,6 +870,7 @@ body{
   .intro-text{font-size:var(--t-sm);line-height:1.35;}
   .intro-tips li:nth-child(n+4){display:none;}
   #chronicle{display:none;}
+  :root{--chron-h:0px;}
   .menu-help{display:none;}
 }
 /* Below ~320px there is no room for prose at all. CI caught this: the
@@ -853,6 +953,9 @@ body{
       <div class="stat" id="time-stat" title="How fast history is moving"><span id="time-scale">Normal · 20 s/yr</span></div>
       <div class="stat" id="vill-stat"><span id="vill-val">🏙 0</span></div>
       <div id="race-counts" class="race-counts"></div>
+      <!-- standing toggles (Sabbath, Omniscience). Empty and hidden until one
+           is on, so it costs no room in the bar the rest of the time. -->
+      <div id="toggle-chips" style="display:none"></div>
     </div>
     <div class="hud-right">
       <div class="speeds" id="time-dial"><!-- built by buildTimeDial() --></div>
@@ -946,15 +1049,18 @@ body{
       <label class="gen-label">Hardiness <input type="range" id="gen-hp" min="12" max="90" value="30"></label>
       <label class="gen-label">Swiftness <input type="range" id="gen-spd" min="6" max="16" value="10"></label>
       <label class="gen-label">Lifespan <input type="range" id="gen-life" min="1000" max="6000" value="2600" step="100"></label>
+      <!-- Eight identical boxes used to give "Tail" the same weight as
+           "Raiders", which is a permanent, irreversible war with every other
+           people on the planet. Each one now says what it costs you. -->
       <div class="gen-flags">
-        <label><input type="checkbox" class="gen-flag" value="flies"> Wings</label>
-        <label><input type="checkbox" class="gen-flag" value="aquatic"> Gills</label>
-        <label><input type="checkbox" class="gen-flag" value="raider"> Raiders</label>
-        <label><input type="checkbox" class="gen-flag" value="healer"> Healers</label>
-        <label><input type="checkbox" class="gen-flag" value="horns"> Horns</label>
-        <label><input type="checkbox" class="gen-flag" value="tail"> Tail</label>
-        <label><input type="checkbox" class="gen-flag" value="nocturnal"> Nocturnal</label>
-        <label><input type="checkbox" class="gen-flag" value="tinker"> Tinkerers</label>
+        <label title="Cross any terrain, and fly above it."><input type="checkbox" class="gen-flag" value="flies"> Wings <small>go anywhere</small></label>
+        <label title="Move through water and land alike; only lava stops them."><input type="checkbox" class="gen-flag" value="aquatic"> Gills <small>sea &amp; shore</small></label>
+        <label class="gen-warn" title="PERMANENT. Hostile on sight to every other sentient race, forever. There is no undoing this."><input type="checkbox" class="gen-flag" value="raider"> Raiders <small>⚠ war with all</small></label>
+        <label title="Tend the sick around them every few ticks."><input type="checkbox" class="gen-flag" value="healer"> Healers <small>cure the sick</small></label>
+        <label title="Strike 35% harder, and burn a shade warmer on the globe."><input type="checkbox" class="gen-flag" value="horns"> Horns <small>+35% damage</small></label>
+        <label title="Carry themselves 30% faster."><input type="checkbox" class="gen-flag" value="tail"> Tail <small>+30% speed</small></label>
+        <label title="Fight at 1.6x by night and 0.7x by day."><input type="checkbox" class="gen-flag" value="nocturnal"> Nocturnal <small>strong at night</small></label>
+        <label title="Their nations research 60% faster — the strongest choice here."><input type="checkbox" class="gen-flag" value="tinker"> Tinkerers <small>+60% science</small></label>
       </div>
       <button id="genesis-create" class="big-btn" style="width:100%">🧬 CREATE (✦150)</button>
       <p class="panel-note">Tip: create a <b>Primordial</b> planet in the Cosmos and guide evolution from ooze to empire.</p>
@@ -1047,11 +1153,18 @@ body{
       </div>
       <div class="menu-help">
         <b>Controls</b><br>
-        WASD / arrows — pan · Wheel / pinch — zoom · worlds wrap around<br>
-        Space — pause · 1–5 — forward speeds · 0 — pause<br>
+        WASD / arrows — pan · Wheel / pinch / <b>= −</b> — zoom · worlds wrap around<br>
+        Space — pause · 1–5 — forward speeds (5 is <b>1000×</b>, millennia a second) · 0 — pause<br>
         , . — step the time dial · <b>R — run time backwards</b> · U — undo the unmaking<br>
         [ ] — brush size · L — labels · Esc — close/deselect<br>
-        C — cosmos · P — prayers · H — history · M — menu<br><br>
+        C — cosmos · P — prayers · H — history · M — menu<br>
+        <b>Tap the minimap</b> (bottom right) to jump anywhere on the world<br>
+        <b>Tap ✦</b> in the bar to see where your faith comes from<br><br>
+        <b>The second word.</b> Every power has a greater form. Press and
+        <b>hold</b> instead of tapping — a ring closes, and what you release is
+        not what you selected. The sidebar names each one under its power.<br><br>
+        <b>Finding a power.</b> Search the toolbar by name, or tap a category
+        heading to fold it away.<br><br>
         <b>Need help?</b> Hints live in the 📖 Testament tab.
       </div>
     </div>
@@ -2626,12 +2739,20 @@ body{
     }
     if (PD.FX) PD.FX.blood(u.x, u.y);
     const R = RACES[u.race];
-    // dark conversions: the plague-dead rise, vampire victims turn
+    // Dark conversions: the plague-dead rise, vampire victims turn.
+    //
+    // These used to be gated on `units.length < UNIT_CAP`. A populated world
+    // sits AT the cap within a few hundred ticks, so in practice neither
+    // conversion could ever fire — the undead never rose and the bite never
+    // spread, in any world with people in it. A conversion is a REPLACEMENT:
+    // the body it needs just died on this line. It never should have competed
+    // for headroom with the living. The raise queue compacts the dead before
+    // spawning (see step()), so this cannot exceed the cap either.
     if (!R.monster) {
-      if ((byRace === 'undead' || byRace === 'plague') && sim.rng() < 0.28 && sim.units.length < sim.UNIT_CAP) {
+      if ((byRace === 'undead' || byRace === 'plague') && sim.rng() < 0.28) {
         sim._raise = sim._raise || [];
         sim._raise.push({ x: u.x, y: u.y, as: 'undead' });
-      } else if (byRace === 'vampire' && R.sentient && sim.rng() < 0.35 && sim.units.length < sim.UNIT_CAP) {
+      } else if (byRace === 'vampire' && R.sentient && sim.rng() < 0.35) {
         sim._raise = sim._raise || [];
         sim._raise.push({ x: u.x, y: u.y, as: 'vampire' });
       }
@@ -2952,6 +3073,10 @@ body{
 
     // process raises (undead rising, vampire spawn)
     if (sim._raise && sim._raise.length) {
+      // spawnUnit refuses at the cap, and a full world is the normal state —
+      // so drop the corpses first. Every unit in this queue died to make room
+      // for the thing replacing it; without this the raise silently no-ops.
+      if (sim.units.length >= sim.UNIT_CAP) sim.units = sim.units.filter(u => !u.dead);
       for (const r of sim._raise) {
         const u = spawnUnit(sim, r.as || 'undead', r.x, r.y);
         if (u && PD.FX) PD.FX.puff(r.x, r.y, r.as === 'vampire' ? '#5a1030' : '#6a2a6a');
@@ -5335,7 +5460,10 @@ void main(){
       if (!R) continue;
       tileToSphere(r.world, u.x, u.y, _upos, 0.014 + (R.flies ? 0.015 : 0));
       r._uP[n * 3] = _upos[0]; r._uP[n * 3 + 1] = _upos[1]; r._uP[n * 3 + 2] = _upos[2];
-      const c = R2.hexToRgb(u.paragon ? '#ffd700' : R.col);
+      // A paragon wears their people's garb. col2 was read by nothing in the
+      // shipping renderer, so the Genesis Lab's Garb picker had no effect at
+      // all; a champion is the one place a second colour has room to show.
+      const c = R2.hexToRgb(u.paragon ? (R.col2 || '#ffd700') : R.col);
       r._uC[n * 4] = c[0] / 255; r._uC[n * 4 + 1] = c[1] / 255; r._uC[n * 4 + 2] = c[2] / 255;
       r._uC[n * 4 + 3] = R.ghost ? 0.5 : 1;
       let sz = 0.09 * zoomSize;
@@ -5471,13 +5599,16 @@ void main(){
     if (!ctx) return;
     ctx.clearRect(0, 0, r.w, r.h);
 
-    // omniscience: every soul named and weighed
-    if (global.G && global.G.omniscient && r.cam.dist < 4.2) {
+    // omniscience: every soul named and weighed. The lesser eye needs you
+    // close and reads only ninety; THE UNBLINKING EYE has no such manners.
+    const omniAll = !!(global.G && global.G.omniAll);
+    if (global.G && global.G.omniscient && (omniAll || r.cam.dist < 4.2)) {
+      const cap = omniAll ? 600 : 90;
       ctx.font = '9px ui-monospace, monospace';
       ctx.textAlign = 'center';
       let shown = 0;
       for (const u of sim.units) {
-        if (u.dead || shown > 90) continue;
+        if (u.dead || shown > cap) continue;
         const s2 = worldToScreen(r, u.x, u.y);
         if (!s2) continue;
         shown++;
@@ -5967,7 +6098,9 @@ void main(){
       if (v && v.pop < 5 && sim.rng() < 0.4) { makePrayer(sim, u, 'child'); continue; }
       if (u.karma > 3 && sim.rng() < 0.1) makePrayer(sim, u, 'thanks');
     }
-    // stale prayers fade (unanswered prayers cost a little faith income)
+    // Stale prayers fade. (This used to claim unanswered prayers cost a little
+    // faith income. Nothing has ever charged for one — ignoring your people is
+    // free, and the comment was the only place that said otherwise.)
     // abs(): under reversed time sim.tick < p.t, which would make every
     // prayer immortal and the divine inbox grow without bound
     soc.prayers = soc.prayers.filter(p => Math.abs(sim.tick - p.t) < 1600);
@@ -6527,6 +6660,10 @@ void main(){
         PD.Society.hist(sim, `${parent.name} seals their child into a rocket as the core fails. It rises on a pillar of fire toward ${dest.name}.`, 'legend');
         PD.Society.hist(dest.sim, `A tiny rocket falls from the sky. Inside: a child of doomed ${p.name}. They seem… unusual.`, 'legend');
       }
+      // hist() reaches one planet's History panel. This is the thing the
+      // intro card leads with; it should reach you wherever you are looking.
+      if (PD.Game && PD.Game.announce)
+        PD.Game.announce(`🚀 A rocket leaves dying ${p.name}, bound for ${dest.name}.`, 'legend', 'levelup');
       if (PD.FX && dest.id === C.activeId) PD.FX.explosion(spot.x, spot.y, false);
     }
   }
@@ -6539,6 +6676,8 @@ void main(){
     if (u.age > u.adultAt && !u.paragon) {
       PD.Society.empower(sim, u, 3);
       PD.Society.hist(sim, `${u.name}, the child from the stars, discovers what they can do.`, 'legend');
+      if (PD.Game && PD.Game.announce)
+        PD.Game.announce(`✨ ${u.name}, the child from the stars, comes into their power.`, 'legend', 'levelup');
       sim._starchild = null;
     }
   }
@@ -6561,6 +6700,9 @@ void main(){
     if (PD.Society) PD.Society.hist(sim, `${p.name} HAS SHATTERED. ${p.name} is no more. The Beyond weeps with new souls.`, 'fall');
     if (p.id === C.activeId && global.G) { global.G.flash = 1; global.G.shake = 30; }
     if (PD.Audio8) PD.Audio8.sfx('meteor');
+    // a world can end while you are looking at another one
+    if (PD.Game && PD.Game.announce)
+      PD.Game.announce(`☄ ${p.name} HAS SHATTERED. It is no more.`, 'fall');
   }
 
   // "Stabilize Core" — the god's mercy (called by a power)
@@ -6615,6 +6757,17 @@ void main(){
   }
 
   // ---- Genesis Lab: custom races ---------------------------------------
+  // push a #rrggbb toward the red end without blowing out — horned peoples
+  // read hotter on the globe, which is the only channel a point sprite has
+  function warmer(hex) {
+    const m = /^#?([0-9a-f]{6})$/i.exec(String(hex || ''));
+    if (!m) return hex;
+    const v = parseInt(m[1], 16);
+    const r = PD.clamp(((v >> 16) & 255) + 40, 0, 255);
+    const g = PD.clamp(((v >> 8) & 255) - 12, 0, 255);
+    const b = PD.clamp((v & 255) - 20, 0, 255);
+    return '#' + ((1 << 24) | (r << 16) | (g << 8) | b).toString(16).slice(1);
+  }
   const customRaces = [];
   function registerRace(def) {
     // def: {key,name,one,emoji,col,col2,aggr,breed,dmg,hp,spd,lifespan,flags:{}}
@@ -6626,6 +6779,14 @@ void main(){
       likes: def.likes || [W.B.GRASS, W.B.FOREST], sentient: true, custom: true
     };
     for (const f of (def.flags || [])) R[f] = true;
+    // Horns, Tail and Garb were read only by render.js, which render3d.js
+    // overwrites on load — three of the eight Lab options were sold at ✦150
+    // and did nothing at all. The 3D renderer draws each creature as one point
+    // sprite, so give them meaning it can actually express: horns hit harder
+    // and burn warmer, a tail carries you faster, and the garb colour is what
+    // a paragon of this people wears when you raise one.
+    if (R.horns) { R.dmg = Math.round(R.dmg * 1.35); R.col = warmer(R.col); }
+    if (R.tail) R.spd = Math.round(R.spd * 1.3);
     PD.Sim.RACES[def.key] = R;
     if (PD.Sim.SENTIENT.indexOf(def.key) < 0) PD.Sim.SENTIENT.push(def.key);
     customRaces.push(Object.assign({ key: def.key }, def));
@@ -6784,6 +6945,47 @@ void main(){
       color: 'rgba(224,168,106,0.9)', race: 'dwarf',
       desc: 'Carve the stout Dwarves from the mountains — hardy and enduring.',
       apply(G, wx, wy) { return spawnRace(G, 'dwarf', wx, wy, this.cost); } },
+    // Nine of the thirteen sentient peoples had no way into the world at all.
+    // The intro card promises "breathe life into 16 peoples"; the toolbar
+    // offered four, and the only other route was evolution stage 4 picking
+    // one of thirteen at random, behind a Primordial planet and five
+    // advances. Prices track hp/dmg/lifespan against the four that existed.
+    { id: 'spawn_gnome', name: 'Gnomes', icon: '🍄', cat: 'life', cost: 12, radius: 2, cont: true,
+      color: 'rgba(232,200,224,0.9)', race: 'gnome',
+      desc: 'Wake the Gnomes — small, curious, and forever taking things apart. Their nations learn fastest.',
+      apply(G, wx, wy) { return spawnRace(G, 'gnome', wx, wy, this.cost); } },
+    { id: 'spawn_halfling', name: 'Halflings', icon: '🥧', cat: 'life', cost: 7, radius: 2, cont: true,
+      color: 'rgba(240,216,168,0.9)', race: 'halfling',
+      desc: 'Settle the Halflings in the soft country. They want nothing but a full larder, and they breed for it.',
+      apply(G, wx, wy) { return spawnRace(G, 'halfling', wx, wy, this.cost); } },
+    { id: 'spawn_goblin', name: 'Goblins', icon: '👺', cat: 'life', cost: 6, radius: 2, cont: true,
+      color: 'rgba(168,200,96,0.9)', race: 'goblin',
+      desc: 'Let the Goblins out of the swamp. Weak, short-lived, hostile to everything, and there are always more.',
+      apply(G, wx, wy) { return spawnRace(G, 'goblin', wx, wy, this.cost); } },
+    { id: 'spawn_tiefling', name: 'Tieflings', icon: '😈', cat: 'life', cost: 13, radius: 2, cont: true,
+      color: 'rgba(216,138,122,0.9)', race: 'tiefling',
+      desc: 'Call the Tieflings up out of the ash. Horned, hard to burn, and at home where nothing else will live.',
+      apply(G, wx, wy) { return spawnRace(G, 'tiefling', wx, wy, this.cost); } },
+    { id: 'spawn_dragonborn', name: 'Dragonborn', icon: '🐲', cat: 'life', cost: 18, radius: 2, cont: true,
+      color: 'rgba(200,160,64,0.9)', race: 'dragonborn',
+      desc: 'Raise the Dragonborn from the desert stone — few, slow to breed, and worth three of anyone in a fight.',
+      apply(G, wx, wy) { return spawnRace(G, 'dragonborn', wx, wy, this.cost); } },
+    { id: 'spawn_lizardfolk', name: 'Lizardfolk', icon: '🦎', cat: 'life', cost: 10, radius: 2, cont: true,
+      color: 'rgba(122,176,96,0.9)', race: 'lizardfolk',
+      desc: 'Stir the Lizardfolk in the wet heat. They thrive where the swamp defeats everyone else.',
+      apply(G, wx, wy) { return spawnRace(G, 'lizardfolk', wx, wy, this.cost); } },
+    { id: 'spawn_merfolk', name: 'Merfolk', icon: '🧜', cat: 'life', cost: 14, radius: 2, cont: true,
+      color: 'rgba(122,200,216,0.9)', race: 'merfolk',
+      desc: 'Give the sea a people. Merfolk cross water and shore alike — the only ones who can.',
+      apply(G, wx, wy) { return spawnRace(G, 'merfolk', wx, wy, this.cost); } },
+    { id: 'spawn_fairy', name: 'Fairies', icon: '🧚', cat: 'life', cost: 16, radius: 2, cont: true,
+      color: 'rgba(240,200,248,0.9)', race: 'fairy',
+      desc: 'Let there be Fairies — fragile, near-immortal, tending the hurt wherever they drift.',
+      apply(G, wx, wy) { return spawnRace(G, 'fairy', wx, wy, this.cost); } },
+    { id: 'spawn_giant', name: 'Giants', icon: '🗿', cat: 'life', cost: 26, radius: 2, cont: true,
+      color: 'rgba(216,176,144,0.9)', race: 'giant',
+      desc: 'Wake the Giants in the high cold. Almost nothing kills one, and almost nothing makes another.',
+      apply(G, wx, wy) { return spawnRace(G, 'giant', wx, wy, this.cost); } },
     { id: 'spawn_critter', name: 'Critters', icon: '🐇', cat: 'life', cost: 2, radius: 2, cont: true,
       color: 'rgba(230,216,176,0.9)', race: 'critter',
       desc: 'Scatter little critters across the grass. Prey for the food chain.',
@@ -7495,6 +7697,8 @@ void main(){
       apply(G) {
         if (!G.omniscient && G.faith < this.cost) { snd('error'); return 0; }
         G.omniscient = !G.omniscient;
+        // the greater form's reach does not outlive the eye that carries it
+        if (!G.omniscient) G.omniAll = false;
         if (PD.Society) PD.Society.hist(G.sim, G.omniscient ? 'The eye opens. Nothing is hidden.' : 'The eye closes.', 'faith');
         snd(G.omniscient ? 'bless' : 'click');
         return G.omniscient ? this.cost : 0;
@@ -7511,7 +7715,12 @@ void main(){
         // scrub every trace: chronicle, legends, feed, and the afterlife
         if (PD.Society) {
           const soc = PD.Society.ensure(G.sim);
-          const strip = (arr, key) => { for (let i = arr.length - 1; i >= 0; i--) if ((arr[i][key] || '').indexOf(name) >= 0) arr.splice(i, 1); };
+          // Whole names only. Names are GIVEN+GIVEN2 concatenations, so a
+          // plain indexOf made 'Ala' a match inside 'Alan' — erasing one soul
+          // silently deleted the chronicle, legends and posts of every
+          // stranger whose name happened to contain theirs.
+          const re = new RegExp('(^|[^A-Za-z])' + name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?![A-Za-z])');
+          const strip = (arr, key) => { for (let i = arr.length - 1; i >= 0; i--) if (re.test(arr[i][key] || '')) arr.splice(i, 1); };
           strip(soc.history, 'text'); strip(soc.legends, 'deed'); strip(soc.feed, 'author'); strip(soc.feed, 'text');
         }
         if (PD.Afterlife) PD.Afterlife.erase && PD.Afterlife.erase(name);
@@ -7529,16 +7738,18 @@ void main(){
         const plane = PD.Afterlife.AL.planes['grayfields'];
         if (!plane || !plane.souls.length) { snd('error'); return 0; }
         const names = plane.souls.slice(0, 40).map(s => s.name);
-        let n = 0;
+        const back = [];
         for (const nm of names) {
           const spot = W.nearestLand(G.world, wx + (Math.random() * 8 - 4), wy + (Math.random() * 8 - 4), 12);
           if (!spot) continue;
-          if (PD.Afterlife.resurrect(nm, G.sim, spot.x, spot.y)) n++;
+          const u = PD.Afterlife.resurrect(nm, G.sim, spot.x, spot.y);
+          if (u) back.push(u);
         }
-        if (!n) { snd('error'); return 0; }
+        if (!back.length) { snd('error'); return 0; }
         FX.shock(wx, wy, 8, '#bfffdc');
-        if (PD.Society) PD.Society.hist(G.sim, `${n} souls are breathed back out of limbo. The Grayfields thin.`, 'legend');
+        if (PD.Society) PD.Society.hist(G.sim, `${back.length} souls are breathed back out of limbo. The Grayfields thin.`, 'legend');
         snd('levelup');
+        firstOfTheThirst(G, back);
         return this.cost;
       } },
     { id: 'sabbath', name: 'Sabbath', icon: '⏸️', cat: 'godhead', cost: 25, radius: 0, cont: false,
@@ -7555,6 +7766,52 @@ void main(){
       } },
 
   ];
+
+  // ------------------------------------------------------------------
+  // Vampires have been fully implemented since the first build — nocturnal,
+  // 9000-tick lifespan, their own art, and a bite that turns the bitten. The
+  // only line that ever created one required the killer to be a vampire
+  // already. No power made them, no omen, no ambient spawn, and they were
+  // left out of SENTIENT so evolution could not pick them either. A vampire
+  // could only be made by a vampire, so there had never been a first one.
+  //
+  // That stays true. There is exactly one way to make patient zero, and
+  // nothing in the game will tell you what it is: breathe the Grayfields
+  // empty while a blood moon is up, and one of them comes back wrong. From
+  // there the bite does the rest with no help from anyone.
+  //
+  // Do not mention this in the power's description, the Testament, or a
+  // tooltip. It is meant to be found.
+  function firstOfTheThirst(G, returned) {
+    const sim = G.sim;
+    if (!sim || !(sim.bloodMoonT > 0)) return;
+    if ((sim.counts && sim.counts.vampire) > 0) return;   // there is already a first
+    if (!returned || !returned.length) return;
+    // One of the souls you just breathed back — not an extra body. A mature
+    // world sits at UNIT_CAP, so anything that needed headroom of its own
+    // would never happen on the worlds where blood moons do.
+    const u = returned[(Math.random() * returned.length) | 0];
+    if (!u || u.dead) return;
+    u.race = 'vampire';
+    // The progenitor is not an ordinary vampire. An ordinary one — made by a
+    // bite — has 40 hp and dies to the first mob that finds it, which is
+    // fine; that is what a vampire is. But this one was breathed out of limbo
+    // by a god under a blood moon, and it has to survive long enough to make
+    // a second. Only this one is built this way; every vampire it makes is
+    // the ordinary kind.
+    u.paragon = 2;
+    u.maxHp = PD.Sim.RACES.vampire.hp * 5;
+    u.hp = u.maxHp;
+    u.village = -1;                       // it does not go home
+    u.lifespan = Math.max(u.lifespan || 0, (u.age || 0) + 9000);
+    PD.Sim.recount(sim);                  // so counts.vampire is true immediately
+    if (FX) { FX.shock(u.x, u.y, 5, '#5a1030'); FX.blood && FX.blood(u.x, u.y); }
+    if (PD.Society) PD.Society.hist(sim, 'One of them did not come back the same.', 'legend');
+    PD.Sim.logEvent(sim, 'One of them did not come back the same.', 'fall');
+    // G.ach is the counter map, not the function — the recorder is G.deed
+    if (typeof G.deed === 'function') G.deed('firstthirst');
+    snd('plague');
+  }
 
   // helpers for targeted powers
   function nearestUnit(G, wx, wy, r) {
@@ -7639,6 +7896,24 @@ void main(){
                     desc: 'Not warriors. A war, already begun.' },
     spawn_dwarf:  { name: 'THE DEEP HOLDS',     cost: 60,  rMul: 3.0, reps: 9,
                     desc: 'The mountain is opened, and it was always full.' },
+    spawn_gnome:  { name: 'THE WORKSHOP AGE',   cost: 66,  rMul: 3.0, reps: 9,
+                    desc: 'Every one of them already has an idea.' },
+    spawn_halfling:{ name: 'THE HUNDRED HEARTHS', cost: 40, rMul: 3.4, reps: 11,
+                    desc: 'The kettles go on across a whole county at once.' },
+    spawn_goblin: { name: 'THE SWARM',          cost: 34,  rMul: 3.6, reps: 13,
+                    desc: 'You will not count them. Nobody ever has.' },
+    spawn_tiefling:{ name: 'THE INFERNAL COMPACT', cost: 72, rMul: 3.0, reps: 9,
+                    desc: 'The ash remembers what walked out of it.' },
+    spawn_dragonborn:{ name: 'THE SCALED LEGION', cost: 100, rMul: 2.8, reps: 8,
+                    desc: 'Few. Enough.' },
+    spawn_lizardfolk:{ name: 'THE DROWNED CITIES', cost: 56, rMul: 3.2, reps: 10,
+                    desc: 'The swamp was never empty. It was only waiting.' },
+    spawn_merfolk:{ name: 'THE TIDE PEOPLE',    cost: 78,  rMul: 3.4, reps: 10,
+                    desc: 'Every shore at once, and everything between them.' },
+    spawn_fairy:  { name: 'THE GLIMMERING',     cost: 88,  rMul: 3.6, reps: 12,
+                    desc: 'The air itself goes kind.' },
+    spawn_giant:  { name: 'THE OLD HIGH FOLK',  cost: 140, rMul: 2.6, reps: 6,
+                    desc: 'They were here before the mountains had names.' },
     spawn_critter:{ name: 'THE TEEMING',        cost: 12,  rMul: 4.0, reps: 14,
                     desc: 'Every hedge and hollow, all at once, alive.' },
     spawn_wolf:   { name: 'THE LONG WINTER PACK',cost: 22, rMul: 3.4, reps: 10,
@@ -7703,14 +7978,32 @@ void main(){
                     desc: 'A hundred thousand years, spent at once.' },
     judgment:     { name: 'THE FINAL ACCOUNTING', cost: 800, rMul: 1, reps: 3,
                     desc: 'Every ledger, opened, and every one read aloud.' },
-    omniscience:  { name: 'THE UNBLINKING EYE', cost: 190, rMul: 1, reps: 3,
-                    desc: 'Nothing is hidden. Nothing was ever hidden.' },
+    omniscience:  { name: 'THE UNBLINKING EYE', cost: 190, rMul: 1,
+                    toggle: true, flag: 'omniscient',
+                    desc: 'Nothing is hidden. Nothing was ever hidden.',
+                    // the lesser eye only reads what you lean close to; this
+                    // one reads the whole world at any remove, and the
+                    // nations' private opinions of each other with it
+                    after(G) { G.omniAll = true; } },
     unmake:       { name: 'ERASURE',            cost: 340, rMul: 1, reps: 3,
                     desc: 'Not killed. Never having been.' },
     breath:       { name: 'THE FIRST BREATH',   cost: 520, rMul: 1, reps: 4,
                     desc: 'The lungs of the world fill again.' },
-    sabbath:      { name: 'THE LONG SABBATH',   cost: 110, rMul: 1, reps: 3,
-                    desc: 'Rest, imposed. The world will thank you later.' },
+    sabbath:      { name: 'THE LONG SABBATH',   cost: 110, rMul: 1,
+                    toggle: true, flag: 'sabbath',
+                    desc: 'Rest, imposed. The world will thank you later.',
+                    // rest that repairs: every fire goes out, every larder
+                    // fills, every town breathes easier while nothing moves
+                    after(G) {
+                      const sim = G.sim; if (!sim) return;
+                      const w = sim.world;
+                      if (w && w.fire) w.fire.fill(0);
+                      for (const v of sim.villages) {
+                        v.food += 40;
+                        v.prosperity = PD.clamp((v.prosperity || 0) + 0.25, 0, 1);
+                      }
+                      if (PD.Society) PD.Society.hist(sim, 'The long rest. Fires die, granaries fill, and nothing stirs.', 'faith');
+                    } },
 
     // ---- politics: the thumb on the scale, pressed harder ----
     crown:        { name: 'THE DYNASTY',        cost: 95,  rMul: 1, reps: 5,
@@ -7774,14 +8067,22 @@ void main(){
     p.cost = 0;
     p.radius = Math.max(1, Math.round(baseRadius * (a.rMul || 1)));
     const spread = Math.max(1.2, baseRadius * 1.25);
-    const reps = a.reps || 5;
+    // A toggle repeated is a toggle undone. Sabbath and Omniscience flip a
+    // flag, so firing them `reps` times landed exactly where one press would
+    // — for four times the faith. Toggles fire once, and only to turn ON.
+    const reps = a.toggle ? 1 : (a.reps || 5);
+    const alreadyOn = a.toggle && a.flag && !!G[a.flag];
     try {
-      for (let i = 0; i < reps; i++) {
-        // first at the point itself, the rest in a ring around it
-        const ang = (i / Math.max(1, reps - 1)) * 6.2832;
-        const d = i === 0 ? 0 : spread * (0.6 + (i % 3) * 0.32);
-        p.apply(G, wx + Math.cos(ang) * d, wy + Math.sin(ang) * d);
+      if (!alreadyOn) {
+        for (let i = 0; i < reps; i++) {
+          // first at the point itself, the rest in a ring around it
+          const ang = (i / Math.max(1, reps - 1)) * 6.2832;
+          const d = i === 0 ? 0 : spread * (0.6 + (i % 3) * 0.32);
+          p.apply(G, wx + Math.cos(ang) * d, wy + Math.sin(ang) * d);
+        }
       }
+      // the escalation proper — what makes the greater form greater
+      if (typeof a.after === 'function') a.after(G, wx, wy);
     } finally {
       p.cost = baseCost;
       p.radius = baseRadius;
@@ -7948,6 +8249,27 @@ void main(){
     // Divinity: each transcendence permanently multiplies the flow of faith
     return f * (1 + G.divinity * 0.25);
   }
+  // The same sum, itemised. The HUD showed one aggregate number, so nothing
+  // in the game revealed that a wonder is worth 3.6 temples — which makes
+  // pushing a village to level 4 the highest-leverage act available, and a
+  // complete secret. Kept beside faithPerStep so the two cannot drift.
+  function faithBreakdown() {
+    const c = G.sim.counts;
+    let pop = 0;
+    for (const k of Sim.SENTIENT) pop += c[k] || 0;
+    let temples = 0, wonders = 0;
+    for (const v of G.sim.villages) { temples += v.temples; wonders += v.wonders || 0; }
+    const rows = [
+      ['base', 0.04, ''],
+      ['worshippers', pop * 0.014, pop + ' × 0.014'],
+      ['temples', temples * 0.22, temples + ' × 0.22'],
+      ['wonders', wonders * 0.8, wonders + ' × 0.80'],
+      ['devotion', Sim.devotion ? Sim.devotion(G.sim) * 0.22 : 0, 'their piety, summed'],
+      ['religion', PD.Society ? PD.Society.faithBonus(G.sim) : 0, 'organized faith']
+    ];
+    const sub = rows.reduce((s, r) => s + r[1], 0);
+    return { rows, sub, mult: 1 + G.divinity * 0.25, total: sub * (1 + G.divinity * 0.25) };
+  }
 
   // ---- Transcendence (prestige): trade a multiverse for permanent power
   // ================= Themed ask / confirm =================
@@ -7961,8 +8283,13 @@ void main(){
       if (!m) { resolve(opts.input != null ? global.prompt(opts.body, opts.input) : global.confirm(opts.body)); return; }
       const input = $('#ask-input'), okBtn = $('#ask-ok'), cancel = $('#ask-cancel');
       $('#ask-title').textContent = opts.title || 'Are you certain?';
-      $('#ask-body').textContent = opts.body || '';
+      // opts.html is markup we author here; opts.body is still escaped, because
+      // some call sites interpolate a player-supplied planet or race name
+      if (opts.html != null) $('#ask-body').innerHTML = opts.html;
+      else $('#ask-body').textContent = opts.body || '';
       okBtn.textContent = opts.ok || 'Confirm';
+      // an informational dialog has nothing to cancel — pass cancel:null
+      cancel.style.display = (opts.cancel === null) ? 'none' : '';
       cancel.textContent = opts.cancel || 'Cancel';
       m.classList.toggle('has-input', opts.input != null);
       m.classList.toggle('danger', !!opts.danger);
@@ -8029,7 +8356,10 @@ void main(){
     { id: 'races', name: 'Genesis Engine', desc: 'Design a custom race', need: 1 },
     { id: 'floods', name: 'Deluge', desc: 'Flood the world', need: 1 },
     { id: 'timetravels', name: 'Chronarch', desc: 'Bend time 3 times', need: 3 },
-    { id: 'transcends', name: 'BEYOND', desc: 'Transcend reality itself', need: 1 }
+    { id: 'transcends', name: 'BEYOND', desc: 'Transcend reality itself', need: 1 },
+    // Not listed until it is done. There is no hint for this one anywhere in
+    // the game, and there should not be.
+    { id: 'firstthirst', name: 'PATIENT ZERO', desc: 'There had never been a first one', need: 1, hidden: true }
   ];
   function ach(id, n) {
     G.ach[id] = (G.ach[id] || 0) + (n || 1);
@@ -8254,7 +8584,8 @@ void main(){
       // world.mode, so without these a save taken in the Deep or in Nothing
       // reloads as a black empty sphere with the Genesis powers hidden.
       speedIdx: G.speedIdx, creationStage: G.creationStage, dissolve: G.dissolve,
-      omniscient: !!G.omniscient, sabbath: !!G.sabbath, preSabbathIdx: G._preSabbathIdx,
+      omniscient: !!G.omniscient, omniAll: !!G.omniAll,
+      sabbath: !!G.sabbath, preSabbathIdx: G._preSabbathIdx,
       cam: G.r ? { lon: G.r.cam.lon, lat: G.r.cam.lat, dist: G.r.cam.dist } : null,
       cosmos: { nextId: Cosmos.C.nextId, activeId: Cosmos.C.activeId, customRaces: Cosmos.customRaces },
       planets: Cosmos.C.planets.map(packPlanet),
@@ -8301,6 +8632,7 @@ void main(){
       G.creationStage = (d.creationStage != null) ? d.creationStage : null;
       G.dissolve = d.dissolve || 0;
       G.omniscient = !!d.omniscient;
+      G.omniAll = !!d.omniAll && G.omniscient;
       G.sabbath = !!d.sabbath;
       G._preSabbathIdx = d.preSabbathIdx;
       // Builds before this one never stored creationStage, so their saves can
@@ -8336,9 +8668,15 @@ void main(){
       G.view = (d.view && d.view.kind === 'planet' && Cosmos.getPlanet(d.view.id)) ? d.view : { kind: 'planet', id: Cosmos.C.activeId };
       bindView();
       if (d.cam && d.cam.lon != null && G.r) { G.r.cam.lon = d.cam.lon; G.r.cam.lat = d.cam.lat; G.r.cam.dist = d.cam.dist; }
+      // Quitting while paused used to mean no offline progress at all, and
+      // nothing said so — you came back to a world that had not moved and no
+      // explanation. Time you deliberately stopped stays stopped, but say it.
       if (G.speed !== 0) {
         const off = runOffline((Date.now() - (d.t || Date.now())) / 1000);
         if (off) showOffline(off);
+      } else {
+        const away = (Date.now() - (d.t || Date.now())) / 1000;
+        if (away > 120) setTimeout(() => flashToast('You left with time paused, so nothing moved while you were gone.'), 900);
       }
       return true;
     } catch (e) {
@@ -8811,6 +9149,25 @@ void main(){
     return 0;
   };
 
+  // Powers record deeds through this. Note G.ach is the counter map, so the
+  // recorder cannot share that name.
+  G.deed = ach;
+
+  // Something happened on a world you are not looking at.
+  //
+  // The rocket, the starchild and the shattering — the set-piece the intro
+  // card leads with — reported only through Society.hist(), which writes into
+  // ONE planet's History panel. If you were gazing elsewhere, an entire world
+  // could burn and you would never learn of it. This reaches you wherever you
+  // are: the chronicle of the world you are watching, plus a toast.
+  G.announce = function (text, kind, sfx) {
+    try {
+      if (G.sim) Sim.logEvent(G.sim, text, kind || 'event');
+      flashToast(text);
+      if (sfx) Audio8.sfx(sfx);
+    } catch (e) {}
+  };
+
   // Sabbath: the world holds still, but the god does not.
   G.setSabbath = function (on) {
     if (on) { G._preSabbathIdx = G.speedIdx; setSpeedIdx(IDX_PAUSE, true); }
@@ -8818,19 +9175,32 @@ void main(){
   };
 
   // ================= Testament story =================
+  // Every world-shaped check used to read G.sim — the world you happen to be
+  // GAZING at. Build a Modern-era civilisation on planet A, go look at planet
+  // B, and chapter XII could never complete no matter how long you waited.
+  // The chapters are about your works, not about your current view, so they
+  // ask every planet.
+  function anyWorld(fn) {
+    try { if (fn(G.sim)) return true; } catch (e) {}
+    for (const p of Cosmos.C.planets) {
+      if (!p.sim || p.sim === G.sim) continue;
+      try { if (fn(p.sim)) return true; } catch (e) {}
+    }
+    return false;
+  }
   const CHAPTERS = [
     { id: 'genesis', title: 'I. The Shaping', text: 'In the beginning you hovered over the face of the waters. Shape the land. Raise mountains, plant forests.', hint: 'Use Raise Land or Grow Forest anywhere.', check: () => G._usedTerra },
-    { id: 'life', title: 'II. Breath of Life', text: 'Breathe life into the dust. Let peoples walk your world.', hint: 'Spawn any sentient race from the Life tab.', check: () => { let n = 0; for (const k of Sim.SENTIENT) n += G.sim.counts[k] || 0; return n >= 10; } },
-    { id: 'watch', title: 'III. The Watchers', text: 'They build without your hand. Watch a village become a town.', hint: 'Wait, or feed a village with Bless/Miracle. A village must reach level 2.', check: () => G.sim.villages.some(v => v.level >= 2) },
+    { id: 'life', title: 'II. Breath of Life', text: 'Breathe life into the dust. Let peoples walk your world.', hint: 'Spawn any sentient race from the Life tab.', check: () => anyWorld(s => { let n = 0; for (const k of Sim.SENTIENT) n += s.counts[k] || 0; return n >= 10; }) },
+    { id: 'watch', title: 'III. The Watchers', text: 'They build without your hand. Watch a village become a town.', hint: 'Wait, or feed a village with Bless/Miracle. A village must reach level 2.', check: () => anyWorld(s => s.villages.some(v => v.level >= 2)) },
     { id: 'prayer', title: 'IV. The First Prayer', text: 'They are starting to look up. Answer them.', hint: 'Open the Prayers tab (🙏) and answer 3 prayers.', check: () => (G._prayersAnswered || 0) >= 3 },
-    { id: 'faith', title: 'V. Organized Faith', text: 'Let them build a church around the answering.', hint: 'A faith forms on its own once temples exist — or use Anoint Prophet.', check: () => PD.Society && PD.Society.ensure(G.sim).faiths.length > 0 },
-    { id: 'law', title: 'VI. The Law', text: 'Faith without law is a fire without a hearth. Hand down commandments.', hint: 'Use the Commandments power (Testament tab).', check: () => PD.Society && PD.Society.ensure(G.sim).faiths.some(f => f.commandments > 0) },
+    { id: 'faith', title: 'V. Organized Faith', text: 'Let them build a church around the answering.', hint: 'A faith forms on its own once temples exist — or use Anoint Prophet.', check: () => !!PD.Society && anyWorld(s => PD.Society.ensure(s).faiths.length > 0) },
+    { id: 'law', title: 'VI. The Law', text: 'Faith without law is a fire without a hearth. Hand down commandments.', hint: 'Use the Commandments power — the Testament group in the power sidebar, not the 📖 tab.', check: () => !!PD.Society && anyWorld(s => PD.Society.ensure(s).faiths.some(f => f.commandments > 0)) },
     { id: 'wrath', title: 'VII. Wrath', text: 'They must know both sides of you. Show them judgement.', hint: 'Use Lightning, Meteor, Plague, or the Great Flood.', check: () => G._usedWrath },
-    { id: 'hero', title: 'VIII. The Chosen', text: 'Raise up a mortal as your champion against the dark.', hint: 'Use Empower Hero (Godhead tab) on any citizen.', check: () => PD.Society && PD.Society.ensure(G.sim).heroes.length > 0 },
+    { id: 'hero', title: 'VIII. The Chosen', text: 'Raise up a mortal as your champion against the dark.', hint: 'Use Empower Hero — the Godhead group in the power sidebar — on any citizen.', check: () => !!PD.Society && anyWorld(s => PD.Society.ensure(s).heroes.length > 0) },
     { id: 'beyond', title: 'IX. The Beyond', text: 'Where do they go when they die? Walk your own heavens and hells.', hint: 'Open the Souls tab (👻) and Visit any plane.', check: () => G._visitedPlane },
     { id: 'return', title: 'X. Resurrection', text: 'Death answers to you. Bring one back.', hint: 'In the Souls tab, resurrect any soul.', check: () => G._resurrected },
     { id: 'cosmos', title: 'XI. Many Worlds', text: 'One world is a garden. Many is a cosmos. Create a second planet.', hint: 'Open the Cosmos tab (🪐) and create a planet.', check: () => Cosmos.C.planets.length >= 2 },
-    { id: 'modern', title: 'XII. The Wired Age', text: 'Let a nation grow until it wires itself together and posts about you.', hint: 'A nation must reach the Modern era. Prosperous big nations advance faster.', check: () => PD.Society && PD.Society.ensure(G.sim).internetOn },
+    { id: 'modern', title: 'XII. The Wired Age', text: 'Let a nation grow until it wires itself together and posts about you.', hint: 'A nation must reach the Modern era. Prosperous big nations advance faster.', check: () => !!PD.Society && anyWorld(s => PD.Society.ensure(s).internetOn) },
     // The dial goes the other way too — and nothing in the game said so.
     { id: 'turnback', title: 'XIII. Turn Back', text: 'Time has only ever run one way for them. It has never had to, for you. Take an hour of history back.', hint: 'The time dial runs left of the pause bar: ◀ ⧏ ⧏⧏ ⧏⧏⧏. Press R, or tap any arrow left of ❚❚.', check: () => G._reversed },
     { id: 'before', title: 'XIV. Before the Beginning', text: 'Keep going. Past the first city, past the first breath, past the first morning — to the night that had no evening before it.', hint: 'Hold the leftmost notch (⧏⧏⧏ · Unmaking) once the record runs out. The works undo, the land unshapes, the deep goes dark. Press U at any point to take it all back.', check: () => G._sawNothing },
@@ -8854,6 +9224,9 @@ void main(){
 
   // ================= Selection =================
   G.selectAt = function (wx, wy) {
+    // the inspector and the open panel share a column; asking to inspect
+    // something is asking for that column
+    if (G.openPanel) closePanel();
     let best = null, bd = 2.2;
     for (const u of G.sim.units) {
       if (u.dead) continue;
@@ -8960,7 +9333,22 @@ void main(){
       if (G.acc > STEP_MS * 4) G.acc = STEP_MS * 4;
     } else if (G.speed < 0) {
       stepRewind(dt);
-    }
+    } else if (G.sabbath) {
+      // Sabbath is not the pause key, and this is the difference. The world
+      // holds still — nothing ages, nothing burns, nothing is born — but the
+      // faith you are owed keeps arriving. A plain pause stops the clock and
+      // the income with it; this stops only the clock. Without this, ✦25 bought
+      // exactly what the spacebar gives away.
+      G.sabbathAcc = (G.sabbathAcc || 0) + dt;
+      let n = 0;
+      while (G.sabbathAcc >= STEP_MS && n < 8) {
+        G.sabbathAcc -= STEP_MS; n++;
+        const gain = faithPerStep();
+        G.faith = Math.min(9999999, G.faith + gain);
+        G.faithTotal += gain;
+      }
+      if (G.sabbathAcc > STEP_MS * 4) G.sabbathAcc = STEP_MS * 4;
+    } else if (G.sabbathAcc) { G.sabbathAcc = 0; }
 
     if (G.weatherT > 0) { G.weatherT -= dt / STEP_MS; if (G.weatherT <= 0) { G.weather = 'clear'; G.r.weather = 'clear'; } }
     autoWeather();
@@ -9498,6 +9886,24 @@ void main(){
   }
   function highlightPower(id) {
     document.querySelectorAll('.tool').forEach(b => b.classList.toggle('active', b.dataset.id === id));
+    refreshToggleState();
+  }
+  // Sabbath and Omniscience flip a flag and nothing ever said so. A second
+  // press silently refunded nothing; a third charged again. Now the button
+  // that is holding a state looks like it, and the HUD says which.
+  const TOGGLE_POWERS = { sabbath: 'sabbath', omniscience: 'omniscient' };
+  function refreshToggleState() {
+    document.querySelectorAll('.tool').forEach(b => {
+      const flag = TOGGLE_POWERS[b.dataset.id];
+      b.classList.toggle('tool-on', !!flag && !!G[flag]);
+    });
+    const el = $('#toggle-chips');
+    if (!el) return;
+    const chips = [];
+    if (G.sabbath) chips.push('<span class="tgl-chip">⏸️ SABBATH</span>');
+    if (G.omniscient) chips.push('<span class="tgl-chip">👁 ' + (G.omniAll ? 'UNBLINKING' : 'OMNISCIENT') + '</span>');
+    el.innerHTML = chips.join('');
+    el.style.display = chips.length ? '' : 'none';
   }
   function updatePowerInfo(p) {
     if (!p) return;
@@ -9609,6 +10015,7 @@ void main(){
       log.innerHTML = G.sim.log.slice(0, 12).map(e => `<div class="log-line log-${e.kind}">${e.msg}</div>`).join('');
     }
     updateTabBadges();
+    refreshToggleState();
   }
   function updateTabBadges() {
     const soc = G.sim.soc;
@@ -9656,15 +10063,21 @@ void main(){
         ${n ? `<div class="ins-row"><span>Nation</span><b>${n.name}</b></div>
         <div class="ins-row"><span>Rule</span><b>${PD.Society.GOVERNMENTS[n.gov]} · ${n.leaderName}</b></div>
         <div class="ins-row"><span>Era</span><b>${PD.Society.ERAS[n.era]}</b></div>
+        ${nationProgress(n)}
         <div class="ins-row"><span>Scholars</span><b>${
           n.scholars ? n.scholars + ' 📚' : '<span style="color:#8a7a5a">none — this age will not pass</span>'
         }</b></div>` : ''}
         ${faith ? `<div class="ins-row"><span>Faith</span><b>${faith.name}</b></div>` : ''}
-        <div class="ins-row"><span>Population</span><b>${v.pop}</b></div>
+        <div class="ins-row"><span>Population</span><b>${v.pop}${
+          v.cap ? ` <small class="ins-cap${v.pop >= v.cap ? ' ins-capped' : ''}">/ ${v.cap} land</small>` : ''
+        }</b></div>
         <div class="ins-row"><span>Tier</span><b>${['Hamlet', 'Village', 'Town', 'City', 'Metropolis'][Math.min(4, v.level - 1)]} (lvl ${v.level})</b></div>
         <div class="ins-bar"><span>Prosperity</span>${bar(v.prosperity, '#f0c040')}</div>
         <div class="ins-row"><span>Food store</span><b>${Math.floor(v.food)}</b></div>
+        <div class="ins-row"><span>Wealth</span><b>${Math.floor(v.wealth || 0)}</b></div>
         <div class="ins-row"><span>Temples</span><b>${v.temples} ⛪</b></div>
+        ${v.wonders ? `<div class="ins-row"><span>Wonders</span><b>${v.wonders} 🏛</b></div>` : ''}
+        ${scholarGate(v)}
         ${describeTrades(v)}
         ${v.rival >= 0 ? `<div class="ins-row war"><span>At war with</span><b>${villName(v.rival) || '?'}</b></div>` : ''}
         <button class="ins-smite" id="smite-btn">⚡ Smite this town</button>`;
@@ -9707,6 +10120,22 @@ void main(){
       if (spent > 0) onPowerUsed(pw || { cat: 'god' }, spent);
     }
   }
+  // Scholars are the entire tech tree, and the three things that gate them
+  // were all invisible: wealth was computed every tick and displayed nowhere,
+  // prosperity saturates so nobody reads it as a gate, and the population
+  // floor was never stated. "This age will not pass" was the whole diagnosis.
+  // These thresholds mirror chooseProfession() in sim.js.
+  function scholarGate(v) {
+    const has = v.jobs && Sim.PROFESSIONS ? (v.jobs[Sim.PROFESSIONS.indexOf('scholar')] || 0) : 0;
+    if (has > 0) return '';
+    const miss = [];
+    if (v.pop <= 12) miss.push(`${v.pop}/13 people`);
+    if ((v.wealth || 0) <= 18) miss.push(`${Math.floor(v.wealth || 0)}/19 wealth`);
+    if (v.prosperity <= 0.75) miss.push(`${(v.prosperity * 100) | 0}/76% prosperity`);
+    if (!miss.length) return '<div class="ins-note">Ready for a scholar — one will take up the study soon.</div>';
+    return `<div class="ins-note ins-gate">No scholars, and so no discoveries. Wants: ${miss.join(', ')}.</div>`;
+  }
+
   // A town's roster of trades — who is actually here, and what that buys it.
   function describeTrades(v) {
     if (!v.jobs || !Sim.PROFESSIONS) return '';
@@ -9755,7 +10184,14 @@ void main(){
     G.openPanel = name;
     $('#panel-' + name).classList.add('show');
     $('#tab-' + name) && $('#tab-' + name).classList.add('active');
-    $('#chronicle').style.display = 'none'; // panels own that corner
+    // Three things want that column: the panel (z17), the inspector (z15) and
+    // the chronicle (z14). Only the topmost was reachable, so opening a panel
+    // silently buried the inspector's action buttons under .panel-scroll —
+    // you could see a dossier you could not press. The panel takes the column
+    // outright; selecting something while a panel is open closes the panel
+    // instead (see selectAt).
+    $('#chronicle').style.display = 'none';
+    $('#inspect').classList.remove('show');
     refreshOpenPanel(true);
     Audio8.sfx('select');
   }
@@ -9766,6 +10202,7 @@ void main(){
     $('#chronicle').style.display = '';
     G.openPanel = null;
   }
+  let lastDeedSig = '';
   function refreshOpenPanel(force) {
     if (!G.openPanel) return;
     switch (G.openPanel) {
@@ -9774,10 +10211,53 @@ void main(){
       case 'feed': renderFeed(); break;
       case 'souls': renderSouls(force); break;
       case 'time': renderTime(force); break;
-      case 'testament': if (force) renderTestament(); break;
+      // Deeds count progress ("7/25 lightning bolts") and only ever redrew on
+      // force, so casting with the panel open left the counter frozen. Redraw
+      // only when a count actually moves: renderTestament replaces innerHTML,
+      // and doing that every 250ms would re-hide a hint the moment you
+      // revealed it.
+      case 'testament': {
+        const sig = ACHIEVEMENTS.map(a => G.ach[a.id] || 0).join(',') + '|' + G.story.active +
+                    '|' + Object.keys(G.story.done).length + '|' + G.divinity;
+        if (force || sig !== lastDeedSig) { lastDeedSig = sig; renderTestament(); }
+        break;
+      }
       case 'cosmos': if (force) renderCosmosControls(); break;
       case 'genesis': break; // static form
     }
+  }
+
+  // How close a nation is to its next era. `need` is the same expression the
+  // sim uses (society.js) — neither n.science nor the threshold appeared
+  // anywhere in the game, so "why won't they advance" had no answer, while a
+  // Testament chapter hung on reaching the Modern age.
+  function eraNeed(era) { return 40 * Math.pow(1.9, era); }
+  function nationProgress(n) {
+    const ERAS = PD.Society.ERAS;
+    if (n.era >= ERAS.length - 1) return '<div class="nat-era">Space Age — nothing further to learn.</div>';
+    const need = eraNeed(n.era);
+    const pct = PD.clamp((n.science || 0) / need, 0, 1);
+    return `<div class="nat-era">
+      <span>→ ${ERAS[n.era + 1]}</span>
+      <span class="bar"><span class="bar-fill" style="width:${(pct * 100).toFixed(0)}%;background:var(--accent)"></span></span>
+      <small>${Math.floor(n.science || 0)}/${Math.floor(need)}</small></div>`;
+  }
+  // The drifting opinions that actually decide who declares war (they snap at
+  // -70). Omniscience promised "every nation's true intent" and rendered none
+  // of it; this is that promise, kept, and shown only while the eye is open.
+  function nationIntent(n, soc) {
+    if (!G.omniscient || soc.nations.length < 2) return '';
+    const rows = [];
+    for (const m of soc.nations) {
+      if (m.id === n.id) continue;
+      const r = n.relations ? n.relations[m.id] : null;
+      if (r == null) continue;
+      const mood = r < -70 ? 'murderous' : r < -35 ? 'hostile' : r < -10 ? 'cold'
+                 : r < 15 ? 'wary' : r < 50 ? 'warm' : 'devoted';
+      const col = r < -35 ? '#ff8a6a' : r < 15 ? '#9aa6c8' : '#7fe0a0';
+      rows.push(`<span style="color:${col}">${m.name}: ${mood} (${Math.round(r)})</span>`);
+    }
+    return rows.length ? `<div class="nat-intent">👁 ${rows.join(' · ')}</div>` : '';
   }
 
   // ---- History panel ----
@@ -9790,13 +10270,18 @@ void main(){
     // nations summary
     const ns = $('#nations-list');
     if (soc.nations.length) {
+      const nameOf = (id) => { const m = soc.nations.find(x => x.id === id); return m ? m.name : 'someone'; };
       ns.innerHTML = '<div class="panel-subtitle">Nations</div>' + soc.nations.map(n => {
         const R = Sim.RACES[n.race];
+        // "AT WAR" without saying with whom was the whole report on the one
+        // thing the player might want to intervene in
+        const war = n.warWith.length
+          ? ' · <span class="nat-war">⚔ at war with ' + n.warWith.map(nameOf).join(', ') + '</span>' : '';
         return `<div class="nation-line">${R ? R.emoji : '?'} <b>${n.name}</b> · ${PD.Society.ERAS[n.era]} · ${PD.Society.GOVERNMENTS[n.gov]}<br>
           <small>${n.leaderName} the ${n.leaderTrait} · pop ${n.pop || 0}${
             n.scholars ? ' · 📚 ' + n.scholars + ' scholar' + (n.scholars === 1 ? '' : 's')
                        : ' · <span style="color:#8a7a5a">no scholars</span>'
-          }${n.warWith.length ? ' · ⚔ AT WAR' : ''}</small></div>`;
+          }${war}</small>${nationProgress(n)}${nationIntent(n, soc)}</div>`;
       }).join('');
     } else ns.innerHTML = '';
     // legends
@@ -9814,12 +10299,26 @@ void main(){
     el.innerHTML = soc.prayers.map(p =>
       `<div class="prayer">
         <div class="prayer-text">${p.text}</div>
+        <div class="prayer-grant">${PRAYER_GRANT[p.kind] || 'Their karma rises.'}</div>
         <div class="prayer-btns">
           <button class="pr-answer" data-pid="${p.id}">✨ Answer (+8✦)</button>
-          <button class="pr-refuse" data-pid="${p.id}">🌑 Refuse</button>
+          <button class="pr-refuse" data-pid="${p.id}">🌑 Refuse (−1 karma)</button>
         </div>
       </div>`).join('');
   }
+  // What answering actually does. The effects are wildly unequal — 'monster'
+  // grants a Paragon, the same thing Empower Hero sells for ✦60, in exchange
+  // for GAINING ✦8 — and the panel showed two identical buttons and one
+  // number, so "send us food" and "send us a hero" looked the same. Mirrors
+  // the switch in answerPrayer (society.js).
+  const PRAYER_GRANT = {
+    sick:    'Grants: healed of sickness, restored to full.',
+    famine:  'Grants: +60 food to their town.',
+    war:     'Grants: the town\'s feud ends, and everyone near them is healed.',
+    child:   'Grants: a child is born to their village.',
+    monster: 'Grants: they become a Paragon — a champion, permanently.',
+    thanks:  'Grants: nothing but their gratitude. Karma only.'
+  };
   $('#prayers-list') && $('#prayers-list').addEventListener('click', () => {});
 
   // ---- PixelNet feed ----
@@ -9909,6 +10408,8 @@ void main(){
     for (const a of ACHIEVEMENTS) {
       const have = G.ach[a.id] || 0;
       const done2 = have >= a.need;
+      // a hidden deed does not exist until you have done it
+      if (a.hidden && !done2) continue;
       html += `<div class="deed ${done2 ? 'deed-done' : ''}">${done2 ? '🏆' : '▫'} <b>${a.name}</b> — ${a.desc} <small>(${Math.min(have, a.need)}/${a.need})</small></div>`;
     }
     // transcendence status
@@ -10159,6 +10660,25 @@ void main(){
     });
     $('#btn-menu').addEventListener('click', toggleMenu);
     $('#btn-save').addEventListener('click', () => save());
+    // The faith rate was one number with no way to ask what it was made of.
+    // Tap it and it says.
+    const fstat = document.querySelector('#hud-top .stat.faith');
+    if (fstat) {
+      fstat.addEventListener('click', () => {
+        const b = faithBreakdown();
+        const lines = b.rows.filter(r => Math.abs(r[1]) > 0.0005 || r[0] === 'base')
+          .map(r => `<div class="fb-row"><span>${r[0]}</span><b>+${r[1].toFixed(2)}</b>${r[2] ? `<small>${r[2]}</small>` : ''}</div>`);
+        ask({
+          title: '✦ Where your faith comes from',
+          html: `<div class="fb">${lines.join('')}
+            <div class="fb-row fb-sum"><span>subtotal</span><b>+${b.sub.toFixed(2)}</b></div>
+            <div class="fb-row"><span>divinity ⍟${G.divinity}</span><b>×${b.mult.toFixed(2)}</b></div>
+            <div class="fb-row fb-sum"><span>per tick</span><b>+${b.total.toFixed(2)}</b></div></div>
+            <p class="panel-note">A wonder is worth ${(0.8 / 0.22).toFixed(1)} temples. Wonders raise themselves in towns of level 4 and above.</p>`,
+          ok: 'Close', cancel: null
+        });
+      });
+    }
     const search = $('#tool-search');
     if (search) {
       search.addEventListener('input', () => { G.toolQuery = search.value; buildToolbar(); });
