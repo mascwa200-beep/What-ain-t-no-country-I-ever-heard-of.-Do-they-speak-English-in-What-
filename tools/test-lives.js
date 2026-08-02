@@ -325,6 +325,107 @@ console.log('\n--- the new state survives a round trip ---');
     !!sim.villages[0].jobs && !!sim.villages[0].labour);
 }
 
+// ------------------------------------------- the peace optimisation is safe
+// updateUnit skips its neighbour scan when no enemy can exist. That is a pure
+// speed win ONLY while the precondition is exhaustive — if a new way to
+// become foes is ever added without updating recount(), fights would silently
+// stop happening. These pin the behaviour, not the optimisation.
+console.log('\n--- war still finds those it should ---');
+{
+  // 1. hostile races DO fight, and the precomputed table says so
+  const sim = freshSim(101);
+  for (let i = 0; i < 8; i++) {
+    const h = Sim.spawnUnit(sim, 'human', 60 + i * 0.3, 50);
+    const o = Sim.spawnUnit(sim, 'orc', 60.5 + i * 0.3, 50);
+    if (h) { h.age = h.adultAt + 5; h.food = 1; }
+    if (o) { o.age = o.adultAt + 5; o.food = 1; }
+  }
+  Sim.recount(sim);
+  check('orcs and humans are marked as able to find foes',
+    sim.foeRace.human === true && sim.foeRace.orc === true);
+  // Headcount is the wrong measure — the survivors out-breed the casualties,
+  // so the population climbs even in a war. Track the cohort that was there
+  // when the fighting started, and whether it took wounds.
+  const cohort = sim.units.filter(u => !u.dead).map(u => u.id);
+  for (let i = 0; i < 400; i++) Sim.step(sim, 1);
+  const byId = new Map(sim.units.map(u => [u.id, u]));
+  let fell = 0, wounded = 0;
+  for (const id of cohort) {
+    const u = byId.get(id);
+    if (!u || u.dead) fell++;
+    else if (u.hp < u.maxHp) wounded++;
+  }
+  check('and blood is actually shed between them', fell + wounded > 0,
+    fell + ' fell, ' + wounded + ' wounded of ' + cohort.length);
+
+  // 2. a world of one peaceful race skips the scan
+  const calm = freshSim(103);
+  for (let i = 0; i < 10; i++) {
+    const h = Sim.spawnUnit(calm, 'human', 60 + i * 0.4, 50);
+    if (h) { h.age = h.adultAt + 5; h.food = 1; }
+  }
+  Sim.recount(calm);
+  check('a world of humans alone has no foe for a human',
+    calm.foeRace.human === false, String(calm.foeRace.human));
+  check('and no rivalry is declared', calm.anyRivalry === false);
+
+  // 3. THE TRAP: same-race units at war via village rivalry must still fight,
+  //    even though hostile('human','human') is false and the race table says
+  //    there is no foe. This is the case the optimisation could break.
+  const feud = freshSim(107);
+  const vA = Sim.foundVillage(feud, 'human', 55, 50);
+  const vB = Sim.foundVillage(feud, 'human', 58, 50);
+  check('two same-race villages were founded', !!vA && !!vB && vA.id !== vB.id);
+  for (const vv of [vA, vB]) {
+    for (let i = 0; i < 8; i++) {
+      const u = Sim.spawnUnit(feud, 'human', vv.x + (i % 3) * 0.3, vv.y, { village: vv.id });
+      if (u) { u.age = u.adultAt + 5; u.food = 1; u.hp = u.maxHp; }
+    }
+  }
+  vA.rival = vB.id; vB.rival = vA.id;
+  Sim.recount(feud);
+  check('the race table still reports no racial foe (the trap)',
+    feud.foeRace.human === false);
+  check('but the rivalry flag is raised, so the scan is not skipped',
+    feud.anyRivalry === true);
+  const feudBefore = feud.units.filter(u => !u.dead).length;
+  let hurt = 0;
+  for (let i = 0; i < 300; i++) {
+    Sim.step(feud, 1);
+    vA.rival = vB.id; vB.rival = vA.id;   // hold the feud open
+  }
+  for (const u of feud.units) if (!u.dead && u.hp < u.maxHp) hurt++;
+  const feudAfter = feud.units.filter(u => !u.dead).length;
+  check('neighbours at feud still draw blood despite sharing a race',
+    hurt > 0 || feudAfter < feudBefore,
+    hurt + ' wounded, ' + feudBefore + ' -> ' + feudAfter);
+}
+
+// ------------------------------------------------ the wrap fast path is safe
+console.log('\n--- the round world still wraps ---');
+{
+  const w = PD.World.createWorld(180, 120, 7, {});
+  const W = PD.World;
+  let bad = 0;
+  // idx() gained a fast path; it must agree with the slow form everywhere,
+  // including off both edges and on fractional coordinates
+  for (const x of [-361.5, -180, -1, -0.5, 0, 0.5, 1, 89.9, 179, 179.5, 180, 181, 360, 541.2]) {
+    for (const y of [0, 1, 59, 119]) {
+      const fast = W.idx(w, x, y);
+      const slow = y * w.W + (((Math.floor(x) % w.W) + w.W) % w.W);
+      if (fast !== slow) { bad++; console.log('    MISMATCH x=' + x + ' y=' + y + ' ' + fast + ' vs ' + slow); }
+    }
+  }
+  check('idx() agrees with the unoptimised form at every edge', bad === 0,
+    bad + ' mismatches');
+  let bx = 0;
+  for (const x of [-361.5, -180, -1, -0.5, 0, 0.5, 179.5, 180, 181, 360]) {
+    const fast = W.wrapX(w, x), slow = ((x % w.W) + w.W) % w.W;
+    if (Math.abs(fast - slow) > 1e-9) { bx++; console.log('    wrapX MISMATCH ' + x + ': ' + fast + ' vs ' + slow); }
+  }
+  check('wrapX() agrees with the unoptimised form', bx === 0, bx + ' mismatches');
+}
+
 console.log('\n=== lives failures: ' + fails + ' ===');
 console.log(fails === 0 ? 'LIVES TEST PASSED' : 'LIVES TEST FAILED');
 process.exit(fails === 0 ? 0 : 1);

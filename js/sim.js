@@ -206,7 +206,7 @@
       isNight: false,
       log: [],
       grid: null,
-      UNIT_CAP: 1100
+      UNIT_CAP: 1400
     };
   }
 
@@ -462,7 +462,21 @@
     // village rivalry makes same-species-tolerant races fight each other
     const rivalId = v && v.rival >= 0 ? v.rival : -1;
     let enemy = null, enemyD = 99;
-    forNeighbors(sim, u.x, u.y, 3.2, (o) => {
+
+    // A peaceful world was still paying for war. This scan ran for every
+    // unit every tick, and in a world of one race at peace it could not
+    // possibly find anything: `hostile()` is a pure function of the race
+    // pair, so if nothing alive is hostile to this race, and no village
+    // anywhere has declared a rival, there is no enemy to find. Both facts
+    // are computed once per tick in recount(). Skipping is exactly
+    // equivalent to scanning and finding nothing.
+    // `!== false` not `=== true`: an absent table (first tick, fresh load)
+    // or an unknown race must fall through to scanning, never to skipping.
+    const ff = sim.foeRace;
+    const canHaveFoe = !ff || ff[u.race] !== false ||
+                       (sim.anyRivalry && u.village >= 0);
+    if (!canHaveFoe) { enemy = null; }
+    else forNeighbors(sim, u.x, u.y, 3.2, (o) => {
       if (o === u) return;
       let isFoe = hostile(u.race, o.race);
       if (!isFoe && rivalId >= 0 && o.village === rivalId) isFoe = true;
@@ -872,6 +886,34 @@
         } else u.village = -1;
       }
     }
+
+    // ---- who could possibly fight whom, this tick ----
+    // Consulted by every unit's combat scan (see updateUnit). `hostile()` is
+    // a pure function of the race pair, so this is a full precomputation:
+    // foeRace[r] is true iff some race hostile to r is currently alive.
+    if (!sim.foeRace) sim.foeRace = {};
+    const live = [];
+    for (const k in sim.counts) if (sim.counts[k] > 0) live.push(k);
+    for (const r in RACES) {
+      let any = false;
+      for (let i = 0; i < live.length; i++) {
+        if (hostile(r, live[i])) { any = true; break; }
+      }
+      sim.foeRace[r] = any;
+    }
+    // runtime-registered races are not in RACES at module scope
+    for (let i = 0; i < live.length; i++) {
+      const r = live[i];
+      if (sim.foeRace[r] !== undefined) continue;
+      let any = false;
+      for (let j = 0; j < live.length; j++) {
+        if (hostile(r, live[j])) { any = true; break; }
+      }
+      sim.foeRace[r] = any;
+    }
+    // and whether any settlement has declared on another
+    sim.anyRivalry = false;
+    for (const vv of sim.villages) if (vv.rival >= 0) { sim.anyRivalry = true; break; }
   }
 
   // ---- Main step -------------------------------------------------------
