@@ -21,7 +21,19 @@
   ];
 
   // helper to play sound
-  function snd(n) { if (PD.Audio8) PD.Audio8.sfx(n); }
+  //
+  // Every act of god knows exactly where it landed — apply(G, wx, wy) — but
+  // all 145 sound calls threw that away and played dead centre at full
+  // volume. `at()` is set once by the dispatcher before a power runs, so a
+  // meteor dropped on the far limb now arrives quiet, muffled and off to
+  // the side, without touching a single call site.
+  let sndAt = null;
+  function soundAt(x, y, w, h) { sndAt = (x == null) ? null : [x, y, w, h]; }
+  function snd(n) {
+    if (!PD.Audio8) return;
+    if (sndAt) PD.Audio8.sfx(n, sndAt[0], sndAt[1], sndAt[2], sndAt[3]);
+    else PD.Audio8.sfx(n);
+  }
 
   // Each power: apply(G, wx, wy) -> returns faith cost actually spent (0 if noop/free)
   const POWERS = [
@@ -877,5 +889,5 @@
     { id: 'omni', name: 'Omnipotence' }
   ];
 
-  global.PD.Powers = { POWERS, BY_ID, CATEGORIES };
+  global.PD.Powers = { soundAt, POWERS, BY_ID, CATEGORIES };
 })(window);

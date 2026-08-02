@@ -1131,29 +1131,82 @@ body{
     }
     function resume() { if (ctx && ctx.state === 'suspended') ctx.resume(); }
 
+    // ---- where a sound is happening ------------------------------------
+    // Everything was mono and unattenuated: a volcano on the far side of the
+    // planet arrived at exactly the same volume, and in exactly the same
+    // place, as one under the cursor. `listen()` is fed the camera each
+    // frame; `place()` turns a tile into pan, gain and muffling.
+    let ear = null;   // {lon, lat, dist} in the renderer's terms
+    function listen(lon, lat, dist) { ear = { lon, lat, dist }; }
+
+    // returns {pan, gain, lp} for a world tile, or null when unpositioned
+    function place(x, y, wW, wH) {
+      if (!ear || x == null || y == null) return null;
+      const lon = (x / (wW || 180)) * 360 - 180;
+      const lat = 90 - (y / (wH || 120)) * 180;
+      const d2r = Math.PI / 180;
+      // angle between the listener's view axis and the event, on the sphere
+      const clat = ear.lat * d2r, elat = lat * d2r;
+      let dlon = (lon - ear.lon) * d2r;
+      while (dlon > Math.PI) dlon -= 2 * Math.PI;
+      while (dlon < -Math.PI) dlon += 2 * Math.PI;
+      const cosAng = Math.sin(clat) * Math.sin(elat) +
+                     Math.cos(clat) * Math.cos(elat) * Math.cos(dlon);
+      const ang = Math.acos(Math.max(-1, Math.min(1, cosAng)));   // 0..PI
+      // pan follows which side of the view axis it fell on
+      const pan = Math.max(-1, Math.min(1, Math.cos(elat) * Math.sin(dlon) * 1.6));
+      // the far side of the world is muffled by the whole planet
+      const front = Math.max(0, Math.cos(ang));           // 1 facing, 0 at limb
+      const behind = ang > Math.PI / 2;
+      const zoom = ear.dist ? Math.max(0.35, Math.min(1.6, 2.4 / ear.dist)) : 1;
+      const gain = (behind ? 0.12 : 0.25 + front * 0.75) * zoom;
+      const lp = behind ? 420 : 700 + front * 3600;
+      return { pan, gain, lp };
+    }
+
     // one soft voice: detuned pair through a lowpass with envelope
     function voice(freq, dur, opts) {
       if (!enabled) return;
       const c = ensure(); if (!c) return; resume();
       opts = opts || {};
+      // `when` lets a phrase be scheduled sample-accurately instead of
+      // chained through setTimeout, which jittered audibly under load
+      const t0 = c.currentTime + (opts.when || 0);
       const g = c.createGain();
       const f = c.createBiquadFilter();
-      f.type = 'lowpass'; f.frequency.value = opts.lp || 2200; f.Q.value = 0.6;
+      f.type = 'lowpass'; f.Q.value = 0.6;
+      let vol = opts.vol || 0.2;
+      let lp = opts.lp || 2200;
+      let node = g;
+
+      // position it, if the caller said where it happened
+      const p = opts.pos ? place(opts.pos[0], opts.pos[1], opts.pos[2], opts.pos[3]) : null;
+      if (p) {
+        vol *= p.gain;
+        lp = Math.min(lp, p.lp);
+        if (c.createStereoPanner) {
+          const sp = c.createStereoPanner();
+          sp.pan.value = p.pan;
+          g.connect(sp); node = sp;
+        }
+      }
+      if (vol < 0.0008) return;   // too far to bother rendering
+
+      f.frequency.value = lp;
       const atk = opts.atk != null ? opts.atk : 0.02;
-      const vol = opts.vol || 0.2;
-      g.gain.setValueAtTime(0.0001, c.currentTime);
-      g.gain.linearRampToValueAtTime(vol, c.currentTime + atk);
-      g.gain.exponentialRampToValueAtTime(0.0001, c.currentTime + dur);
-      f.connect(g); g.connect(opts.dest || sfxGain);
+      g.gain.setValueAtTime(0.0001, t0);
+      g.gain.linearRampToValueAtTime(vol, t0 + atk);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+      f.connect(g); node.connect(opts.dest || sfxGain);
       const detunes = opts.detune || [0, 7];
       for (const dt of detunes) {
         const o = c.createOscillator();
         o.type = opts.type || 'sine';
-        o.frequency.setValueAtTime(freq, c.currentTime);
-        if (opts.slideTo) o.frequency.exponentialRampToValueAtTime(Math.max(1, opts.slideTo), c.currentTime + dur);
+        o.frequency.setValueAtTime(freq, t0);
+        if (opts.slideTo) o.frequency.exponentialRampToValueAtTime(Math.max(1, opts.slideTo), t0 + dur);
         o.detune.value = dt;
         o.connect(f);
-        o.start(); o.stop(c.currentTime + dur + 0.05);
+        o.start(t0); o.stop(t0 + dur + 0.05);
       }
     }
     function blip(freq, dur, type, vol, dest, slideTo) {
@@ -1178,46 +1231,168 @@ body{
       voice(freq, dur, { type: 'sine', vol: vol || 0.4, lp: 300, detune: [0], slideTo: freq * 0.4 });
     }
 
+    // ---- ducking -------------------------------------------------------
+    // An act of god used to sit at the same level as the pad behind it.
+    // Big events now press the score down and let it swell back.
+    function duck(amount, hold) {
+      if (!musicGain || !ctx) return;
+      const t = ctx.currentTime, base = musicBase();
+      musicGain.gain.cancelScheduledValues(t);
+      musicGain.gain.setValueAtTime(musicGain.gain.value, t);
+      musicGain.gain.linearRampToValueAtTime(base * (1 - amount), t + 0.06);
+      musicGain.gain.setTargetAtTime(base, t + (hold || 0.5), 0.9);
+    }
+
+    // ---- whispered prayers ---------------------------------------------
+    // Prayers have always existed as text in a side panel. Nobody has ever
+    // heard one. This is a breath, not a note: filtered noise shaped into
+    // two or three syllables, pitched to the pad so a hundred of them can
+    // overlap without turning into noise, and placed where the village is.
+    // The effect is meant to sit just at the edge of hearing.
+    function whisper(pos, fervor) {
+      if (!enabled || !musicOn) return;
+      const c = ensure(); if (!c) return; resume();
+      const p = pos ? place(pos[0], pos[1], pos[2], pos[3]) : null;
+      // A thunderclap carries from the far side of a planet; a whisper does
+      // not. `place()` floors an occluded event at 0.12, so this cutoff sits
+      // deliberately above that: prayers are only heard from the visible face.
+      if (p && p.gain < 0.15) return;
+      const syll = 2 + ((Math.random() * 2) | 0);
+      const base = 0.014 * (0.6 + (fervor || 0.5) * 0.8) * (p ? p.gain : 1);
+      let t = 0;
+      for (let i = 0; i < syll; i++) {
+        const dur = 0.14 + Math.random() * 0.13;
+        const n = Math.floor(c.sampleRate * dur);
+        const buf = c.createBuffer(1, n, c.sampleRate);
+        const d = buf.getChannelData(0);
+        // a vowel-ish envelope: breath in, breath out
+        for (let s = 0; s < n; s++) {
+          const u = s / n;
+          d[s] = (Math.random() * 2 - 1) * Math.sin(u * Math.PI) * 0.9;
+        }
+        const src = c.createBufferSource(); src.buffer = buf;
+        // two formants make noise read as a voice rather than as wind
+        const f1 = c.createBiquadFilter();
+        f1.type = 'bandpass'; f1.Q.value = 5.5;
+        f1.frequency.value = 380 + Math.random() * 320;
+        const f2 = c.createBiquadFilter();
+        f2.type = 'bandpass'; f2.Q.value = 7;
+        f2.frequency.value = 1100 + Math.random() * 900;
+        const g = c.createGain();
+        const t0 = c.currentTime + t;
+        g.gain.setValueAtTime(0.0001, t0);
+        g.gain.linearRampToValueAtTime(base, t0 + dur * 0.35);
+        g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+        src.connect(f1); f1.connect(f2); f2.connect(g);
+        let out = g;
+        if (p && c.createStereoPanner) {
+          const sp = c.createStereoPanner();
+          sp.pan.value = p.pan * 0.8;
+          g.connect(sp); out = sp;
+        }
+        // prayers go through the hall, which is what makes them read as
+        // coming from somewhere rather than from the speakers
+        out.connect(verb); out.connect(musicGain);
+        src.start(t0); src.stop(t0 + dur + 0.02);
+        t += dur * (0.75 + Math.random() * 0.4);
+      }
+    }
+
+    // set by sfx() for the duration of one effect so the individual voices
+    // below do not each need the position threaded through them
+    let curPos = null;
+    const P = () => curPos;
+
     const SFX = {
       click:   () => voice(720, 0.09, { vol: 0.14, lp: 4000, detune: [0] }),
-      select:  () => { voice(523, 0.14, { vol: 0.14 }); setTimeout(() => voice(784, 0.18, { vol: 0.12 }), 60); },
-      spawn:   () => { voice(392, 0.3, { vol: 0.16, type: 'triangle' }); setTimeout(() => voice(587, 0.4, { vol: 0.14 }), 80); },
-      terra:   () => { noiseBurst(0.5, 0.14, 500); subHit(90, 0.5, 0.25); },
-      lightning: () => { noiseBurst(0.9, 0.5, 3200, 200); subHit(70, 1.1, 0.5); },
-      meteor:  () => { voice(160, 1.2, { type: 'sawtooth', vol: 0.16, lp: 900, slideTo: 40 }); noiseBurst(1.4, 0.5, 900); subHit(55, 1.6, 0.6); },
+      select:  () => { voice(523, 0.14, { vol: 0.14 }); voice(784, 0.18, { vol: 0.12, when: 0.06 }); },
+      spawn:   () => { voice(392, 0.3, { vol: 0.16, type: 'triangle', pos: P() }); voice(587, 0.4, { vol: 0.14, when: 0.08, pos: P() }); },
+      terra:   () => { duck(0.35, 0.4); noiseBurst(0.5, 0.14, 500); subHit(90, 0.5, 0.25); },
+      lightning: () => { duck(0.55, 0.5); noiseBurst(0.9, 0.5, 3200, 200); subHit(70, 1.1, 0.5); },
+      meteor:  () => { duck(0.7, 1.2); voice(160, 1.2, { type: 'sawtooth', vol: 0.16, lp: 900, slideTo: 40, pos: P() }); noiseBurst(1.4, 0.5, 900); subHit(55, 1.6, 0.6); },
       fire:    () => noiseBurst(0.6, 0.2, 1800),
       rain:    () => noiseBurst(1.2, 0.14, 900, 400),
-      bless:   () => { [659, 831, 988, 1319].forEach((f, i) => setTimeout(() => voice(f, 0.8, { vol: 0.1, atk: 0.05 }), i * 90)); },
-      plague:  () => voice(130, 1.2, { type: 'sawtooth', vol: 0.12, lp: 500, slideTo: 60, detune: [0, -15, 15] }),
-      quake:   () => { noiseBurst(1.6, 0.45, 260); subHit(40, 1.8, 0.7); },
-      death:   () => voice(220, 0.35, { vol: 0.1, slideTo: 90 }),
-      build:   () => { voice(440, 0.12, { vol: 0.1 }); setTimeout(() => voice(554, 0.14, { vol: 0.1 }), 70); },
-      war:     () => { voice(311, 0.3, { type: 'sawtooth', vol: 0.12, lp: 1200 }); subHit(90, 0.5, 0.3); },
-      levelup: () => { [523, 659, 784, 1047, 1319].forEach((f, i) => setTimeout(() => voice(f, 0.7, { vol: 0.12, atk: 0.03 }), i * 90)); },
+      bless:   () => { const q = P(); [659, 831, 988, 1319].forEach((f, i) => voice(f, 0.8, { vol: 0.1, atk: 0.05, when: i * 0.09, pos: q })); },
+      plague:  () => voice(130, 1.2, { type: 'sawtooth', vol: 0.12, lp: 500, slideTo: 60, detune: [0, -15, 15], pos: P() }),
+      quake:   () => { duck(0.6, 1.0); noiseBurst(1.6, 0.45, 260); subHit(40, 1.8, 0.7); },
+      death:   () => voice(220, 0.35, { vol: 0.1, slideTo: 90, pos: P() }),
+      build:   () => { voice(440, 0.12, { vol: 0.1, pos: P() }); voice(554, 0.14, { vol: 0.1, when: 0.07, pos: P() }); },
+      war:     () => { voice(311, 0.3, { type: 'sawtooth', vol: 0.12, lp: 1200, pos: P() }); subHit(90, 0.5, 0.3); },
+      levelup: () => { const q = P(); [523, 659, 784, 1047, 1319].forEach((f, i) => voice(f, 0.7, { vol: 0.12, atk: 0.03, when: i * 0.09, pos: q })); },
       error:   () => voice(150, 0.25, { type: 'sawtooth', vol: 0.1, lp: 600, slideTo: 90 })
     };
 
-    // generative ambient score: slow chord pads + sparse celestial melody
-    const CHORDS = [
-      [220.0, 277.18, 329.63, 415.30],  // Amaj7-ish
-      [174.61, 220.0, 261.63, 329.63],  // Fmaj7
-      [196.0, 246.94, 293.66, 369.99],  // G add
-      [146.83, 220.0, 293.66, 349.23]   // Dm-ish
-    ];
-    const LEAD = [440, 493.88, 554.37, 659.26, 739.99, 880];
+    // ---- an adaptive score ---------------------------------------------
+    // The old score was four chords on a four-second timer, forever,
+    // identical whether the world below was a paradise or a graveyard.
+    // The palette now follows the state of creation.
+    const PALETTES = {
+      // serene: major sevenths, open and unhurried
+      calm: {
+        chords: [[220.00, 277.18, 329.63, 415.30], [174.61, 220.00, 261.63, 329.63],
+                 [196.00, 246.94, 293.66, 369.99], [146.83, 220.00, 293.66, 349.23]],
+        lead: [440, 493.88, 554.37, 659.26, 739.99, 880],
+        lp: 1100, leadLp: 2600, rate: 1, density: 0.65, pad: 0.045
+      },
+      // war: minor seconds ground against the root, low and close
+      war: {
+        chords: [[146.83, 174.61, 220.00, 233.08], [130.81, 155.56, 196.00, 207.65],
+                 [164.81, 196.00, 246.94, 261.63], [123.47, 146.83, 185.00, 196.00]],
+        lead: [293.66, 311.13, 349.23, 415.30, 466.16],
+        lp: 760, leadLp: 1500, rate: 0.8, density: 0.4, pad: 0.055
+      },
+      // plague: a diminished haze that never resolves
+      plague: {
+        chords: [[138.59, 164.81, 196.00, 233.08], [130.81, 155.56, 185.00, 220.00],
+                 [146.83, 174.61, 207.65, 246.94], [123.47, 146.83, 174.61, 207.65]],
+        lead: [277.18, 311.13, 369.99, 415.30],
+        lp: 620, leadLp: 1200, rate: 1.25, density: 0.3, pad: 0.05
+      },
+      // glory: bright, wide, a fifth stacked on top
+      glory: {
+        chords: [[261.63, 329.63, 392.00, 493.88], [220.00, 277.18, 329.63, 440.00],
+                 [246.94, 311.13, 369.99, 466.16], [196.00, 246.94, 293.66, 392.00]],
+        lead: [523.25, 587.33, 659.26, 783.99, 880, 1046.50],
+        lp: 1700, leadLp: 3800, rate: 0.9, density: 0.8, pad: 0.04
+      },
+      // the void: almost nothing, a long way off
+      empty: {
+        chords: [[110.00, 164.81, 220.00], [98.00, 146.83, 196.00]],
+        lead: [220, 246.94, 293.66],
+        lp: 460, leadLp: 900, rate: 1.6, density: 0.15, pad: 0.03
+      }
+    };
+    let mood = 'calm', moodMix = 0;
+
+    // The world tells the score what it is. Called from the game loop.
+    function setMood(name) {
+      if (!PALETTES[name] || name === mood) return;
+      mood = name; moodMix = 0;
+      // retune the running pad rather than cutting it off
+      if (musicGain && ctx) musicGain.gain.setTargetAtTime(musicBase(), ctx.currentTime, 1.2);
+      if (musicTimer) { clearInterval(musicTimer); musicTimer = null; startMusic(); }
+    }
+    function musicBase() {
+      const p = PALETTES[mood] || PALETTES.calm;
+      return (timeDir < 0 ? 0.16 : 0.28) * (p === PALETTES.empty ? 0.6 : 1);
+    }
+
     function musicStep() {
       if (!musicOn || !enabled) return;
-      const chord = CHORDS[(step >> 1) % CHORDS.length];
+      const P = PALETTES[mood] || PALETTES.calm;
+      const chord = P.chords[(step >> 1) % P.chords.length];
       const bend = timeDir < 0 ? 0.62 : 1;   // reversed time sags a fifth down
       if (step % 2 === 0) {
         for (const f of chord) {
-          voice(f * bend, 7.5, { vol: 0.045, atk: 2.5, lp: timeDir < 0 ? 700 : 1100, detune: [-6, 5], dest: musicGain });
+          voice(f * bend, 7.5, { vol: P.pad, atk: 2.5, lp: timeDir < 0 ? 700 : P.lp, detune: [-6, 5], dest: musicGain });
         }
-        voice(chord[0] / 2 * bend, 8, { vol: 0.06, atk: 2.0, lp: 300, detune: [0], dest: musicGain });
+        voice(chord[0] / 2 * bend, 8, { vol: P.pad * 1.3, atk: 2.0, lp: 300, detune: [0], dest: musicGain });
       }
-      if (Math.random() < 0.65) {
-        const f = LEAD[(Math.random() * LEAD.length) | 0] * bend;
-        voice(f, 2.4, { vol: 0.035, atk: 0.4, lp: 2600, detune: [0, 4], dest: musicGain });
+      if (Math.random() < P.density) {
+        const f = P.lead[(Math.random() * P.lead.length) | 0] * bend;
+        // schedule inside the bar instead of exactly on it
+        voice(f, 2.4, { vol: 0.035, atk: 0.4, lp: P.leadLp, detune: [0, 4],
+                        dest: musicGain, when: Math.random() * 1.6 });
       }
       step++;
     }
@@ -1247,7 +1422,15 @@ body{
     return {
       init() { ensure(); },
       unlock() { ensure(); resume(); if (musicOn) startMusic(); started = true; },
-      sfx(name) { if (SFX[name]) SFX[name](); },
+      // sfx('lightning') still works; sfx('lightning', x, y) places it on
+      // the globe and attenuates it against where the camera is looking
+      sfx(name, x, y, wW, wH) {
+        if (!SFX[name]) return;
+        curPos = (x != null && y != null) ? [x, y, wW, wH] : null;
+        try { SFX[name](); } finally { curPos = null; }
+      },
+      listen, whisper, duck, setMood,
+      mood() { return mood; },
       setEnabled(v) { enabled = v; if (!v) stopMusic(); },
       setMusic(v) { musicOn = v; if (v && started) startMusic(); else stopMusic(); },
       isEnabled() { return enabled; },
@@ -1256,7 +1439,7 @@ body{
       setTimeDirection(d) {
         timeDir = d;
         if (!ctx) return;
-        if (musicGain) musicGain.gain.setTargetAtTime(d < 0 ? 0.16 : 0.28, ctx.currentTime, 0.4);
+        if (musicGain) musicGain.gain.setTargetAtTime(musicBase(), ctx.currentTime, 0.4);
         if (verbGain) verbGain.gain.setTargetAtTime(d < 0 ? 0.85 : 0.5, ctx.currentTime, 0.4);
       },
       suspend() { stopMusic(); if (ctx && ctx.state === 'running') ctx.suspend(); },
@@ -1840,6 +2023,90 @@ body{
   const GIVEN2 = ['a','ah','an','ar','ella','en','ette','ia','ic','in','is','on','or','ric','ula','us','wen','wyn'];
   const TRAITS = ['brave','kind','greedy','curious','devout','cruel','wise','lazy','zealous','gentle','proud','sly','stoic','merry','grim','dreamy'];
   const PROFESSIONS = ['farmer','builder','hunter','priest','soldier','healer','scholar','artisan','merchant','bard'];
+
+  // ---- what a soul's nature actually DOES -------------------------------
+  // Every unit has carried a trait and a profession since the first build,
+  // and nothing has ever read them: they were printed in the inspector and
+  // used to decorate prayer text, and that was all. A "brave" farmer and a
+  // "lazy" soldier were byte-for-byte identical in the simulation.
+  //
+  // These two tables are the whole fix. They are plain data consulted at
+  // decision points the loop already runs, so nothing new is scanned:
+  //   bravery  fight vs flee, and how hard they hit
+  //   work     share of the village's labour they actually do
+  //   piety    faith generated, pull toward temples
+  //   greed    hoards food, and will take it from others
+  //   roam     how far from home they will stray
+  //   warmth   tends the hurt nearby; drifts karma up
+  //   guile    steals from rival stores
+  const T = (bravery, work, piety, greed, roam, warmth, guile) =>
+    ({ bravery, work, piety, greed, roam, warmth, guile });
+  const TRAIT_FX = {
+    brave:   T( 1.55, 1.00, 1.00, 0.90, 1.20, 1.00, 1.00),
+    kind:    T( 0.85, 1.05, 1.10, 0.70, 0.90, 1.90, 0.80),
+    greedy:  T( 0.95, 1.15, 0.80, 2.10, 1.00, 0.50, 1.50),
+    curious: T( 1.05, 0.95, 1.05, 1.00, 1.85, 1.05, 1.10),
+    devout:  T( 1.00, 1.00, 2.00, 0.80, 0.80, 1.25, 0.80),
+    cruel:   T( 1.35, 0.85, 0.75, 1.45, 1.10, 0.20, 1.40),
+    wise:    T( 1.00, 1.25, 1.30, 0.85, 0.95, 1.30, 0.85),
+    lazy:    T( 0.70, 0.45, 0.90, 1.15, 0.70, 0.90, 1.10),
+    zealous: T( 1.45, 1.05, 1.75, 0.85, 1.05, 0.85, 0.90),
+    gentle:  T( 0.55, 1.00, 1.15, 0.75, 0.85, 1.60, 0.75),
+    proud:   T( 1.40, 1.10, 0.95, 1.20, 1.00, 0.80, 0.95),
+    sly:     T( 0.90, 0.90, 0.85, 1.55, 1.25, 0.70, 2.20),
+    stoic:   T( 1.20, 1.20, 1.00, 0.80, 0.90, 1.00, 0.85),
+    merry:   T( 0.95, 1.00, 1.05, 0.95, 1.15, 1.35, 1.00),
+    grim:    T( 1.30, 1.10, 0.85, 1.00, 0.95, 0.65, 1.05),
+    dreamy:  T( 0.75, 0.70, 1.45, 0.85, 1.55, 1.15, 0.95)
+  };
+  // resolved once per trait index so the hot loop never does a string lookup
+  const TRAIT_BY_IDX = TRAITS.map(n => TRAIT_FX[n]);
+  const NEUTRAL = T(1, 1, 1, 1, 1, 1, 1);
+  function traitFx(u) { return TRAIT_BY_IDX[u.trait] || NEUTRAL; }
+
+  // What each profession contributes to the settlement per village tick,
+  // scaled by that citizen's `work`. Food feeds the store, faith reaches the
+  // god, science advances the nation, order suppresses unrest, care fights
+  // sickness, build hastens construction.
+  const PROF_FX = {
+    farmer:   { food: 0.135, build: 0.05 },
+    builder:  { build: 0.85,  food: 0.012 },
+    hunter:   { food: 0.100, order: 0.10 },
+    priest:   { faith: 0.085, care: 0.10 },
+    soldier:  { order: 0.90,  food: 0.010 },
+    healer:   { care: 0.90,   faith: 0.010 },
+    scholar:  { science: 0.90, faith: 0.012 },
+    artisan:  { build: 0.40,  wealth: 0.55 },
+    merchant: { wealth: 0.90, food: 0.030 },
+    bard:     { morale: 0.90, faith: 0.030 }
+  };
+  const PROF_BY_IDX = PROFESSIONS.map(n => PROF_FX[n] || {});
+  function profFx(u) { return PROF_BY_IDX[u.prof] || {}; }
+
+  const P_FARMER = PROFESSIONS.indexOf('farmer');
+  const P_PRIEST = PROFESSIONS.indexOf('priest');
+  const P_SOLDIER = PROFESSIONS.indexOf('soldier');
+  const P_HEALER = PROFESSIONS.indexOf('healer');
+  const P_BUILDER = PROFESSIONS.indexOf('builder');
+  const P_SCHOLAR = PROFESSIONS.indexOf('scholar');
+
+  // A trade is not drawn from a hat. A starving town raises farmers; a town
+  // under siege raises soldiers; a plague town raises healers. Only once the
+  // necessities are met does anyone get to be a bard.
+  function chooseProfession(sim, villageId) {
+    const v = villageId >= 0 ? villageById(sim, villageId) : null;
+    if (!v) return (sim.rng() * PROFESSIONS.length) | 0;
+    if (v.food < 12 + v.pop * 0.5 && sim.rng() < 0.65) return P_FARMER;
+    if (v.underAttack > 0 && sim.rng() < 0.55) return P_SOLDIER;
+    if ((v.plagueT || 0) > 0 && sim.rng() < 0.5) return P_HEALER;
+    if (v.temples > 0 && (v.jobs ? v.jobs[P_PRIEST] : 0) < v.temples * 2 && sim.rng() < 0.4) return P_PRIEST;
+    if (v.pop < 8 && sim.rng() < 0.4) return sim.rng() < 0.6 ? P_FARMER : P_BUILDER;
+    // A settled, wealthy town can afford a few thinkers — but only a few.
+    // Keyed on wealth and size rather than prosperity, which saturates.
+    if (v.pop > 12 && (v.wealth || 0) > 18 && v.prosperity > 0.75 &&
+        (v.jobs ? v.jobs[P_SCHOLAR] : 0) < 2 + v.pop * 0.08 && sim.rng() < 0.30) return P_SCHOLAR;
+    return (sim.rng() * PROFESSIONS.length) | 0;
+  }
   function personName(race, rng) {
     return GIVEN[(rng() * GIVEN.length) | 0] + GIVEN2[(rng() * GIVEN2.length) | 0];
   }
@@ -1923,7 +2190,8 @@ body{
       // identity: every creature is somebody
       name: personName(race, sim.rng),
       trait: (sim.rng() * TRAITS.length) | 0,
-      prof: (sim.rng() * PROFESSIONS.length) | 0,
+      // a trade is chosen for you by the place you are born into
+      prof: chooseProfession(sim, (opts && opts.village != null) ? opts.village : -1),
       karma: 0,
       paragon: 0 // >0: an empowered hero (grants stats & powers)
     };
@@ -2060,9 +2328,23 @@ body{
     }
 
     // sickness
+    const tf = traitFx(u);
+
     if (u.sick > 0) {
       u.sick++;
-      u.hp -= 0.25;
+      // the stoic and the hardy endure what carries others off
+      u.hp -= 0.25 / (0.7 + tf.work * 0.3);
+      // and a town with healers in it treats its people: sickness used to be
+      // a bare timer with a 2% spontaneous cure and nothing could affect it
+      const hv = u.village >= 0 ? villageById(sim, u.village) : null;
+      if (hv) {
+        hv.sickCount = (hv.sickCount || 0) + 1;
+        const care = hv.labour ? hv.labour.care : 0;
+        if (care > 0.2) {
+          u.hp = PD.clamp(u.hp + care * 0.10, 0, u.maxHp);
+          if (sim.rng() < PD.clamp(care * 0.004, 0, 0.05)) u.sick = 0;
+        }
+      }
       // spread
       if (u.sick % 12 === 0) {
         forNeighbors(sim, u.x, u.y, 2.5, (o) => {
@@ -2077,8 +2359,10 @@ body{
     const v = u.village >= 0 ? villageById(sim, u.village) : null;
     if (!R.monster && !R.ghost) {
       if (v && v.food > 0) {
-        u.food = PD.clamp(u.food + 0.02, 0, 1);
-        v.food -= 0.018;
+        // the greedy take more than their share, and the village feels it
+        const take = 0.018 * (0.75 + tf.greed * 0.45);
+        u.food = PD.clamp(u.food + 0.02 * (0.8 + tf.greed * 0.3), 0, 1);
+        v.food -= take;
       } else {
         // wild units forage from the land they stand on
         const ti = W.idx(world, PD.clamp(Math.floor(u.x), 0, world.W - 1), PD.clamp(Math.floor(u.y), 0, world.H - 1));
@@ -2120,6 +2404,19 @@ body{
         moveToward(sim, u, R.spd * 1.3);
         return;
       }
+      // A thinking creature weighs the odds. The gentle and the lazy break
+      // and run from a fight they are losing; the brave and the proud do
+      // not, which is what makes watching them mean anything.
+      if (R.sentient) {
+        const hurt = u.hp / u.maxHp;
+        const flee = 0.34 / Math.max(0.25, tf.bravery);
+        if (hurt < flee && enemyD < 3) {
+          u.state = 'flee';
+          u.tx = u.x + (u.x - enemy.x) * 2; u.ty = u.y + (u.y - enemy.y) * 2;
+          moveToward(sim, u, R.spd * 1.25);
+          return;
+        }
+      }
       u.state = 'fight';
       u.tx = enemy.x; u.ty = enemy.y;
       if (enemyD < 1.2) {
@@ -2131,6 +2428,9 @@ body{
           if (R.monster && sim.bloodMoonT > 0) mult *= 1.6;
           if (u.paragon) mult *= 1 + u.paragon;
           if (u.big) mult *= u.big;
+          // nature and training both tell in the blow
+          mult *= 0.55 + tf.bravery * 0.45;
+          if (PROFESSIONS[u.prof] === 'soldier') mult *= 1.35;
           enemy.hp -= R.dmg * mult;
           u.cd = 18;
           if (PD.FX) PD.FX.hit(enemy.x, enemy.y);
@@ -2149,6 +2449,20 @@ body{
         moveToward(sim, u, R.spd * 1.15);
       }
       return;
+    }
+
+    // ---- the kindness of ordinary people ----
+    // Healers were a racial gift only. Now a kind or gentle soul of any race
+    // stops for the wounded — the single most visible way a trait reads on
+    // screen, because you can watch someone break off and go help.
+    if (R.sentient && tf.warmth >= 1.3 && sim.tick % 24 === (u.id & 23)) {
+      forNeighbors(sim, u.x, u.y, 2.6, (o) => {
+        if (o !== u && !RACES[o.race].monster && (o.hp < o.maxHp * 0.6 || o.sick > 0)) {
+          o.hp = PD.clamp(o.hp + 0.9 * tf.warmth, 0, o.maxHp);
+          if (o.sick > 0 && sim.rng() < 0.06 * tf.warmth) o.sick = 0;
+          u.karma += 0.02;
+        }
+      });
     }
 
     // ---- racial gifts ----
@@ -2207,13 +2521,15 @@ body{
     // homing toward village if far (settlers/citizens stay near home)
     if (v) {
       const dh = W.wdist(world, u.x, u.y, v.x, v.y);
-      if (dh > v.radius + 5) { u.state = 'goHome'; u.tx = v.x; u.ty = v.y; moveToward(sim, u, R.spd); return; }
+      // the curious and the dreamy wander far; the devout keep close to home
+      const leash = v.radius + 5 * tf.roam;
+      if (dh > leash) { u.state = 'goHome'; u.tx = v.x; u.ty = v.y; moveToward(sim, u, R.spd); return; }
     }
 
-    // wander
+    // wander — the lazy dawdle, the curious range
     if (W.wdist(world, u.x, u.y, u.tx, u.ty) < 0.4 || sim.rng() < 0.02) pickWander(sim, u);
     u.state = 'wander';
-    moveToward(sim, u, R.spd * (0.6 + 0.4 * (u.food)));
+    moveToward(sim, u, R.spd * (0.6 + 0.4 * u.food) * (0.65 + tf.work * 0.35));
   }
 
   function killUnit(sim, u, byRace, killer) {
@@ -2276,19 +2592,66 @@ body{
       }
     }
     v.temples = temples; v.houses = houses;
+
+    // ---- the labour of actual people ----
+    // Production used to be a pure function of dirt: fertility and farm
+    // count, with population appearing only as mouths to feed. A town of
+    // ten farmers and a town of ten bards produced exactly the same crop.
+    // `v.labour` is accumulated by the census below, so the town's output
+    // is the sum of what its citizens are and how hard their nature makes
+    // them work.
+    const L = v.labour || (v.labour = { food: 0, build: 0, faith: 0, science: 0, care: 0, order: 0, wealth: 0, morale: 0 });
+    const era = v.era || 0;
+    // Eras were flavour text with a government change attached. Now the age
+    // a people live in multiplies what their hands can do.
+    const eraYield = 1 + era * 0.16;
+
     // base forage keeps small settlements alive; land+farms scale it up
-    const production = (0.7 + fertSum + farms * 0.6) * 0.06 * seasonMul;
+    const production = (0.7 + fertSum + farms * 0.6) * 0.06 * seasonMul * eraYield
+                     + L.food * seasonMul;
     v.food += production;
+    v.wealth = PD.clamp((v.wealth || 0) * 0.97 + L.wealth * 0.05, 0, 200);
+    // a settlement with no one keeping order frays; soldiers and hunters hold it
+    v.order = PD.clamp((v.order || 0.5) * 0.95 + PD.clamp(L.order / Math.max(2, v.pop * 0.35), 0, 1) * 0.05, 0, 1);
+    v.morale = PD.clamp((v.morale || 0.5) * 0.96 + PD.clamp(0.35 + L.morale * 0.5 + v.prosperity * 0.3, 0, 1) * 0.04, 0, 1);
     // consumption is handled per-unit (citizens draw from the store); add a
     // small upkeep so sprawling empty claims aren't free
     v.food -= ownedLand * 0.004;
 
+    // ---- granaries: grain does not keep forever ----
+    // The store was unbounded, so a mature town sat on tens of thousands of
+    // food (8.6k by year 25 before this change, and my labour on top of the
+    // land yield pushed that to 23k). Nothing could ever threaten a town
+    // with that buffer, and prosperity — being food per capita — pinned at
+    // 1.0 for the rest of the world's life, which flattened every system
+    // downstream of it. A settlement can now only keep what it can store.
+    const granary = 45 + v.pop * 7 + v.level * 30 + (v.houses || 0) * 4;
+    if (v.food > granary) {
+      v.food = granary + (v.food - granary) * 0.35;  // the surplus spoils
+      if (v.food > granary * 1.6) v.food = granary * 1.6;
+    }
+
     // carrying capacity from worked land (this is what stops runaway growth)
     v.cap = Math.min(120, 5 + Math.floor(fertSum * 2.2) + farms * 2 + v.level * 3);
 
-    // prosperity from food per capita
+    // prosperity from food per capita, and from the trades that make a town
+    // worth living in rather than merely survivable
     const perCap = v.pop > 0 ? v.food / v.pop : v.food;
-    v.prosperity = PD.clamp(v.prosperity * 0.94 + PD.clamp(perCap / 6, 0, 1) * 0.06, 0, 1);
+    const comfort = PD.clamp(perCap / 6, 0, 1) * 0.75
+                  + PD.clamp((v.wealth || 0) / 60, 0, 1) * 0.15
+                  + (v.morale || 0.5) * 0.10;
+    v.prosperity = PD.clamp(v.prosperity * 0.94 + comfort * 0.06, 0, 1);
+
+    // ---- healers earn their keep ----
+    // Sickness was a pure timer: catch it and either die or roll a 2% cure.
+    // A town with healers now actually treats its people.
+    // The cure is applied by the sick unit itself (see updateUnit), which is
+    // O(1) per sufferer instead of a full unit scan per village per tick.
+    v.underAttack = Math.max(0, (v.underAttack || 0) - 1);
+    v.plagueT = v.sickCount > 0 ? 60 : Math.max(0, (v.plagueT || 0) - 1);
+
+    // faith reaching the god is the work of priests and temples together —
+    // the Society layer reads v.labour.faith when it tallies devotion
 
     // ---- growth: birth a citizen (logistic toward capacity) ----
     if (v.pop < v.cap && v.food > 8 + v.pop * 0.6 && sim.units.length < sim.UNIT_CAP) {
@@ -2393,11 +2756,41 @@ body{
     for (const k in RACES) sim.counts[k] = 0;
     for (const k in sim.counts) sim.counts[k] = 0;
     sim.vmap = new Map();
-    for (const v of sim.villages) { v.pop = 0; sim.vmap.set(v.id, v); }
+    for (const v of sim.villages) {
+      v.pop = 0; v.sickCount = 0; sim.vmap.set(v.id, v);
+      // the labour census, zeroed here and refilled by the same pass that
+      // counts heads — a settlement's output is recomputed from its actual
+      // living citizens every time, so plague and war show up in the crop
+      const L = v.labour || (v.labour = { food: 0, build: 0, faith: 0, science: 0, care: 0, order: 0, wealth: 0, morale: 0 });
+      L.food = L.build = L.faith = L.science = L.care = L.order = L.wealth = L.morale = 0;
+      if (!v.jobs) v.jobs = new Array(PROFESSIONS.length).fill(0);
+      else v.jobs.fill(0);
+    }
     for (const u of sim.units) {
       if (u.dead) continue;
       sim.counts[u.race] = (sim.counts[u.race] || 0) + 1;
-      if (u.village >= 0) { const v = villageById(sim, u.village); if (v) v.pop++; else u.village = -1; }
+      if (u.village >= 0) {
+        const v = villageById(sim, u.village);
+        if (v) {
+          v.pop++;
+          // Children and the starving do not work a full day. Everything
+          // else is nature: a lazy scholar advances less than a stoic one.
+          if (RACES[u.race].sentient && u.age > u.adultAt) {
+            const fx = profFx(u);
+            const w = traitFx(u).work * (0.45 + 0.55 * u.food) * (u.sick > 0 ? 0.35 : 1);
+            const L = v.labour;
+            if (fx.food) L.food += fx.food * w;
+            if (fx.build) L.build += fx.build * w;
+            if (fx.faith) L.faith += fx.faith * w;
+            if (fx.science) L.science += fx.science * w;
+            if (fx.care) L.care += fx.care * w;
+            if (fx.order) L.order += fx.order * w;
+            if (fx.wealth) L.wealth += fx.wealth * w;
+            if (fx.morale) L.morale += fx.morale * w;
+            v.jobs[u.prof]++;
+          }
+        } else u.village = -1;
+      }
     }
   }
 
@@ -2576,7 +2969,8 @@ body{
     RACES, SENTIENT, hostile, createSim, spawnUnit, foundVillage,
     step, recount, villageById, logEvent, killUnit,
     damageArea, blessArea, infectArea, buildGrid, forNeighbors,
-    villageName, personName, TRAITS, PROFESSIONS, walkable, shielded
+    villageName, personName, TRAITS, PROFESSIONS, TRAIT_FX, PROF_FX, traitFx, profFx,
+    chooseProfession, walkable, shielded
   };
 })(window);
 
@@ -4467,6 +4861,10 @@ void main(){
     cam.sDist += (cam.dist - cam.sDist) * f;
     cam.fov += (cam.fovT - cam.fov) * f * 0.6;
 
+    // the ear rides the camera: sounds are placed and attenuated against
+    // wherever the god is currently looking
+    if (PD.Audio8 && PD.Audio8.listen) PD.Audio8.listen(cam.sLon, cam.sLat, cam.sDist);
+
     // shake decays, and drives a real jitter of the eye
     const G = global.G || {};
     cam.shake = Math.max(0, (G.shake || 0));
@@ -5126,6 +5524,19 @@ void main(){
   const W = PD.World;
 
   const ERAS = ['Stone Age', 'Bronze Age', 'Iron Age', 'Medieval', 'Renaissance', 'Industrial', 'Modern', 'Space Age'];
+  // what each age actually hands its people — announced in the chronicle so
+  // an era means something you can watch happen, not just a label change
+  const DISCOVERY = [null, 'smelting', 'the forge', 'the plough and the keep',
+    'the printing press', 'the engine', 'medicine and the grid', 'the rocket'];
+  // resolved lazily: sim.js may not have registered on PD yet at load time,
+  // and hardcoding the index would silently break if the list is reordered
+  let _scholarIdx = -2;
+  function scholarIdx() {
+    if (_scholarIdx === -2) {
+      _scholarIdx = (PD.Sim && PD.Sim.PROFESSIONS) ? PD.Sim.PROFESSIONS.indexOf('scholar') : -1;
+    }
+    return _scholarIdx;
+  }
   const GOVERNMENTS = ['Tribal Council', 'Monarchy', 'Theocracy', 'Republic', 'Empire', 'Technocracy'];
   const FAITH_NAMES = ['Way of the Flame', 'Church of the Sky Father', 'The Green Communion', 'Cult of the Deep', 'Order of the Silver Moon', 'The Last Dawn', 'Choir of Stars', 'The Quiet Path'];
 
@@ -5234,19 +5645,37 @@ void main(){
 
     // politics per nation
     for (const n of soc.nations) {
-      let pop = 0, prosperity = 0;
-      for (const id of n.villages) { const v = PD.Sim.villageById(sim, id); if (v) { pop += v.pop; prosperity += v.prosperity; } }
+      let pop = 0, prosperity = 0, scholarship = 0, scholars = 0;
+      for (const id of n.villages) {
+        const v = PD.Sim.villageById(sim, id);
+        if (v) {
+          pop += v.pop; prosperity += v.prosperity;
+          // the nation learns because particular people study
+          if (v.labour) scholarship += v.labour.science;
+          const si = scholarIdx();
+          if (v.jobs && si >= 0) scholars += v.jobs[si] || 0;
+          v.era = n.era;   // the age a town lives in drives what it can build
+        }
+      }
       prosperity /= Math.max(1, n.villages.length);
       n.pop = pop;
+      n.scholars = scholars;
 
-      // ---- science & eras: bigger, more prosperous nations advance ----
-      // paced so a healthy nation reaches the Modern era in about an hour
-      // of watched time, not weeks
+      // ---- science & eras ----
+      // Discovery used to be a function of headcount alone: a nation of ten
+      // thousand illiterate farmers advanced exactly as fast as one that
+      // built libraries. Scholars now carry most of the weight, so a god who
+      // wants a space age has to make a people who can afford thinkers —
+      // and a plague that takes the learned actually sets the age back.
       const tinker = PD.Sim.RACES[n.race] && PD.Sim.RACES[n.race].tinker ? 1.6 : 1;
-      n.science += (pop * 0.045 + prosperity * 0.8) * tinker;
+      n.science += (pop * 0.012 + prosperity * 0.55 + scholarship * 1.35) * tinker;
       const need = 40 * Math.pow(1.9, n.era);
       if (n.science >= need && n.era < ERAS.length - 1) {
         n.era++; n.science = 0;
+        const disc = DISCOVERY[n.era];
+        if (disc) {
+          hist(sim, `${n.name} discovers ${disc}.`, 'era');
+        }
         hist(sim, `${n.name} enters the ${ERAS[n.era]}!`, 'era');
         PD.Sim.logEvent(sim, `${n.name} enters the ${ERAS[n.era]}!`, 'grow');
         if (n.era >= 6 && !soc.internetOn) {
@@ -5371,6 +5800,13 @@ void main(){
       kind, text: PRAYER_KINDS[kind].text(u, v), t: sim.tick,
       x: u.x, y: u.y
     });
+    // and it is HEARD. Prayers have only ever been text in a side panel;
+    // now the voice carries from where the supplicant is standing.
+    if (PD.Audio8 && PD.Audio8.whisper) {
+      const faith = soc.faiths.length ? soc.faiths[0] : null;
+      PD.Audio8.whisper([u.x, u.y, sim.world.W, sim.world.H],
+                        faith ? PD.clamp(faith.fervor || 0.5, 0, 1) : 0.5);
+    }
     if (PD.Game && PD.Game.onPrayer) PD.Game.onPrayer(sim);
   }
 
@@ -6165,7 +6601,19 @@ void main(){
   ];
 
   // helper to play sound
-  function snd(n) { if (PD.Audio8) PD.Audio8.sfx(n); }
+  //
+  // Every act of god knows exactly where it landed — apply(G, wx, wy) — but
+  // all 145 sound calls threw that away and played dead centre at full
+  // volume. `at()` is set once by the dispatcher before a power runs, so a
+  // meteor dropped on the far limb now arrives quiet, muffled and off to
+  // the side, without touching a single call site.
+  let sndAt = null;
+  function soundAt(x, y, w, h) { sndAt = (x == null) ? null : [x, y, w, h]; }
+  function snd(n) {
+    if (!PD.Audio8) return;
+    if (sndAt) PD.Audio8.sfx(n, sndAt[0], sndAt[1], sndAt[2], sndAt[3]);
+    else PD.Audio8.sfx(n);
+  }
 
   // Each power: apply(G, wx, wy) -> returns faith cost actually spent (0 if noop/free)
   const POWERS = [
@@ -7021,7 +7469,7 @@ void main(){
     { id: 'omni', name: 'Omnipotence' }
   ];
 
-  global.PD.Powers = { POWERS, BY_ID, CATEGORIES };
+  global.PD.Powers = { soundAt, POWERS, BY_ID, CATEGORIES };
 })(window);
 
 </script>
@@ -8293,7 +8741,9 @@ void main(){
       G.ui.mouseW = wc;
       const p = G.power;
       if (!p || !wc) return; // clicked past the planet's limb into space
+      if (Powers.soundAt) Powers.soundAt(wc.x, wc.y, G.world.W, G.world.H);
       const spent = p.apply(G, wc.x, wc.y);
+      if (Powers.soundAt) Powers.soundAt(null);
       if (spent > 0) onPowerUsed(p);
     }
     function onMinimap(x, y) {
@@ -8620,7 +9070,35 @@ void main(){
   }
 
   // ================= HUD =================
+  // ---- the score listens to the world --------------------------------
+  // The music was four chords on a timer, identical whether the world below
+  // was a paradise or a graveyard. Read the state of creation and tell the
+  // audio engine what it is looking at. Cheap: aggregates already computed.
+  let lastMood = '', moodCd = 0;
+  function updateMood() {
+    if (!Audio8.setMood || --moodCd > 0) return;
+    moodCd = 40;                     // re-evaluate about twice a second
+    const s = G.sim; if (!s) return;
+    let pop = 0, sick = 0, atWar = 0, prosperity = 0, temples = 0;
+    for (const v of s.villages) {
+      pop += v.pop; temples += v.temples || 0;
+      prosperity += v.prosperity || 0;
+      sick += v.sickCount || 0;
+      if (v.rival >= 0) atWar++;
+    }
+    const nV = Math.max(1, s.villages.length);
+    prosperity /= nV;
+    let m;
+    if (pop === 0) m = 'empty';
+    else if (sick > pop * 0.22) m = 'plague';
+    else if (atWar > 0 || s.bloodMoonT > 0) m = 'war';
+    else if (prosperity > 0.7 && temples >= 2) m = 'glory';
+    else m = 'calm';
+    if (m !== lastMood) { lastMood = m; Audio8.setMood(m); }
+  }
+
   function refreshHUD() {
+    updateMood();
     $('#faith-val').textContent = Math.floor(G.faith);
     $('#faith-rate').textContent = '+' + faithPerStep().toFixed(1) + '/t' + (G.divinity > 0 ? ' ⍟' + G.divinity : '');
     const ts = $('#time-scale');
@@ -8679,7 +9157,9 @@ void main(){
       const R = Sim.RACES[u.race];
       html = `<div class="ins-title">${R.emoji} ${u.name}${u.paragon ? ' ⭐' : ''}</div>
         <div class="ins-row"><span>Kind</span><b>${R.one || R.name}${u.paragon ? ' · Paragon ' + u.paragon : ''}</b></div>
-        <div class="ins-row"><span>Soul</span><b>${Sim.TRAITS[u.trait] || '—'} ${Sim.RACES[u.race].sentient ? Sim.PROFESSIONS[u.prof] : ''}</b></div>
+        <div class="ins-row"><span>Nature</span><b>${Sim.TRAITS[u.trait] || '—'}</b></div>
+        ${R.sentient ? `<div class="ins-row"><span>Trade</span><b>${Sim.PROFESSIONS[u.prof]}</b></div>` : ''}
+        <div class="ins-row"><span>Bearing</span><b>${describeNature(u)}</b></div>
         <div class="ins-row"><span>Karma</span><b style="color:${u.karma >= 0 ? '#5ad06a' : '#e0503a'}">${u.karma >= 0 ? '+' : ''}${Math.round(u.karma)}</b></div>
         <div class="ins-bar"><span>HP</span>${bar(u.hp / u.maxHp, R.col2)}</div>
         <div class="ins-bar"><span>Food</span>${bar(u.food, '#7ac043')}</div>
@@ -8709,6 +9189,7 @@ void main(){
         <div class="ins-bar"><span>Prosperity</span>${bar(v.prosperity, '#f0c040')}</div>
         <div class="ins-row"><span>Food store</span><b>${Math.floor(v.food)}</b></div>
         <div class="ins-row"><span>Temples</span><b>${v.temples} ⛪</b></div>
+        ${describeTrades(v)}
         ${v.rival >= 0 ? `<div class="ins-row war"><span>At war with</span><b>${villName(v.rival) || '?'}</b></div>` : ''}
         <button class="ins-smite" id="smite-btn">⚡ Smite this town</button>`;
     } else if (sel.type === 'tile') {
@@ -8729,7 +9210,9 @@ void main(){
     if (btn.id === 'ins-close') { G.selected = null; $('#inspect').classList.remove('show'); return; }
     if (btn.id === 'smite-btn' && G.selected && G.selected.type === 'village') {
       const v = G.selected.ref;
+      if (Powers.soundAt) Powers.soundAt(v.x, v.y, G.world.W, G.world.H);
       const spent = Powers.BY_ID.lightning.apply(G, v.x, v.y);
+      if (Powers.soundAt) Powers.soundAt(null);
       if (spent > 0) onPowerUsed(Powers.BY_ID.lightning, spent);
       return;
     }
@@ -8738,12 +9221,50 @@ void main(){
       const u = G.selected.ref;
       let spent = 0, pw = null;
       if (act === 'blessone') { if (G.faith >= 4) { u.hp = u.maxHp; u.food = 1; u.sick = 0; u.karma += 1; PD.FX.spark(u.x, u.y); Audio8.sfx('bless'); spent = 4; pw = Powers.BY_ID.bless; } }
-      else if (act === 'voiceone') { pw = Powers.BY_ID.voice; spent = pw.apply(G, u.x, u.y); }
-      else if (act === 'empowerone') { pw = Powers.BY_ID.empower; spent = pw.apply(G, u.x, u.y); }
-      else if (act === 'smiteone') { pw = Powers.BY_ID.lightning; spent = pw.apply(G, u.x, u.y); }
+      else if (act === 'voiceone' || act === 'empowerone' || act === 'smiteone') {
+        pw = act === 'voiceone' ? Powers.BY_ID.voice
+           : act === 'empowerone' ? Powers.BY_ID.empower : Powers.BY_ID.lightning;
+        if (Powers.soundAt) Powers.soundAt(u.x, u.y, G.world.W, G.world.H);
+        spent = pw.apply(G, u.x, u.y);
+        if (Powers.soundAt) Powers.soundAt(null);
+      }
       if (spent > 0) onPowerUsed(pw || { cat: 'god' }, spent);
     }
   }
+  // A town's roster of trades — who is actually here, and what that buys it.
+  function describeTrades(v) {
+    if (!v.jobs || !Sim.PROFESSIONS) return '';
+    const pairs = [];
+    for (let i = 0; i < v.jobs.length; i++) if (v.jobs[i] > 0) pairs.push([Sim.PROFESSIONS[i], v.jobs[i]]);
+    if (!pairs.length) return '';
+    pairs.sort((a, b) => b[1] - a[1]);
+    const L = v.labour || {};
+    const roster = pairs.slice(0, 6).map(p => `${p[1]}&nbsp;${p[0]}`).join(', ');
+    return `<div class="ins-row"><span>Trades</span><b style="text-align:right">${roster}</b></div>` +
+      `<div class="ins-row"><span>Harvest</span><b>+${(L.food || 0).toFixed(2)}/t</b></div>` +
+      (L.science > 0.01 ? `<div class="ins-row"><span>Study</span><b>${(L.science || 0).toFixed(2)}/t</b></div>` : '') +
+      (v.order != null ? `<div class="ins-bar"><span>Order</span>${bar(v.order, '#7aa0e0')}</div>` : '') +
+      (v.morale != null ? `<div class="ins-bar"><span>Morale</span>${bar(v.morale, '#c48ae0')}</div>` : '');
+  }
+
+  // Say in plain words what this soul's nature will actually make it do, so
+  // the trait is a promise about behaviour and not a decorative adjective.
+  function describeNature(u) {
+    const tf = Sim.traitFx ? Sim.traitFx(u) : null;
+    if (!tf) return '—';
+    const notes = [];
+    if (tf.bravery >= 1.35) notes.push('holds the line');
+    else if (tf.bravery <= 0.75) notes.push('runs early');
+    if (tf.warmth >= 1.5) notes.push('tends the hurt');
+    else if (tf.warmth <= 0.55) notes.push('walks past the dying');
+    if (tf.work >= 1.2) notes.push('works hard');
+    else if (tf.work <= 0.7) notes.push('shirks');
+    if (tf.greed >= 1.5) notes.push('eats more than its share');
+    if (tf.piety >= 1.5) notes.push('prays often');
+    if (tf.roam >= 1.5) notes.push('strays far');
+    return notes.length ? notes.join(' · ') : 'unremarkable';
+  }
+
   function bar(v, col) { v = PD.clamp(v, 0, 1); return `<div class="bar"><div class="bar-fill" style="width:${(v * 100).toFixed(0)}%;background:${col}"></div></div>`; }
   function villName(id) { const v = Sim.villageById(G.sim, id); return v ? v.name : null; }
 

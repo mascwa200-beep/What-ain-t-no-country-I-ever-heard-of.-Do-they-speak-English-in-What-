@@ -1265,7 +1265,9 @@
       G.ui.mouseW = wc;
       const p = G.power;
       if (!p || !wc) return; // clicked past the planet's limb into space
+      if (Powers.soundAt) Powers.soundAt(wc.x, wc.y, G.world.W, G.world.H);
       const spent = p.apply(G, wc.x, wc.y);
+      if (Powers.soundAt) Powers.soundAt(null);
       if (spent > 0) onPowerUsed(p);
     }
     function onMinimap(x, y) {
@@ -1592,7 +1594,35 @@
   }
 
   // ================= HUD =================
+  // ---- the score listens to the world --------------------------------
+  // The music was four chords on a timer, identical whether the world below
+  // was a paradise or a graveyard. Read the state of creation and tell the
+  // audio engine what it is looking at. Cheap: aggregates already computed.
+  let lastMood = '', moodCd = 0;
+  function updateMood() {
+    if (!Audio8.setMood || --moodCd > 0) return;
+    moodCd = 40;                     // re-evaluate about twice a second
+    const s = G.sim; if (!s) return;
+    let pop = 0, sick = 0, atWar = 0, prosperity = 0, temples = 0;
+    for (const v of s.villages) {
+      pop += v.pop; temples += v.temples || 0;
+      prosperity += v.prosperity || 0;
+      sick += v.sickCount || 0;
+      if (v.rival >= 0) atWar++;
+    }
+    const nV = Math.max(1, s.villages.length);
+    prosperity /= nV;
+    let m;
+    if (pop === 0) m = 'empty';
+    else if (sick > pop * 0.22) m = 'plague';
+    else if (atWar > 0 || s.bloodMoonT > 0) m = 'war';
+    else if (prosperity > 0.7 && temples >= 2) m = 'glory';
+    else m = 'calm';
+    if (m !== lastMood) { lastMood = m; Audio8.setMood(m); }
+  }
+
   function refreshHUD() {
+    updateMood();
     $('#faith-val').textContent = Math.floor(G.faith);
     $('#faith-rate').textContent = '+' + faithPerStep().toFixed(1) + '/t' + (G.divinity > 0 ? ' ⍟' + G.divinity : '');
     const ts = $('#time-scale');
@@ -1651,7 +1681,9 @@
       const R = Sim.RACES[u.race];
       html = `<div class="ins-title">${R.emoji} ${u.name}${u.paragon ? ' ⭐' : ''}</div>
         <div class="ins-row"><span>Kind</span><b>${R.one || R.name}${u.paragon ? ' · Paragon ' + u.paragon : ''}</b></div>
-        <div class="ins-row"><span>Soul</span><b>${Sim.TRAITS[u.trait] || '—'} ${Sim.RACES[u.race].sentient ? Sim.PROFESSIONS[u.prof] : ''}</b></div>
+        <div class="ins-row"><span>Nature</span><b>${Sim.TRAITS[u.trait] || '—'}</b></div>
+        ${R.sentient ? `<div class="ins-row"><span>Trade</span><b>${Sim.PROFESSIONS[u.prof]}</b></div>` : ''}
+        <div class="ins-row"><span>Bearing</span><b>${describeNature(u)}</b></div>
         <div class="ins-row"><span>Karma</span><b style="color:${u.karma >= 0 ? '#5ad06a' : '#e0503a'}">${u.karma >= 0 ? '+' : ''}${Math.round(u.karma)}</b></div>
         <div class="ins-bar"><span>HP</span>${bar(u.hp / u.maxHp, R.col2)}</div>
         <div class="ins-bar"><span>Food</span>${bar(u.food, '#7ac043')}</div>
@@ -1681,6 +1713,7 @@
         <div class="ins-bar"><span>Prosperity</span>${bar(v.prosperity, '#f0c040')}</div>
         <div class="ins-row"><span>Food store</span><b>${Math.floor(v.food)}</b></div>
         <div class="ins-row"><span>Temples</span><b>${v.temples} ⛪</b></div>
+        ${describeTrades(v)}
         ${v.rival >= 0 ? `<div class="ins-row war"><span>At war with</span><b>${villName(v.rival) || '?'}</b></div>` : ''}
         <button class="ins-smite" id="smite-btn">⚡ Smite this town</button>`;
     } else if (sel.type === 'tile') {
@@ -1701,7 +1734,9 @@
     if (btn.id === 'ins-close') { G.selected = null; $('#inspect').classList.remove('show'); return; }
     if (btn.id === 'smite-btn' && G.selected && G.selected.type === 'village') {
       const v = G.selected.ref;
+      if (Powers.soundAt) Powers.soundAt(v.x, v.y, G.world.W, G.world.H);
       const spent = Powers.BY_ID.lightning.apply(G, v.x, v.y);
+      if (Powers.soundAt) Powers.soundAt(null);
       if (spent > 0) onPowerUsed(Powers.BY_ID.lightning, spent);
       return;
     }
@@ -1710,12 +1745,50 @@
       const u = G.selected.ref;
       let spent = 0, pw = null;
       if (act === 'blessone') { if (G.faith >= 4) { u.hp = u.maxHp; u.food = 1; u.sick = 0; u.karma += 1; PD.FX.spark(u.x, u.y); Audio8.sfx('bless'); spent = 4; pw = Powers.BY_ID.bless; } }
-      else if (act === 'voiceone') { pw = Powers.BY_ID.voice; spent = pw.apply(G, u.x, u.y); }
-      else if (act === 'empowerone') { pw = Powers.BY_ID.empower; spent = pw.apply(G, u.x, u.y); }
-      else if (act === 'smiteone') { pw = Powers.BY_ID.lightning; spent = pw.apply(G, u.x, u.y); }
+      else if (act === 'voiceone' || act === 'empowerone' || act === 'smiteone') {
+        pw = act === 'voiceone' ? Powers.BY_ID.voice
+           : act === 'empowerone' ? Powers.BY_ID.empower : Powers.BY_ID.lightning;
+        if (Powers.soundAt) Powers.soundAt(u.x, u.y, G.world.W, G.world.H);
+        spent = pw.apply(G, u.x, u.y);
+        if (Powers.soundAt) Powers.soundAt(null);
+      }
       if (spent > 0) onPowerUsed(pw || { cat: 'god' }, spent);
     }
   }
+  // A town's roster of trades — who is actually here, and what that buys it.
+  function describeTrades(v) {
+    if (!v.jobs || !Sim.PROFESSIONS) return '';
+    const pairs = [];
+    for (let i = 0; i < v.jobs.length; i++) if (v.jobs[i] > 0) pairs.push([Sim.PROFESSIONS[i], v.jobs[i]]);
+    if (!pairs.length) return '';
+    pairs.sort((a, b) => b[1] - a[1]);
+    const L = v.labour || {};
+    const roster = pairs.slice(0, 6).map(p => `${p[1]}&nbsp;${p[0]}`).join(', ');
+    return `<div class="ins-row"><span>Trades</span><b style="text-align:right">${roster}</b></div>` +
+      `<div class="ins-row"><span>Harvest</span><b>+${(L.food || 0).toFixed(2)}/t</b></div>` +
+      (L.science > 0.01 ? `<div class="ins-row"><span>Study</span><b>${(L.science || 0).toFixed(2)}/t</b></div>` : '') +
+      (v.order != null ? `<div class="ins-bar"><span>Order</span>${bar(v.order, '#7aa0e0')}</div>` : '') +
+      (v.morale != null ? `<div class="ins-bar"><span>Morale</span>${bar(v.morale, '#c48ae0')}</div>` : '');
+  }
+
+  // Say in plain words what this soul's nature will actually make it do, so
+  // the trait is a promise about behaviour and not a decorative adjective.
+  function describeNature(u) {
+    const tf = Sim.traitFx ? Sim.traitFx(u) : null;
+    if (!tf) return '—';
+    const notes = [];
+    if (tf.bravery >= 1.35) notes.push('holds the line');
+    else if (tf.bravery <= 0.75) notes.push('runs early');
+    if (tf.warmth >= 1.5) notes.push('tends the hurt');
+    else if (tf.warmth <= 0.55) notes.push('walks past the dying');
+    if (tf.work >= 1.2) notes.push('works hard');
+    else if (tf.work <= 0.7) notes.push('shirks');
+    if (tf.greed >= 1.5) notes.push('eats more than its share');
+    if (tf.piety >= 1.5) notes.push('prays often');
+    if (tf.roam >= 1.5) notes.push('strays far');
+    return notes.length ? notes.join(' · ') : 'unremarkable';
+  }
+
   function bar(v, col) { v = PD.clamp(v, 0, 1); return `<div class="bar"><div class="bar-fill" style="width:${(v * 100).toFixed(0)}%;background:${col}"></div></div>`; }
   function villName(id) { const v = Sim.villageById(G.sim, id); return v ? v.name : null; }
 

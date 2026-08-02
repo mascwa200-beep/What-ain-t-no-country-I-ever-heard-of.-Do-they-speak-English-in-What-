@@ -103,6 +103,90 @@
   const GIVEN2 = ['a','ah','an','ar','ella','en','ette','ia','ic','in','is','on','or','ric','ula','us','wen','wyn'];
   const TRAITS = ['brave','kind','greedy','curious','devout','cruel','wise','lazy','zealous','gentle','proud','sly','stoic','merry','grim','dreamy'];
   const PROFESSIONS = ['farmer','builder','hunter','priest','soldier','healer','scholar','artisan','merchant','bard'];
+
+  // ---- what a soul's nature actually DOES -------------------------------
+  // Every unit has carried a trait and a profession since the first build,
+  // and nothing has ever read them: they were printed in the inspector and
+  // used to decorate prayer text, and that was all. A "brave" farmer and a
+  // "lazy" soldier were byte-for-byte identical in the simulation.
+  //
+  // These two tables are the whole fix. They are plain data consulted at
+  // decision points the loop already runs, so nothing new is scanned:
+  //   bravery  fight vs flee, and how hard they hit
+  //   work     share of the village's labour they actually do
+  //   piety    faith generated, pull toward temples
+  //   greed    hoards food, and will take it from others
+  //   roam     how far from home they will stray
+  //   warmth   tends the hurt nearby; drifts karma up
+  //   guile    steals from rival stores
+  const T = (bravery, work, piety, greed, roam, warmth, guile) =>
+    ({ bravery, work, piety, greed, roam, warmth, guile });
+  const TRAIT_FX = {
+    brave:   T( 1.55, 1.00, 1.00, 0.90, 1.20, 1.00, 1.00),
+    kind:    T( 0.85, 1.05, 1.10, 0.70, 0.90, 1.90, 0.80),
+    greedy:  T( 0.95, 1.15, 0.80, 2.10, 1.00, 0.50, 1.50),
+    curious: T( 1.05, 0.95, 1.05, 1.00, 1.85, 1.05, 1.10),
+    devout:  T( 1.00, 1.00, 2.00, 0.80, 0.80, 1.25, 0.80),
+    cruel:   T( 1.35, 0.85, 0.75, 1.45, 1.10, 0.20, 1.40),
+    wise:    T( 1.00, 1.25, 1.30, 0.85, 0.95, 1.30, 0.85),
+    lazy:    T( 0.70, 0.45, 0.90, 1.15, 0.70, 0.90, 1.10),
+    zealous: T( 1.45, 1.05, 1.75, 0.85, 1.05, 0.85, 0.90),
+    gentle:  T( 0.55, 1.00, 1.15, 0.75, 0.85, 1.60, 0.75),
+    proud:   T( 1.40, 1.10, 0.95, 1.20, 1.00, 0.80, 0.95),
+    sly:     T( 0.90, 0.90, 0.85, 1.55, 1.25, 0.70, 2.20),
+    stoic:   T( 1.20, 1.20, 1.00, 0.80, 0.90, 1.00, 0.85),
+    merry:   T( 0.95, 1.00, 1.05, 0.95, 1.15, 1.35, 1.00),
+    grim:    T( 1.30, 1.10, 0.85, 1.00, 0.95, 0.65, 1.05),
+    dreamy:  T( 0.75, 0.70, 1.45, 0.85, 1.55, 1.15, 0.95)
+  };
+  // resolved once per trait index so the hot loop never does a string lookup
+  const TRAIT_BY_IDX = TRAITS.map(n => TRAIT_FX[n]);
+  const NEUTRAL = T(1, 1, 1, 1, 1, 1, 1);
+  function traitFx(u) { return TRAIT_BY_IDX[u.trait] || NEUTRAL; }
+
+  // What each profession contributes to the settlement per village tick,
+  // scaled by that citizen's `work`. Food feeds the store, faith reaches the
+  // god, science advances the nation, order suppresses unrest, care fights
+  // sickness, build hastens construction.
+  const PROF_FX = {
+    farmer:   { food: 0.135, build: 0.05 },
+    builder:  { build: 0.85,  food: 0.012 },
+    hunter:   { food: 0.100, order: 0.10 },
+    priest:   { faith: 0.085, care: 0.10 },
+    soldier:  { order: 0.90,  food: 0.010 },
+    healer:   { care: 0.90,   faith: 0.010 },
+    scholar:  { science: 0.90, faith: 0.012 },
+    artisan:  { build: 0.40,  wealth: 0.55 },
+    merchant: { wealth: 0.90, food: 0.030 },
+    bard:     { morale: 0.90, faith: 0.030 }
+  };
+  const PROF_BY_IDX = PROFESSIONS.map(n => PROF_FX[n] || {});
+  function profFx(u) { return PROF_BY_IDX[u.prof] || {}; }
+
+  const P_FARMER = PROFESSIONS.indexOf('farmer');
+  const P_PRIEST = PROFESSIONS.indexOf('priest');
+  const P_SOLDIER = PROFESSIONS.indexOf('soldier');
+  const P_HEALER = PROFESSIONS.indexOf('healer');
+  const P_BUILDER = PROFESSIONS.indexOf('builder');
+  const P_SCHOLAR = PROFESSIONS.indexOf('scholar');
+
+  // A trade is not drawn from a hat. A starving town raises farmers; a town
+  // under siege raises soldiers; a plague town raises healers. Only once the
+  // necessities are met does anyone get to be a bard.
+  function chooseProfession(sim, villageId) {
+    const v = villageId >= 0 ? villageById(sim, villageId) : null;
+    if (!v) return (sim.rng() * PROFESSIONS.length) | 0;
+    if (v.food < 12 + v.pop * 0.5 && sim.rng() < 0.65) return P_FARMER;
+    if (v.underAttack > 0 && sim.rng() < 0.55) return P_SOLDIER;
+    if ((v.plagueT || 0) > 0 && sim.rng() < 0.5) return P_HEALER;
+    if (v.temples > 0 && (v.jobs ? v.jobs[P_PRIEST] : 0) < v.temples * 2 && sim.rng() < 0.4) return P_PRIEST;
+    if (v.pop < 8 && sim.rng() < 0.4) return sim.rng() < 0.6 ? P_FARMER : P_BUILDER;
+    // A settled, wealthy town can afford a few thinkers — but only a few.
+    // Keyed on wealth and size rather than prosperity, which saturates.
+    if (v.pop > 12 && (v.wealth || 0) > 18 && v.prosperity > 0.75 &&
+        (v.jobs ? v.jobs[P_SCHOLAR] : 0) < 2 + v.pop * 0.08 && sim.rng() < 0.30) return P_SCHOLAR;
+    return (sim.rng() * PROFESSIONS.length) | 0;
+  }
   function personName(race, rng) {
     return GIVEN[(rng() * GIVEN.length) | 0] + GIVEN2[(rng() * GIVEN2.length) | 0];
   }
@@ -186,7 +270,8 @@
       // identity: every creature is somebody
       name: personName(race, sim.rng),
       trait: (sim.rng() * TRAITS.length) | 0,
-      prof: (sim.rng() * PROFESSIONS.length) | 0,
+      // a trade is chosen for you by the place you are born into
+      prof: chooseProfession(sim, (opts && opts.village != null) ? opts.village : -1),
       karma: 0,
       paragon: 0 // >0: an empowered hero (grants stats & powers)
     };
@@ -323,9 +408,23 @@
     }
 
     // sickness
+    const tf = traitFx(u);
+
     if (u.sick > 0) {
       u.sick++;
-      u.hp -= 0.25;
+      // the stoic and the hardy endure what carries others off
+      u.hp -= 0.25 / (0.7 + tf.work * 0.3);
+      // and a town with healers in it treats its people: sickness used to be
+      // a bare timer with a 2% spontaneous cure and nothing could affect it
+      const hv = u.village >= 0 ? villageById(sim, u.village) : null;
+      if (hv) {
+        hv.sickCount = (hv.sickCount || 0) + 1;
+        const care = hv.labour ? hv.labour.care : 0;
+        if (care > 0.2) {
+          u.hp = PD.clamp(u.hp + care * 0.10, 0, u.maxHp);
+          if (sim.rng() < PD.clamp(care * 0.004, 0, 0.05)) u.sick = 0;
+        }
+      }
       // spread
       if (u.sick % 12 === 0) {
         forNeighbors(sim, u.x, u.y, 2.5, (o) => {
@@ -340,8 +439,10 @@
     const v = u.village >= 0 ? villageById(sim, u.village) : null;
     if (!R.monster && !R.ghost) {
       if (v && v.food > 0) {
-        u.food = PD.clamp(u.food + 0.02, 0, 1);
-        v.food -= 0.018;
+        // the greedy take more than their share, and the village feels it
+        const take = 0.018 * (0.75 + tf.greed * 0.45);
+        u.food = PD.clamp(u.food + 0.02 * (0.8 + tf.greed * 0.3), 0, 1);
+        v.food -= take;
       } else {
         // wild units forage from the land they stand on
         const ti = W.idx(world, PD.clamp(Math.floor(u.x), 0, world.W - 1), PD.clamp(Math.floor(u.y), 0, world.H - 1));
@@ -383,6 +484,19 @@
         moveToward(sim, u, R.spd * 1.3);
         return;
       }
+      // A thinking creature weighs the odds. The gentle and the lazy break
+      // and run from a fight they are losing; the brave and the proud do
+      // not, which is what makes watching them mean anything.
+      if (R.sentient) {
+        const hurt = u.hp / u.maxHp;
+        const flee = 0.34 / Math.max(0.25, tf.bravery);
+        if (hurt < flee && enemyD < 3) {
+          u.state = 'flee';
+          u.tx = u.x + (u.x - enemy.x) * 2; u.ty = u.y + (u.y - enemy.y) * 2;
+          moveToward(sim, u, R.spd * 1.25);
+          return;
+        }
+      }
       u.state = 'fight';
       u.tx = enemy.x; u.ty = enemy.y;
       if (enemyD < 1.2) {
@@ -394,6 +508,9 @@
           if (R.monster && sim.bloodMoonT > 0) mult *= 1.6;
           if (u.paragon) mult *= 1 + u.paragon;
           if (u.big) mult *= u.big;
+          // nature and training both tell in the blow
+          mult *= 0.55 + tf.bravery * 0.45;
+          if (PROFESSIONS[u.prof] === 'soldier') mult *= 1.35;
           enemy.hp -= R.dmg * mult;
           u.cd = 18;
           if (PD.FX) PD.FX.hit(enemy.x, enemy.y);
@@ -412,6 +529,20 @@
         moveToward(sim, u, R.spd * 1.15);
       }
       return;
+    }
+
+    // ---- the kindness of ordinary people ----
+    // Healers were a racial gift only. Now a kind or gentle soul of any race
+    // stops for the wounded — the single most visible way a trait reads on
+    // screen, because you can watch someone break off and go help.
+    if (R.sentient && tf.warmth >= 1.3 && sim.tick % 24 === (u.id & 23)) {
+      forNeighbors(sim, u.x, u.y, 2.6, (o) => {
+        if (o !== u && !RACES[o.race].monster && (o.hp < o.maxHp * 0.6 || o.sick > 0)) {
+          o.hp = PD.clamp(o.hp + 0.9 * tf.warmth, 0, o.maxHp);
+          if (o.sick > 0 && sim.rng() < 0.06 * tf.warmth) o.sick = 0;
+          u.karma += 0.02;
+        }
+      });
     }
 
     // ---- racial gifts ----
@@ -470,13 +601,15 @@
     // homing toward village if far (settlers/citizens stay near home)
     if (v) {
       const dh = W.wdist(world, u.x, u.y, v.x, v.y);
-      if (dh > v.radius + 5) { u.state = 'goHome'; u.tx = v.x; u.ty = v.y; moveToward(sim, u, R.spd); return; }
+      // the curious and the dreamy wander far; the devout keep close to home
+      const leash = v.radius + 5 * tf.roam;
+      if (dh > leash) { u.state = 'goHome'; u.tx = v.x; u.ty = v.y; moveToward(sim, u, R.spd); return; }
     }
 
-    // wander
+    // wander — the lazy dawdle, the curious range
     if (W.wdist(world, u.x, u.y, u.tx, u.ty) < 0.4 || sim.rng() < 0.02) pickWander(sim, u);
     u.state = 'wander';
-    moveToward(sim, u, R.spd * (0.6 + 0.4 * (u.food)));
+    moveToward(sim, u, R.spd * (0.6 + 0.4 * u.food) * (0.65 + tf.work * 0.35));
   }
 
   function killUnit(sim, u, byRace, killer) {
@@ -539,19 +672,66 @@
       }
     }
     v.temples = temples; v.houses = houses;
+
+    // ---- the labour of actual people ----
+    // Production used to be a pure function of dirt: fertility and farm
+    // count, with population appearing only as mouths to feed. A town of
+    // ten farmers and a town of ten bards produced exactly the same crop.
+    // `v.labour` is accumulated by the census below, so the town's output
+    // is the sum of what its citizens are and how hard their nature makes
+    // them work.
+    const L = v.labour || (v.labour = { food: 0, build: 0, faith: 0, science: 0, care: 0, order: 0, wealth: 0, morale: 0 });
+    const era = v.era || 0;
+    // Eras were flavour text with a government change attached. Now the age
+    // a people live in multiplies what their hands can do.
+    const eraYield = 1 + era * 0.16;
+
     // base forage keeps small settlements alive; land+farms scale it up
-    const production = (0.7 + fertSum + farms * 0.6) * 0.06 * seasonMul;
+    const production = (0.7 + fertSum + farms * 0.6) * 0.06 * seasonMul * eraYield
+                     + L.food * seasonMul;
     v.food += production;
+    v.wealth = PD.clamp((v.wealth || 0) * 0.97 + L.wealth * 0.05, 0, 200);
+    // a settlement with no one keeping order frays; soldiers and hunters hold it
+    v.order = PD.clamp((v.order || 0.5) * 0.95 + PD.clamp(L.order / Math.max(2, v.pop * 0.35), 0, 1) * 0.05, 0, 1);
+    v.morale = PD.clamp((v.morale || 0.5) * 0.96 + PD.clamp(0.35 + L.morale * 0.5 + v.prosperity * 0.3, 0, 1) * 0.04, 0, 1);
     // consumption is handled per-unit (citizens draw from the store); add a
     // small upkeep so sprawling empty claims aren't free
     v.food -= ownedLand * 0.004;
 
+    // ---- granaries: grain does not keep forever ----
+    // The store was unbounded, so a mature town sat on tens of thousands of
+    // food (8.6k by year 25 before this change, and my labour on top of the
+    // land yield pushed that to 23k). Nothing could ever threaten a town
+    // with that buffer, and prosperity — being food per capita — pinned at
+    // 1.0 for the rest of the world's life, which flattened every system
+    // downstream of it. A settlement can now only keep what it can store.
+    const granary = 45 + v.pop * 7 + v.level * 30 + (v.houses || 0) * 4;
+    if (v.food > granary) {
+      v.food = granary + (v.food - granary) * 0.35;  // the surplus spoils
+      if (v.food > granary * 1.6) v.food = granary * 1.6;
+    }
+
     // carrying capacity from worked land (this is what stops runaway growth)
     v.cap = Math.min(120, 5 + Math.floor(fertSum * 2.2) + farms * 2 + v.level * 3);
 
-    // prosperity from food per capita
+    // prosperity from food per capita, and from the trades that make a town
+    // worth living in rather than merely survivable
     const perCap = v.pop > 0 ? v.food / v.pop : v.food;
-    v.prosperity = PD.clamp(v.prosperity * 0.94 + PD.clamp(perCap / 6, 0, 1) * 0.06, 0, 1);
+    const comfort = PD.clamp(perCap / 6, 0, 1) * 0.75
+                  + PD.clamp((v.wealth || 0) / 60, 0, 1) * 0.15
+                  + (v.morale || 0.5) * 0.10;
+    v.prosperity = PD.clamp(v.prosperity * 0.94 + comfort * 0.06, 0, 1);
+
+    // ---- healers earn their keep ----
+    // Sickness was a pure timer: catch it and either die or roll a 2% cure.
+    // A town with healers now actually treats its people.
+    // The cure is applied by the sick unit itself (see updateUnit), which is
+    // O(1) per sufferer instead of a full unit scan per village per tick.
+    v.underAttack = Math.max(0, (v.underAttack || 0) - 1);
+    v.plagueT = v.sickCount > 0 ? 60 : Math.max(0, (v.plagueT || 0) - 1);
+
+    // faith reaching the god is the work of priests and temples together —
+    // the Society layer reads v.labour.faith when it tallies devotion
 
     // ---- growth: birth a citizen (logistic toward capacity) ----
     if (v.pop < v.cap && v.food > 8 + v.pop * 0.6 && sim.units.length < sim.UNIT_CAP) {
@@ -656,11 +836,41 @@
     for (const k in RACES) sim.counts[k] = 0;
     for (const k in sim.counts) sim.counts[k] = 0;
     sim.vmap = new Map();
-    for (const v of sim.villages) { v.pop = 0; sim.vmap.set(v.id, v); }
+    for (const v of sim.villages) {
+      v.pop = 0; v.sickCount = 0; sim.vmap.set(v.id, v);
+      // the labour census, zeroed here and refilled by the same pass that
+      // counts heads — a settlement's output is recomputed from its actual
+      // living citizens every time, so plague and war show up in the crop
+      const L = v.labour || (v.labour = { food: 0, build: 0, faith: 0, science: 0, care: 0, order: 0, wealth: 0, morale: 0 });
+      L.food = L.build = L.faith = L.science = L.care = L.order = L.wealth = L.morale = 0;
+      if (!v.jobs) v.jobs = new Array(PROFESSIONS.length).fill(0);
+      else v.jobs.fill(0);
+    }
     for (const u of sim.units) {
       if (u.dead) continue;
       sim.counts[u.race] = (sim.counts[u.race] || 0) + 1;
-      if (u.village >= 0) { const v = villageById(sim, u.village); if (v) v.pop++; else u.village = -1; }
+      if (u.village >= 0) {
+        const v = villageById(sim, u.village);
+        if (v) {
+          v.pop++;
+          // Children and the starving do not work a full day. Everything
+          // else is nature: a lazy scholar advances less than a stoic one.
+          if (RACES[u.race].sentient && u.age > u.adultAt) {
+            const fx = profFx(u);
+            const w = traitFx(u).work * (0.45 + 0.55 * u.food) * (u.sick > 0 ? 0.35 : 1);
+            const L = v.labour;
+            if (fx.food) L.food += fx.food * w;
+            if (fx.build) L.build += fx.build * w;
+            if (fx.faith) L.faith += fx.faith * w;
+            if (fx.science) L.science += fx.science * w;
+            if (fx.care) L.care += fx.care * w;
+            if (fx.order) L.order += fx.order * w;
+            if (fx.wealth) L.wealth += fx.wealth * w;
+            if (fx.morale) L.morale += fx.morale * w;
+            v.jobs[u.prof]++;
+          }
+        } else u.village = -1;
+      }
     }
   }
 
@@ -839,6 +1049,7 @@
     RACES, SENTIENT, hostile, createSim, spawnUnit, foundVillage,
     step, recount, villageById, logEvent, killUnit,
     damageArea, blessArea, infectArea, buildGrid, forNeighbors,
-    villageName, personName, TRAITS, PROFESSIONS, walkable, shielded
+    villageName, personName, TRAITS, PROFESSIONS, TRAIT_FX, PROF_FX, traitFx, profFx,
+    chooseProfession, walkable, shielded
   };
 })(window);
