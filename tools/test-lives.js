@@ -479,6 +479,52 @@ console.log('\n--- every mechanic fires in a world nobody touches ---');
     /traitFx\([^)]*\)\.piety|tf\.piety/.test(src), 'sim.js');
 }
 
+// -------------------------------------------------------------- vampires
+// The bite works and always has. What never existed was a first vampire:
+// the only line that creates one requires the killer to already be one. That
+// closed loop is deliberate and must stay closed — the single way to open it
+// lives in powers.js and is not hinted at anywhere. These two assertions are
+// the fence around it.
+console.log('\n--- the closed loop, and the bite that needs it opened ---');
+{
+  const sim = freshSim(9161);
+  for (let i = 0; i < 60; i++) Sim.spawnUnit(sim, 'human', 40 + (i % 9), 40 + ((i / 9) | 0));
+  for (let i = 0; i < 20; i++) Sim.spawnUnit(sim, 'orc', 44 + (i % 5), 44 + ((i / 5) | 0));
+  let everSaw = 0;
+  for (let t = 0; t < 4000; t++) {
+    Sim.step(sim, 1);
+    if (sim.tick % 100 === 0) PD.Society.step(sim);
+    everSaw += (sim.counts.vampire || 0);
+  }
+  check('no vampire arises on its own, ever — omens, ambient spawns, evolution, war',
+    everSaw === 0, everSaw + ' vampire-ticks across 4000 steps');
+  check('and evolution cannot pick one either: they are not in SENTIENT',
+    Sim.SENTIENT.indexOf('vampire') < 0);
+
+  // Now open the loop by hand under the conditions the hidden act creates —
+  // a blood moon, and a progenitor rather than an ordinary 40hp vampire —
+  // and confirm the existing bite carries it with no further help.
+  const sim2 = freshSim(9161);
+  for (let i = 0; i < 40; i++) Sim.spawnUnit(sim2, 'human', 40 + (i % 14), 40 + ((i / 14) | 0));
+  sim2.bloodMoonT = 480;
+  const zero = Sim.spawnUnit(sim2, 'vampire', 60, 44);
+  if (zero) {
+    zero.paragon = 2;
+    zero.maxHp = Sim.RACES.vampire.hp * 5;
+    zero.hp = zero.maxHp;
+    zero.lifespan = zero.age + 9000;
+  }
+  let peak = 0;
+  for (let t = 0; t < 4000; t++) { Sim.step(sim2, 1); peak = Math.max(peak, sim2.counts.vampire || 0); }
+  check('patient zero can be made at all (spawnUnit accepts the race)', !!zero);
+  // Measured across ten seeds: 7,2,2,2,2,5,20,4,2,9 — never below 2. The line
+  // usually burns out afterwards, which is fine; a vampire is meant to be a
+  // fragile horror. What matters is that the bite fires at all, and until the
+  // UNIT_CAP fix in killUnit it could not, in any world with people in it.
+  check('and once there is one, the bite spreads it with no further help',
+    peak > 1, 'peaked at ' + peak);
+}
+
 console.log('\n=== lives failures: ' + fails + ' ===');
 console.log(fails === 0 ? 'LIVES TEST PASSED' : 'LIVES TEST FAILED');
 process.exit(fails === 0 ? 0 : 1);

@@ -257,7 +257,10 @@
     { id: 'races', name: 'Genesis Engine', desc: 'Design a custom race', need: 1 },
     { id: 'floods', name: 'Deluge', desc: 'Flood the world', need: 1 },
     { id: 'timetravels', name: 'Chronarch', desc: 'Bend time 3 times', need: 3 },
-    { id: 'transcends', name: 'BEYOND', desc: 'Transcend reality itself', need: 1 }
+    { id: 'transcends', name: 'BEYOND', desc: 'Transcend reality itself', need: 1 },
+    // Not listed until it is done. There is no hint for this one anywhere in
+    // the game, and there should not be.
+    { id: 'firstthirst', name: 'PATIENT ZERO', desc: 'There had never been a first one', need: 1, hidden: true }
   ];
   function ach(id, n) {
     G.ach[id] = (G.ach[id] || 0) + (n || 1);
@@ -1040,6 +1043,10 @@
     PD.FX.shock(world.W / 2, world.H / 2, 20, '#ffffff');
     return 0;
   };
+
+  // Powers record deeds through this. Note G.ach is the counter map, so the
+  // recorder cannot share that name.
+  G.deed = ach;
 
   // Sabbath: the world holds still, but the god does not.
   G.setSabbath = function (on) {
@@ -2247,6 +2254,8 @@
     for (const a of ACHIEVEMENTS) {
       const have = G.ach[a.id] || 0;
       const done2 = have >= a.need;
+      // a hidden deed does not exist until you have done it
+      if (a.hidden && !done2) continue;
       html += `<div class="deed ${done2 ? 'deed-done' : ''}">${done2 ? '🏆' : '▫'} <b>${a.name}</b> — ${a.desc} <small>(${Math.min(have, a.need)}/${a.need})</small></div>`;
     }
     // transcendence status

@@ -242,6 +242,72 @@ console.log('genesis hooks fired:', genesisCalls, '| sabbath toggles:', sabbathC
   p1.sim.units.pop();
 }
 
+// ---- the hidden act ----
+// Breath of Life empties limbo. Under a blood moon, one of them comes back
+// wrong — and that is the only way a first vampire has ever been able to
+// exist. Nothing in the UI says so, so this is the only thing that will
+// notice if it stops working.
+{
+  // A dedicated planet: p1 has run 6000 steps and sits AT its unit cap, and
+  // resurrect() cannot place anyone into a full world — the power refuses
+  // before the egg is ever reached. That is real behaviour, not a bug here,
+  // but it means this assertion needs a world with room in it.
+  const eggP = Cosmos.createPlanet('verdant', 'egg-seed');
+  const sim = eggP.sim;
+  const deeds = [];
+  const eggG = Object.assign({}, fakeG, {
+    world: eggP.world, sim: eggP.sim, faith: 1e6,
+    view: { kind: 'planet', id: eggP.id },
+    deed: (id) => deeds.push(id)
+  });
+  const vampCount = () => sim.counts.vampire || 0;
+
+  const stock = () => {
+    // Put souls in the Grayfields so Breath of Life has something to do.
+    // karma must be negative: the Grayfields band is -8..0 and a fresh unit
+    // sits at exactly 0, which routes to the Meadows by a hair.
+    for (let i = 0; i < 6; i++) {
+      const u = PD.Sim.spawnUnit(sim, 'human', 90 + (i % 3), 60 + ((i / 3) | 0));
+      if (u) { u.karma = -2; PD.Sim.killUnit(sim, u, 'starve'); }
+    }
+    PD.Sim.step(sim, 1);
+  };
+
+  // (a) no blood moon: an ordinary miracle, and no vampire
+  stock();
+  sim.bloodMoonT = 0;
+  const before = vampCount();
+  eggG.faith = 1e6;
+  PD.Powers.BY_ID.breath.apply(eggG, 90, 60);
+  PD.Sim.step(sim, 1);
+  const plain = vampCount() - before;
+  console.log('breath of life without a blood moon — vampires created:', plain, '(expect 0)');
+  if (plain !== 0) { console.error('EGG ERR: a vampire appeared with no blood moon'); perrs++; }
+
+  // (b) under a blood moon: exactly one, and the deed fires
+  stock();
+  sim.bloodMoonT = 400;
+  eggG.faith = 1e6;
+  PD.Powers.BY_ID.breath.apply(eggG, 90, 60);
+  PD.Sim.step(sim, 1);
+  const made = vampCount();
+  console.log('breath of life UNDER a blood moon — vampires now:', made, '| deeds:', deeds.join(',') || '(none)');
+  if (made < 1) { console.error('EGG ERR: no patient zero under a blood moon'); perrs++; }
+  if (deeds.indexOf('firstthirst') < 0) { console.error('EGG ERR: the hidden deed did not fire'); perrs++; }
+
+  // (c) it happens once. A second casting must not mint a second progenitor.
+  stock();
+  sim.bloodMoonT = 400;
+  const had = vampCount();
+  eggG.faith = 1e6;
+  PD.Powers.BY_ID.breath.apply(eggG, 90, 60);
+  PD.Sim.step(sim, 1);
+  const again = vampCount() - had;
+  console.log('a second casting under a second blood moon — new progenitors:', again, '(expect 0)');
+  if (again > 0) { console.error('EGG ERR: patient zero can be made twice'); perrs++; }
+
+}
+
 // ---- serialization of the whole thing (like game.js does) ----
 // minimal replication of packPlanet/unpackPlanet correctness via codec
 const w1 = p1.world;

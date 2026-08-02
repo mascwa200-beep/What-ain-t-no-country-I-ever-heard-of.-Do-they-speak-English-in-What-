@@ -816,16 +816,18 @@
         const plane = PD.Afterlife.AL.planes['grayfields'];
         if (!plane || !plane.souls.length) { snd('error'); return 0; }
         const names = plane.souls.slice(0, 40).map(s => s.name);
-        let n = 0;
+        const back = [];
         for (const nm of names) {
           const spot = W.nearestLand(G.world, wx + (Math.random() * 8 - 4), wy + (Math.random() * 8 - 4), 12);
           if (!spot) continue;
-          if (PD.Afterlife.resurrect(nm, G.sim, spot.x, spot.y)) n++;
+          const u = PD.Afterlife.resurrect(nm, G.sim, spot.x, spot.y);
+          if (u) back.push(u);
         }
-        if (!n) { snd('error'); return 0; }
+        if (!back.length) { snd('error'); return 0; }
         FX.shock(wx, wy, 8, '#bfffdc');
-        if (PD.Society) PD.Society.hist(G.sim, `${n} souls are breathed back out of limbo. The Grayfields thin.`, 'legend');
+        if (PD.Society) PD.Society.hist(G.sim, `${back.length} souls are breathed back out of limbo. The Grayfields thin.`, 'legend');
         snd('levelup');
+        firstOfTheThirst(G, back);
         return this.cost;
       } },
     { id: 'sabbath', name: 'Sabbath', icon: '⏸️', cat: 'godhead', cost: 25, radius: 0, cont: false,
@@ -842,6 +844,52 @@
       } },
 
   ];
+
+  // ------------------------------------------------------------------
+  // Vampires have been fully implemented since the first build — nocturnal,
+  // 9000-tick lifespan, their own art, and a bite that turns the bitten. The
+  // only line that ever created one required the killer to be a vampire
+  // already. No power made them, no omen, no ambient spawn, and they were
+  // left out of SENTIENT so evolution could not pick them either. A vampire
+  // could only be made by a vampire, so there had never been a first one.
+  //
+  // That stays true. There is exactly one way to make patient zero, and
+  // nothing in the game will tell you what it is: breathe the Grayfields
+  // empty while a blood moon is up, and one of them comes back wrong. From
+  // there the bite does the rest with no help from anyone.
+  //
+  // Do not mention this in the power's description, the Testament, or a
+  // tooltip. It is meant to be found.
+  function firstOfTheThirst(G, returned) {
+    const sim = G.sim;
+    if (!sim || !(sim.bloodMoonT > 0)) return;
+    if ((sim.counts && sim.counts.vampire) > 0) return;   // there is already a first
+    if (!returned || !returned.length) return;
+    // One of the souls you just breathed back — not an extra body. A mature
+    // world sits at UNIT_CAP, so anything that needed headroom of its own
+    // would never happen on the worlds where blood moons do.
+    const u = returned[(Math.random() * returned.length) | 0];
+    if (!u || u.dead) return;
+    u.race = 'vampire';
+    // The progenitor is not an ordinary vampire. An ordinary one — made by a
+    // bite — has 40 hp and dies to the first mob that finds it, which is
+    // fine; that is what a vampire is. But this one was breathed out of limbo
+    // by a god under a blood moon, and it has to survive long enough to make
+    // a second. Only this one is built this way; every vampire it makes is
+    // the ordinary kind.
+    u.paragon = 2;
+    u.maxHp = PD.Sim.RACES.vampire.hp * 5;
+    u.hp = u.maxHp;
+    u.village = -1;                       // it does not go home
+    u.lifespan = Math.max(u.lifespan || 0, (u.age || 0) + 9000);
+    PD.Sim.recount(sim);                  // so counts.vampire is true immediately
+    if (FX) { FX.shock(u.x, u.y, 5, '#5a1030'); FX.blood && FX.blood(u.x, u.y); }
+    if (PD.Society) PD.Society.hist(sim, 'One of them did not come back the same.', 'legend');
+    PD.Sim.logEvent(sim, 'One of them did not come back the same.', 'fall');
+    // G.ach is the counter map, not the function — the recorder is G.deed
+    if (typeof G.deed === 'function') G.deed('firstthirst');
+    snd('plague');
+  }
 
   // helpers for targeted powers
   function nearestUnit(G, wx, wy, r) {

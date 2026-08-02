@@ -655,12 +655,20 @@
     }
     if (PD.FX) PD.FX.blood(u.x, u.y);
     const R = RACES[u.race];
-    // dark conversions: the plague-dead rise, vampire victims turn
+    // Dark conversions: the plague-dead rise, vampire victims turn.
+    //
+    // These used to be gated on `units.length < UNIT_CAP`. A populated world
+    // sits AT the cap within a few hundred ticks, so in practice neither
+    // conversion could ever fire — the undead never rose and the bite never
+    // spread, in any world with people in it. A conversion is a REPLACEMENT:
+    // the body it needs just died on this line. It never should have competed
+    // for headroom with the living. The raise queue compacts the dead before
+    // spawning (see step()), so this cannot exceed the cap either.
     if (!R.monster) {
-      if ((byRace === 'undead' || byRace === 'plague') && sim.rng() < 0.28 && sim.units.length < sim.UNIT_CAP) {
+      if ((byRace === 'undead' || byRace === 'plague') && sim.rng() < 0.28) {
         sim._raise = sim._raise || [];
         sim._raise.push({ x: u.x, y: u.y, as: 'undead' });
-      } else if (byRace === 'vampire' && R.sentient && sim.rng() < 0.35 && sim.units.length < sim.UNIT_CAP) {
+      } else if (byRace === 'vampire' && R.sentient && sim.rng() < 0.35) {
         sim._raise = sim._raise || [];
         sim._raise.push({ x: u.x, y: u.y, as: 'vampire' });
       }
@@ -981,6 +989,10 @@
 
     // process raises (undead rising, vampire spawn)
     if (sim._raise && sim._raise.length) {
+      // spawnUnit refuses at the cap, and a full world is the normal state —
+      // so drop the corpses first. Every unit in this queue died to make room
+      // for the thing replacing it; without this the raise silently no-ops.
+      if (sim.units.length >= sim.UNIT_CAP) sim.units = sim.units.filter(u => !u.dead);
       for (const r of sim._raise) {
         const u = spawnUnit(sim, r.as || 'undead', r.x, r.y);
         if (u && PD.FX) PD.FX.puff(r.x, r.y, r.as === 'vampire' ? '#5a1030' : '#6a2a6a');
