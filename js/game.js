@@ -1344,7 +1344,21 @@
       if (e.key === ']') { G.power.radius = Math.min(14, G.power.radius + 1); G.ui.brushRadius = G.power.radius; }
     });
 
-    global.addEventListener('resize', () => G.r.resize());
+    // Resize was the only hook, and it fires neither on an orientation flip nor
+    // when the system bars slide in and change the usable height. Coalesce all
+    // three into one rAF-debounced pass so a drag-resize can't thrash the
+    // weather particle reallocation inside resize().
+    let resizeRaf = 0;
+    const onViewportChange = () => {
+      if (resizeRaf) return;
+      resizeRaf = requestAnimationFrame(() => { resizeRaf = 0; G.r.resize(); });
+    };
+    global.addEventListener('resize', onViewportChange);
+    global.addEventListener('orientationchange', onViewportChange);
+    if (global.visualViewport) {
+      global.visualViewport.addEventListener('resize', onViewportChange);
+      global.visualViewport.addEventListener('scroll', onViewportChange);
+    }
     global.addEventListener('blur', () => { keys = {}; });
     global.addEventListener('beforeunload', () => { try { save(); } catch (e) {} });
     document.addEventListener('visibilitychange', () => {

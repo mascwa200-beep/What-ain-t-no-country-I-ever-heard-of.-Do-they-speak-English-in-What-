@@ -45,6 +45,15 @@ public class MainActivity extends Activity {
     }
 
     private void hideBars() {
+        // Draw into the display cutout. In landscape the punch-hole sits on a
+        // SIDE edge — right over the toolbar or the tab rail — and without
+        // this the window is letterboxed away from it instead. The CSS reads
+        // the resulting inset back through env(safe-area-inset-*).
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+            getWindow().getAttributes().layoutInDisplayCutoutMode =
+                android.view.WindowManager.LayoutParams
+                    .LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
+        }
         getWindow().getDecorView().setSystemUiVisibility(
             View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
                 | View.SYSTEM_UI_FLAG_FULLSCREEN
