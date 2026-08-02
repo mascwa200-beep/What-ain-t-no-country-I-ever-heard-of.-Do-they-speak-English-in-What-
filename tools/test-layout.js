@@ -17,14 +17,26 @@ const base = path.resolve(process.argv[2] || path.join(__dirname, '..'));
 const CHROME = process.argv[3] || process.env.CHROME_PATH ||
   '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
 
-// Window sizes, not viewport sizes — headless subtracts a little chrome.
+// VIEWPORT sizes. These used to be window sizes, and headless Chrome
+// subtracts its own chrome from them — by a different amount per build. The
+// local Chromium reserved ~87px of height where the CI runner's Chrome
+// reserved ~143px, so the identical config tested 851x393 here and 851x250
+// there. The suite passed locally and failed in CI on viewports that had
+// never been exercised locally at all. Now the launcher converges on the
+// viewport we actually asked for, so both environments test the same thing.
 const SIZES = [
-  { name: 'pixel10xl-landscape', w: 851, h: 460 },   // the reported device
-  { name: 'short-landscape',     w: 851, h: 393 },
-  { name: 'tiny-landscape',      w: 740, h: 360 },
-  { name: 'phone-portrait',      w: 412, h: 883 },
-  { name: 'tablet',              w: 1024, h: 768 },
-  { name: 'desktop',             w: 1600, h: 900 }
+  { name: 'pixel10xl-landscape', w: 851, h: 373 },   // the reported device
+  { name: 'short-landscape',     w: 851, h: 306 },
+  { name: 'tiny-landscape',      w: 740, h: 273 },
+  // the extreme CI surfaced: at 217px tall the intro is the title and the
+  // button, nothing else. Keep it in the list so that stays true.
+  { name: 'min-landscape',       w: 740, h: 217 },
+  // 500, not the Pixel's true 412: headless Chrome refuses to open a window
+  // narrower than ~500px, so asking for 412 silently tested 500 anyway. The
+  // narrow-width branch is `max-width:520px`, which 500 still exercises.
+  { name: 'phone-portrait',      w: 500, h: 796 },
+  { name: 'tablet',              w: 1024, h: 681 },
+  { name: 'desktop',             w: 1600, h: 813 }
 ];
 
 // Elements that must be fully on-screen, whatever the viewport.
@@ -95,21 +107,42 @@ fs.writeFileSync(probeFile, fs.readFileSync(path.join(base, 'index.html'), 'utf8
 let failures = 0;
 try {
   for (const s of SIZES) {
-    let dom;
-    try {
-      // a private profile per run: concurrent/rapid launches otherwise fight
-      // over the default user-data-dir and die before the page ever loads
+    // Ask for a window, see what viewport we actually got, correct, ask
+    // again. Two attempts converge on any build's chrome height.
+    const shoot = (winW, winH) => {
       const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-layout-'));
       try {
-        dom = execFileSync(CHROME, [
+        return execFileSync(CHROME, [
           '--headless', '--no-sandbox', '--disable-dev-shm-usage',
           '--use-gl=swiftshader', '--enable-unsafe-swiftshader',
           '--user-data-dir=' + profile,
-          '--window-size=' + s.w + ',' + s.h, '--virtual-time-budget=8000', '--dump-dom',
+          '--window-size=' + winW + ',' + winH, '--virtual-time-budget=8000', '--dump-dom',
           'file://' + probeFile
         ], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, timeout: 300000, stdio: ['ignore', 'pipe', 'ignore'] });
       } finally {
         try { fs.rmSync(profile, { recursive: true, force: true }); } catch (e) {}
+      }
+    };
+    const peek = (d) => {
+      const a = d.indexOf('id="layout-probe"');
+      if (a < 0) return null;
+      const b = d.indexOf('>', a) + 1, c = d.indexOf('</div>', b);
+      try { return JSON.parse(d.slice(b, c).replace(/&quot;/g, '"').replace(/&amp;/g, '&')); }
+      catch (e) { return null; }
+    };
+
+    let dom;
+    try {
+      let winW = s.w, winH = s.h;
+      dom = shoot(winW, winH);
+      const first = peek(dom);
+      if (first && (first.vw !== s.w || first.vh !== s.h)) {
+        winW += s.w - first.vw;
+        winH += s.h - first.vh;
+        if (winW > 0 && winH > 0) {
+          const again = shoot(winW, winH);
+          if (peek(again)) dom = again;
+        }
       }
     } catch (e) {
       console.log('  SKIP ' + s.name + ' — browser unavailable (' + e.code + ')');
@@ -120,7 +153,13 @@ try {
     const j = dom.indexOf('>', i) + 1, k = dom.indexOf('</div>', j);
     const rep = JSON.parse(dom.slice(j, k).replace(/&quot;/g, '"').replace(/&amp;/g, '&'));
 
-    console.log('\n' + s.name + ' — viewport ' + rep.vw + 'x' + rep.vh);
+    console.log('\n' + s.name + ' — viewport ' + rep.vw + 'x' + rep.vh +
+      (rep.vw === s.w && rep.vh === s.h ? '' : '  (asked for ' + s.w + 'x' + s.h + ')'));
+    if (Math.abs(rep.vh - s.h) > 4 || Math.abs(rep.vw - s.w) > 4) {
+      console.log('    FAIL — could not reach the requested viewport; ' +
+                  'this run tested something other than what was asked for');
+      failures++;
+    }
     for (const m of rep.must) {
       if (m.skipped) { console.log('    --   ' + m.sel + ' (not shown)'); continue; }
       const over = [];

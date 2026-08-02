@@ -761,6 +761,23 @@ body{
   #chronicle{display:none;}
   .menu-help{display:none;}
 }
+/* Below ~320px there is no room for prose at all. CI caught this: the
+   runner's Chrome reserves ~56px more window chrome than the local build,
+   so viewports came out at 250px and 217px — under every tier above — and
+   LET THERE BE LIGHT sat 14px and 47px below the fold. The intro becomes
+   the only two things that matter: the name of it, and the way in. The
+   tutorial text is not lost; it is the Testament panel, in-world.
+   The button keeps its full 44px touch target — at this height it is the
+   only thing to press, so it is the last thing that should shrink. */
+@media (max-height:320px){
+  .intro-art,.intro-sub,.intro-text,.intro-tips{display:none;}
+  .intro-logo{font-size:20px;letter-spacing:.16em;margin-bottom:2px;}
+  .modal{padding:10px 14px;}
+  .modal-title{margin-bottom:6px;font-size:var(--t-md);}
+  .big-btn{margin-top:8px;padding:8px 18px;}
+  .menu-btns{gap:5px;margin-bottom:8px;}
+  .menu-btn{padding:6px;min-height:34px;}
+}
 
 /* ---------- themed ask/confirm ---------- */
 #ask-body{
