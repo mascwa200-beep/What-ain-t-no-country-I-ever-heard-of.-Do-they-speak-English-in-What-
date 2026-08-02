@@ -150,6 +150,27 @@
     // Divinity: each transcendence permanently multiplies the flow of faith
     return f * (1 + G.divinity * 0.25);
   }
+  // The same sum, itemised. The HUD showed one aggregate number, so nothing
+  // in the game revealed that a wonder is worth 3.6 temples — which makes
+  // pushing a village to level 4 the highest-leverage act available, and a
+  // complete secret. Kept beside faithPerStep so the two cannot drift.
+  function faithBreakdown() {
+    const c = G.sim.counts;
+    let pop = 0;
+    for (const k of Sim.SENTIENT) pop += c[k] || 0;
+    let temples = 0, wonders = 0;
+    for (const v of G.sim.villages) { temples += v.temples; wonders += v.wonders || 0; }
+    const rows = [
+      ['base', 0.04, ''],
+      ['worshippers', pop * 0.014, pop + ' × 0.014'],
+      ['temples', temples * 0.22, temples + ' × 0.22'],
+      ['wonders', wonders * 0.8, wonders + ' × 0.80'],
+      ['devotion', Sim.devotion ? Sim.devotion(G.sim) * 0.22 : 0, 'their piety, summed'],
+      ['religion', PD.Society ? PD.Society.faithBonus(G.sim) : 0, 'organized faith']
+    ];
+    const sub = rows.reduce((s, r) => s + r[1], 0);
+    return { rows, sub, mult: 1 + G.divinity * 0.25, total: sub * (1 + G.divinity * 0.25) };
+  }
 
   // ---- Transcendence (prestige): trade a multiverse for permanent power
   // ================= Themed ask / confirm =================
@@ -163,8 +184,13 @@
       if (!m) { resolve(opts.input != null ? global.prompt(opts.body, opts.input) : global.confirm(opts.body)); return; }
       const input = $('#ask-input'), okBtn = $('#ask-ok'), cancel = $('#ask-cancel');
       $('#ask-title').textContent = opts.title || 'Are you certain?';
-      $('#ask-body').textContent = opts.body || '';
+      // opts.html is markup we author here; opts.body is still escaped, because
+      // some call sites interpolate a player-supplied planet or race name
+      if (opts.html != null) $('#ask-body').innerHTML = opts.html;
+      else $('#ask-body').textContent = opts.body || '';
       okBtn.textContent = opts.ok || 'Confirm';
+      // an informational dialog has nothing to cancel — pass cancel:null
+      cancel.style.display = (opts.cancel === null) ? 'none' : '';
       cancel.textContent = opts.cancel || 'Cancel';
       m.classList.toggle('has-input', opts.input != null);
       m.classList.toggle('danger', !!opts.danger);
@@ -1894,15 +1920,21 @@
         ${n ? `<div class="ins-row"><span>Nation</span><b>${n.name}</b></div>
         <div class="ins-row"><span>Rule</span><b>${PD.Society.GOVERNMENTS[n.gov]} · ${n.leaderName}</b></div>
         <div class="ins-row"><span>Era</span><b>${PD.Society.ERAS[n.era]}</b></div>
+        ${nationProgress(n)}
         <div class="ins-row"><span>Scholars</span><b>${
           n.scholars ? n.scholars + ' 📚' : '<span style="color:#8a7a5a">none — this age will not pass</span>'
         }</b></div>` : ''}
         ${faith ? `<div class="ins-row"><span>Faith</span><b>${faith.name}</b></div>` : ''}
-        <div class="ins-row"><span>Population</span><b>${v.pop}</b></div>
+        <div class="ins-row"><span>Population</span><b>${v.pop}${
+          v.cap ? ` <small class="ins-cap${v.pop >= v.cap ? ' ins-capped' : ''}">/ ${v.cap} land</small>` : ''
+        }</b></div>
         <div class="ins-row"><span>Tier</span><b>${['Hamlet', 'Village', 'Town', 'City', 'Metropolis'][Math.min(4, v.level - 1)]} (lvl ${v.level})</b></div>
         <div class="ins-bar"><span>Prosperity</span>${bar(v.prosperity, '#f0c040')}</div>
         <div class="ins-row"><span>Food store</span><b>${Math.floor(v.food)}</b></div>
+        <div class="ins-row"><span>Wealth</span><b>${Math.floor(v.wealth || 0)}</b></div>
         <div class="ins-row"><span>Temples</span><b>${v.temples} ⛪</b></div>
+        ${v.wonders ? `<div class="ins-row"><span>Wonders</span><b>${v.wonders} 🏛</b></div>` : ''}
+        ${scholarGate(v)}
         ${describeTrades(v)}
         ${v.rival >= 0 ? `<div class="ins-row war"><span>At war with</span><b>${villName(v.rival) || '?'}</b></div>` : ''}
         <button class="ins-smite" id="smite-btn">⚡ Smite this town</button>`;
@@ -1945,6 +1977,22 @@
       if (spent > 0) onPowerUsed(pw || { cat: 'god' }, spent);
     }
   }
+  // Scholars are the entire tech tree, and the three things that gate them
+  // were all invisible: wealth was computed every tick and displayed nowhere,
+  // prosperity saturates so nobody reads it as a gate, and the population
+  // floor was never stated. "This age will not pass" was the whole diagnosis.
+  // These thresholds mirror chooseProfession() in sim.js.
+  function scholarGate(v) {
+    const has = v.jobs && Sim.PROFESSIONS ? (v.jobs[Sim.PROFESSIONS.indexOf('scholar')] || 0) : 0;
+    if (has > 0) return '';
+    const miss = [];
+    if (v.pop <= 12) miss.push(`${v.pop}/13 people`);
+    if ((v.wealth || 0) <= 18) miss.push(`${Math.floor(v.wealth || 0)}/19 wealth`);
+    if (v.prosperity <= 0.75) miss.push(`${(v.prosperity * 100) | 0}/76% prosperity`);
+    if (!miss.length) return '<div class="ins-note">Ready for a scholar — one will take up the study soon.</div>';
+    return `<div class="ins-note ins-gate">No scholars, and so no discoveries. Wants: ${miss.join(', ')}.</div>`;
+  }
+
   // A town's roster of trades — who is actually here, and what that buys it.
   function describeTrades(v) {
     if (!v.jobs || !Sim.PROFESSIONS) return '';
@@ -2090,12 +2138,26 @@
     el.innerHTML = soc.prayers.map(p =>
       `<div class="prayer">
         <div class="prayer-text">${p.text}</div>
+        <div class="prayer-grant">${PRAYER_GRANT[p.kind] || 'Their karma rises.'}</div>
         <div class="prayer-btns">
           <button class="pr-answer" data-pid="${p.id}">✨ Answer (+8✦)</button>
-          <button class="pr-refuse" data-pid="${p.id}">🌑 Refuse</button>
+          <button class="pr-refuse" data-pid="${p.id}">🌑 Refuse (−1 karma)</button>
         </div>
       </div>`).join('');
   }
+  // What answering actually does. The effects are wildly unequal — 'monster'
+  // grants a Paragon, the same thing Empower Hero sells for ✦60, in exchange
+  // for GAINING ✦8 — and the panel showed two identical buttons and one
+  // number, so "send us food" and "send us a hero" looked the same. Mirrors
+  // the switch in answerPrayer (society.js).
+  const PRAYER_GRANT = {
+    sick:    'Grants: healed of sickness, restored to full.',
+    famine:  'Grants: +60 food to their town.',
+    war:     'Grants: the town\'s feud ends, and everyone near them is healed.',
+    child:   'Grants: a child is born to their village.',
+    monster: 'Grants: they become a Paragon — a champion, permanently.',
+    thanks:  'Grants: nothing but their gratitude. Karma only.'
+  };
   $('#prayers-list') && $('#prayers-list').addEventListener('click', () => {});
 
   // ---- PixelNet feed ----
@@ -2435,6 +2497,25 @@
     });
     $('#btn-menu').addEventListener('click', toggleMenu);
     $('#btn-save').addEventListener('click', () => save());
+    // The faith rate was one number with no way to ask what it was made of.
+    // Tap it and it says.
+    const fstat = document.querySelector('#hud-top .stat.faith');
+    if (fstat) {
+      fstat.addEventListener('click', () => {
+        const b = faithBreakdown();
+        const lines = b.rows.filter(r => Math.abs(r[1]) > 0.0005 || r[0] === 'base')
+          .map(r => `<div class="fb-row"><span>${r[0]}</span><b>+${r[1].toFixed(2)}</b>${r[2] ? `<small>${r[2]}</small>` : ''}</div>`);
+        ask({
+          title: '✦ Where your faith comes from',
+          html: `<div class="fb">${lines.join('')}
+            <div class="fb-row fb-sum"><span>subtotal</span><b>+${b.sub.toFixed(2)}</b></div>
+            <div class="fb-row"><span>divinity ⍟${G.divinity}</span><b>×${b.mult.toFixed(2)}</b></div>
+            <div class="fb-row fb-sum"><span>per tick</span><b>+${b.total.toFixed(2)}</b></div></div>
+            <p class="panel-note">A wonder is worth ${(0.8 / 0.22).toFixed(1)} temples. Wonders raise themselves in towns of level 4 and above.</p>`,
+          ok: 'Close', cancel: null
+        });
+      });
+    }
     const search = $('#tool-search');
     if (search) {
       search.addEventListener('input', () => { G.toolQuery = search.value; buildToolbar(); });

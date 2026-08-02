@@ -468,6 +468,17 @@ body{
   background:var(--gold);opacity:.8;
 }
 .panel-note{font-size:var(--t-sm);color:var(--dim);line-height:1.55;margin:var(--s3) 0;}
+/* the faith-income breakdown, opened by tapping the ✦ stat */
+.fb{font-family:var(--f-mono);font-size:var(--t-sm);}
+.fb-row{
+  display:grid;grid-template-columns:1fr auto;align-items:baseline;
+  gap:var(--s2);padding:var(--s1) 0;border-bottom:1px solid rgba(60,70,110,0.25);
+  color:var(--dim);
+}
+.fb-row b{color:var(--ink);font-weight:700;}
+.fb-row small{grid-column:1/-1;color:#5a668c;font-size:var(--t-xs);}
+.fb-row.fb-sum{border-bottom:none;border-top:1px solid var(--gold-dim);color:var(--gold);}
+.fb-row.fb-sum b{color:var(--gold);}
 .empty{font-size:var(--t-md);color:var(--dim);text-align:center;padding:var(--s6) var(--s2);line-height:1.6;}
 
 /* history */
@@ -504,6 +515,12 @@ body{
 .prayer-text{
   font-family:var(--f-serif);font-size:var(--t-md);line-height:1.55;
   font-style:italic;color:#dee5f8;margin-bottom:var(--s2);
+}
+/* what answering this one actually grants — the effects range from a heal to
+   a free Paragon, and the two buttons looked identical for all of them */
+.prayer-grant{
+  font-family:var(--f-mono);font-size:var(--t-xs);color:var(--accent);
+  margin-bottom:var(--s2);line-height:1.4;
 }
 .prayer-btns{display:flex;gap:var(--s2);}
 .prayer-btns button{
@@ -630,6 +647,16 @@ body{
 .ins-row{display:flex;justify-content:space-between;gap:var(--s3);font-size:var(--t-sm);margin:var(--s1) 0;color:var(--dim);font-family:var(--f-mono);}
 .ins-row b{color:var(--ink);font-weight:700;}
 .ins-row.war b,.ins-row.war span{color:var(--bad);}
+/* population against the land that feeds it — the cap was silent, so a town
+   that stopped growing gave no reason */
+.ins-cap{font-family:var(--f-mono);color:var(--dim);font-weight:400;}
+.ins-cap.ins-capped{color:#e0a860;}
+/* why a town has no scholars, and therefore why its nation cannot advance */
+.ins-note{
+  font-size:var(--t-xs);line-height:1.5;color:var(--dim);
+  margin:var(--s2) 0;padding-left:var(--s2);border-left:1px solid var(--edge2);
+}
+.ins-note.ins-gate{color:#c8a86a;border-left-color:var(--gold-dim);}
 .ins-bar{font-size:var(--t-sm);color:var(--dim);margin:5px 0;}
 .ins-bar span{display:block;margin-bottom:2px;}
 .bar{height:8px;background:#0a0e1a;border:1px solid var(--edge);border-radius:3px;overflow:hidden;}
