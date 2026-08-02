@@ -1084,10 +1084,9 @@
     if (G.flash > 0) G.flash = Math.max(0, G.flash - dt / 300);
     if (G.shake > 0) G.shake = Math.max(0, G.shake - dt / 30);
 
-    const sc = G.shake;
-    const jitter = sc > 0 ? `translate(${((Math.random() - 0.5) * sc).toFixed(1)}px,${((Math.random() - 0.5) * sc).toFixed(1)}px)` : '';
-    G.r.canvas.style.transform = jitter;
-    if (G.r.overlay) G.r.overlay.style.transform = jitter;
+    // Shake is a real camera kick now (render3d stepCam), not a CSS transform
+    // on the DOM canvas — which used to move the element out from under the
+    // pointer and desync picking against getBoundingClientRect.
     Render.draw(G.r, G.sim, G.ui);
     drawOverlays();
     if (G.flash > 0 && G.r.octx) { const c = G.r.octx; c.fillStyle = `rgba(255,255,255,${G.flash * 0.5})`; c.fillRect(0, 0, G.r.w, G.r.h); }

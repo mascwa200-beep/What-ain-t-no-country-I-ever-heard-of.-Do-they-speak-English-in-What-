@@ -178,6 +178,48 @@ icheck('every living unit is on the map',
        G2.sim.units.every(u => u.dead || (u.x >= 0 && u.x <= G2.world.W && u.y >= 0 && u.y <= G2.world.H)));
 console.log('rewind invariant failures:', invFails);
 
+// ============ FX RIBBONS ============
+// gl.lineWidth(>1) is a no-op in modern browsers, so lightning and shockwaves
+// used to draw as 1px hairlines. They are camera-facing quads now — pure
+// geometry, so it is checkable without a GPU.
+console.log('\n--- fx ribbons ---');
+let ribFails = 0;
+function rcheck(name, cond) {
+  console.log('  ' + (cond ? 'PASS' : 'FAIL') + ' — ' + name);
+  if (!cond) ribFails++;
+}
+{
+  const RQ = PD.Render.ribbonQuad;
+  const eye = [0, 0, 4];
+  const mk = () => ({ verts: [], cols: [], edges: [] });
+  let o = mk();
+  const ok = RQ(o, [-1, 0, 0], [1, 0, 0], eye, [1, 1, 1], 1, 8);
+  rcheck('a segment produces a quad', ok === true);
+  rcheck('two triangles, six vertices', o.verts.length === 18 && o.edges.length === 6);
+  rcheck('every coordinate is finite', o.verts.every(v => Number.isFinite(v)));
+  rcheck('edges span -1..1 for the soft shoulder',
+         Math.min(...o.edges) === -1 && Math.max(...o.edges) === 1);
+  // the quad must be perpendicular to the view, i.e. offset along y here
+  const spread = Math.max(...o.verts.filter((_, i) => i % 3 === 1)) -
+                 Math.min(...o.verts.filter((_, i) => i % 3 === 1));
+  rcheck('the ribbon has real width (' + spread.toFixed(4) + ')', spread > 1e-4);
+  // width must grow with distance so apparent thickness stays constant
+  let o2 = mk();
+  RQ(o2, [-1, 0, 0], [1, 0, 0], [0, 0, 40], [1, 1, 1], 1, 8);
+  const spread2 = Math.max(...o2.verts.filter((_, i) => i % 3 === 1)) -
+                  Math.min(...o2.verts.filter((_, i) => i % 3 === 1));
+  rcheck('width scales with camera distance (' + spread.toFixed(3) + ' -> ' + spread2.toFixed(3) + ')',
+         spread2 > spread * 5);
+  // a segment pointing straight at the camera has no valid facing quad
+  let o3 = mk();
+  const degen = RQ(o3, [0, 0, 0], [0, 0, 1], [0, 0, 4], [1, 1, 1], 1, 8);
+  rcheck('a view-aligned segment is skipped, not NaN', degen === false && o3.verts.length === 0);
+  let o4 = mk();
+  const zero = RQ(o4, [1, 2, 3], [1, 2, 3], eye, [1, 1, 1], 1, 8);
+  rcheck('a zero-length segment is skipped', zero === false && o4.verts.length === 0);
+}
+console.log('fx ribbon failures:', ribFails);
+
 // ---- ONE monotonic clock for every section below ----
 // rAF timestamps never run backwards in a real browser, and loop() computes
 // dt from them. A section that runs its own clock ahead of this one leaves
@@ -429,7 +471,7 @@ scheck('XIV. Before the Beginning unlocks', !!G2.story.done.before);
 scheck('XV. Let There Be Light unlocks', !!G2.story.done.recreate);
 console.log('testament failures:', storyFails);
 
-const totalFails = invFails + softFails + gateFails + storyFails;
+const totalFails = invFails + ribFails + archFails + softFails + gateFails + storyFails;
 console.log('\n=== assertion failures: ' + totalFails + ' ===');
 console.log('INTEGRATION TEST ' + (totalFails ? 'FAILED' : 'PASSED') +
             ' — boot, loop, powers, save/load, rewind, un-creation, genesis, story.');
