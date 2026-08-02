@@ -1,0 +1,19 @@
+{
+  "name": "Pixel Deity — Cinematic God Simulator",
+  "short_name": "Pixel Deity",
+  "description": "An offline cinematic god simulator: living 3D worlds, emergent civilizations, heavens and hells, and a whole multiverse in your pocket.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "fullscreen",
+  "orientation": "landscape",
+  "background_color": "#0a0e1a",
+  "theme_color": "#0a0e1a",
+  "icons": [
+    {
+      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' fill='%230a0e1a'/><rect x='6' y='2' width='4' height='4' fill='%23f0d040'/><rect x='4' y='6' width='8' height='6' fill='%235aa03c'/><rect x='2' y='10' width='12' height='3' fill='%23245e8f'/></svg>",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

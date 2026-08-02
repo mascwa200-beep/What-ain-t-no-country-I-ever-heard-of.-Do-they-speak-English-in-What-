@@ -37,6 +37,7 @@
     demon:      { name: 'Demons',      one: 'Demon',      col: '#c05030', col2: '#4a0a0a', emoji: '👿', aggr: 1.0,  breed: 0.2,  dmg: 15, hp: 70, spd: 0.12, lifespan: 99999, likes: [B.HELLROCK, B.ASH],        sentient: false, monster: true, horns: true, fiery: true },
     undead:     { name: 'Undead',      one: 'Undead',     col: '#b7c7c9', col2: '#4a2a4a', emoji: '💀', aggr: 1.0,  breed: 0.0,  dmg: 7,  hp: 34, spd: 0.09, lifespan: 5000, likes: [B.ASH, B.DIRT, B.ROCK],     sentient: false, monster: true },
     spirit:     { name: 'Spirits',     one: 'Spirit',     col: '#cfe0e8', col2: '#7a90a8', emoji: '👻', aggr: 0.0,  breed: 0.0,  dmg: 1,  hp: 20, spd: 0.07, lifespan: 99999, likes: [B.CLOUD, B.VOIDSTONE],      sentient: false, ghost: true, flies: true },
+    kraken:     { name: 'Krakens',     one: 'Kraken',     col: '#5a8aa0', col2: '#1a3a5a', emoji: '🐙', aggr: 1.0,  breed: 0.05, dmg: 22, hp: 300, spd: 0.10, lifespan: 9000, likes: [B.DEEP, B.WATER],           sentient: false, monster: true, aquatic: true, big: 2.4 },
     critter:    { name: 'Critters',    one: 'Critter',    col: '#e6d8b0', col2: '#b09060', emoji: '🐇', aggr: 0.0,  breed: 1.6,  dmg: 1,  hp: 8,  spd: 0.09, lifespan: 900,  likes: [B.GRASS, B.FOREST],         sentient: false, animal: true, prey: true },
     wolf:       { name: 'Wolves',      one: 'Wolf',       col: '#9aa0a8', col2: '#40444a', emoji: '🐺', aggr: 0.7,  breed: 0.7,  dmg: 5,  hp: 18, spd: 0.13, lifespan: 1300, likes: [B.FOREST, B.SNOW, B.GRASS], sentient: false, animal: true, predator: true }
   };
@@ -385,11 +386,14 @@
       u.state = 'fight';
       u.tx = enemy.x; u.ty = enemy.y;
       if (enemyD < 1.2) {
-        if (u.cd === 0) {
-          // night empowers the nocturnal; paragons hit like gods' chosen
+        if (u.cd === 0 && !shielded(sim, enemy)) {
+          // night empowers the nocturnal; paragons hit like gods' chosen;
+          // under a blood moon every monster is a nightmare
           let mult = 0.6 + sim.rng() * 0.8;
           if (R.nocturnal) mult *= sim.isNight ? 1.6 : 0.7;
+          if (R.monster && sim.bloodMoonT > 0) mult *= 1.6;
           if (u.paragon) mult *= 1 + u.paragon;
+          if (u.big) mult *= u.big;
           enemy.hp -= R.dmg * mult;
           u.cd = 18;
           if (PD.FX) PD.FX.hit(enemy.x, enemy.y);
@@ -506,6 +510,10 @@
     const world = sim.world;
     const R = RACES[v.race];
     v.age++;
+    if (v.shieldT > 0) {
+      v.shieldT--;
+      if (PD.FX && sim.rng() < 0.1) PD.FX.spawn(v.x + (sim.rng() - 0.5) * v.radius * 2, v.y + (sim.rng() - 0.5) * v.radius * 2, 0, -0.04, 20, '#ffe680', 1);
+    }
 
     // Food production: scan owned tiles for fertility + farms.
     // Carrying capacity is derived from the land the village works, giving
@@ -662,6 +670,7 @@
     sim.season = Math.floor((sim.tick % 480) / 120); // 4 seasons per ~year
     // night falls when the day-cycle cosine dips (matches the renderer)
     sim.isNight = Math.cos(((sim.tick % 480) / 480) * 6.283) * 0.5 + 0.15 > 0.3;
+    if (sim.bloodMoonT > 0) sim.bloodMoonT--;
     buildGrid(sim);
 
     // units
@@ -797,10 +806,17 @@
     }
   }
 
+  // A unit under a village's Divine Shield cannot be harmed
+  function shielded(sim, u) {
+    if (u.village < 0) return false;
+    const v = villageById(sim, u.village);
+    return !!(v && v.shieldT > 0);
+  }
+
   // ---- Area effects invoked by divine powers --------------------------
   function damageArea(sim, cx, cy, radius, dmg, byRace) {
     forNeighbors(sim, cx, cy, radius + 1, (u) => {
-      if (W.wdist(sim.world, u.x, u.y, cx, cy) <= radius) {
+      if (W.wdist(sim.world, u.x, u.y, cx, cy) <= radius && !shielded(sim, u)) {
         u.hp -= dmg;
         if (u.hp <= 0) killUnit(sim, u, byRace);
       }
@@ -823,6 +839,6 @@
     RACES, SENTIENT, hostile, createSim, spawnUnit, foundVillage,
     step, recount, villageById, logEvent, killUnit,
     damageArea, blessArea, infectArea, buildGrid, forNeighbors,
-    villageName, personName, TRAITS, PROFESSIONS, walkable
+    villageName, personName, TRAITS, PROFESSIONS, walkable, shielded
   };
 })(window);

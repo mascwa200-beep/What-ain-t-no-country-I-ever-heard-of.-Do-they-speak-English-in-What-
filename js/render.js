@@ -218,6 +218,13 @@
         t.fillStyle = '#6a6258'; t.fillRect(px + 1, py + 4, 2, 3); t.fillRect(px + 5, py + 3, 2, 4);
         t.fillStyle = '#4a4238'; t.fillRect(px + 3, py + 5, 1, 2);
         break;
+      case S.WONDER:
+        // a golden monument that catches the light
+        t.fillStyle = '#c8a020'; t.fillRect(px + 2, py, 4, 8);
+        t.fillStyle = '#f0d040'; t.fillRect(px + 3, py, 2, 8); t.fillRect(px + 1, py + 6, 6, 2);
+        t.fillStyle = '#fff2a0'; t.fillRect(px + 3, py, 2, 1);
+        t.fillStyle = '#8a6a10'; t.fillRect(px + 1, py + 7, 6, 1);
+        break;
     }
   }
 
@@ -255,6 +262,7 @@
     const px = cz / TILE; // pixel unit size (scale)
     let P = Math.max(1, cz * 0.14); // sprite pixel size
     if (R.big) P *= R.big;          // giants, trolls, dragons loom
+    if (u.big) P *= u.big;          // god-made titans loom larger still
     const flying = R.flies;
     const bob = Math.sin(u.bob) * P * (flying ? 0.7 : 0.35);
     const bx = s.x, by = s.y - P * 2 + bob - (flying ? P * 1.2 : 0);
@@ -526,6 +534,11 @@
       const seasonTints = ['rgba(120,220,120,0.04)', 'rgba(255,220,120,0.05)', 'rgba(220,150,80,0.06)', 'rgba(180,210,255,0.08)'];
       ctx.fillStyle = seasonTints[sim.season];
       ctx.fillRect(0, 0, r.w, r.h);
+      // blood moon: the sky bleeds and monsters grow bold
+      if (sim.bloodMoonT > 0) {
+        ctx.fillStyle = `rgba(180,20,20,${0.10 + Math.sin(sim.tick * 0.1) * 0.04})`;
+        ctx.fillRect(0, 0, r.w, r.h);
+      }
     }
     // vignette
     const g = ctx.createRadialGradient(r.w / 2, r.h / 2, Math.min(r.w, r.h) * 0.35, r.w / 2, r.h / 2, Math.max(r.w, r.h) * 0.75);
@@ -551,7 +564,7 @@
       for (const k in W.BIOME_COLORS) biomeLUT[+k] = hexToRgb(W.BIOME_COLORS[k]);
     }
     // redraw minimap terrain occasionally
-    if (world.dirtyMini || miniDirtyTick < 0 || (sim.tick - miniDirtyTick) > 30) {
+    if (world.dirtyMini || miniDirtyTick < 0 || Math.abs(sim.tick - miniDirtyTick) > 30) {
       if (!miniImg || miniImg.width !== world.W || miniImg.height !== world.H) {
         miniImg = miniCtx.createImageData(world.W, world.H);
       }
@@ -611,8 +624,13 @@
     r.cam.x = world.W / 2; r.cam.y = world.H / 2;
   }
 
-  global.PD.Render = {
-    createRenderer, draw, renderTerrain, worldToScreen, screenToWorld,
+  // Exported as Render2D: the 3D engine (render3d.js) replaces PD.Render for
+  // on-screen drawing but reuses this module's pixel-art terrain baking,
+  // sprites, and color helpers as its texture source.
+  const API = {
+    createRenderer, draw, renderTerrain, renderTileAt, worldToScreen, screenToWorld,
     screenToWorldRaw, setWorld, TILE, FX, hexToRgb
   };
+  global.PD.Render2D = API;
+  global.PD.Render = API; // overridden by render3d.js when it loads
 })(window);

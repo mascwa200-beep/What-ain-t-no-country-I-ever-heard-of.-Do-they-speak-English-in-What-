@@ -44,7 +44,7 @@
   };
 
   // Struct ids
-  const S = { NONE: 0, HOUSE: 1, TOWN: 2, FARM: 3, ROAD: 4, RUIN: 5, TOWER: 6, TEMPLE: 7 };
+  const S = { NONE: 0, HOUSE: 1, TOWN: 2, FARM: 3, ROAD: 4, RUIN: 5, TOWER: 6, TEMPLE: 7, WONDER: 8 };
 
   // Worlds are ROUND: x wraps east-west (cylindrical planet). Only the poles
   // (y) are hard bounds. Every tile access goes through idx(), which wraps.
@@ -161,6 +161,14 @@
         w.biome[i] = ((i * 13) % 4 === 0) ? B.SAND : B.OOZE;
         w.fert[i] = 0.55; w.tree[i] = 0;
       }
+    } else if (m === 'deep' || m === 'nothing') {
+      // without form, and void; darkness upon the face of the deep
+      w.biome[i] = B.DEEP; w.fert[i] = 0; w.tree[i] = 0;
+      w.struct[i] = 0; w.owner[i] = -1;
+    } else if (m === 'firmament') {
+      // waters divided, but no land yet
+      if (!isWater(b)) { w.biome[i] = B.WATER; }
+      w.fert[i] = 0; w.tree[i] = 0;
     } else if (m === 'void') {
       if (b === B.DEEP || b === B.WATER) { w.biome[i] = B.DEEP; }
       else { w.biome[i] = ((i * 11) % 6 === 0) ? B.SNOW : B.VOIDSTONE; w.fert[i] = 0.04; w.tree[i] = 0; }

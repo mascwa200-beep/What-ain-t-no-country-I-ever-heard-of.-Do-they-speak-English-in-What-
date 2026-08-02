@@ -1,8 +1,20 @@
-# ✦ PIXEL DEITY — an 8-bit god simulator
+# ✦ PIXEL DEITY — a cinematic god simulator
 
-A complete, offline-first idle god game in the spirit of *WorldBox*, rendered in
-chunky 2D pixel art and playable forever. No build step, no server, no
-dependencies — open `index.html` and you are a god.
+A complete, offline-first idle god game — *WorldBox* souls on *Solar Smash*
+bodies. Civilizations live on genuine 3D planets floating in space: spin
+them, zoom from orbit to street level, and strike anywhere on the sphere.
+
+**Fully high-definition.** No pixel art, no chiptune. Terrain is baked into
+1440×960 albedo *and* normal maps with hypsometric color ramps, depth-graded
+oceans, wave-lit coastlines, forest mottling, snowlines and city districts —
+then lit per-pixel with normal-mapped sunlight, specular sun-glint, rim-
+scattered atmosphere and a filmic tone-map. The soundtrack is a generative
+ambient score: reverb-drenched pads, detuned voices, sub-bass and stellar
+wind. The UI is frosted glass.
+
+All of it is *computed*, not downloaded — the entire game is still a few
+hundred kilobytes, offline forever, with zero dependencies and no build
+step. Open `index.html` and you are a god.
 
 ## ▶ Play
 
@@ -12,12 +24,48 @@ at runtime. It works from a plain `file://` double-click, fully offline.
 
 *(Optional)* serve it if you prefer: `python3 -m http.server` → `http://localhost:8000`.
 
-## 🌍 What it is — the GENESIS edition
+### 📱 Native Android app (the real deal — not a browser game)
 
-You are the One True God of a **round pixel multiverse**:
+**[⬇ Download PixelDeity.apk](../../raw/main/dist/PixelDeity.apk)** (~100 KB)
 
-- **Round worlds** — planets wrap east-west (walk far enough and come home);
-  the Cosmos screen shows them as **spinning pixel globes** orbiting your sun.
+A genuine installable Android app: launcher icon, fullscreen immersive
+landscape, and saves written to **app-private storage** through a native
+Java bridge — no browser, no browser UI, no browser storage.
+
+**Install on Pixel / GrapheneOS:**
+1. Download `PixelDeity.apk` on the phone.
+2. Open it from Files; allow *Install unknown apps* for Files/browser when
+   prompted (GrapheneOS: per-app toggle, revoke it after if you like).
+3. Tap **Install** → open **Pixel Deity** from the launcher. Play forever.
+
+The APK is self-signed (v2+v3 schemes) and built with a plain
+`aapt2 + d8 + apksigner` pipeline — no Gradle. Rebuild it yourself with
+`android/build-apk.sh` (the signing keystore is included so updates
+install over the top without losing saves). minSdk 26, targetSdk 34.
+
+### 🌐 Other ways to play
+
+- **Single file:** [PixelDeity.html](../../raw/main/dist/PixelDeity.html)
+  (~270 KB, the whole game in one file — open it in any browser) or
+  [PixelDeity.zip](../../raw/main/dist/PixelDeity.zip)
+- **PWA:** serve the repo over HTTPS and the included manifest + service
+  worker make it installable from the browser menu, fullscreen and offline
+- **Desktop:** open `index.html`. That's it.
+
+## 🌍 What it is — the GENESIS edition, now fully 3D and high-definition
+
+You are the One True God of a **3D pixel multiverse**:
+
+- **Real 3D planets (Solar Smash style)** — a custom WebGL engine wraps a
+  high-definition world around a displaced sphere: mountains with real relief, a
+  sweeping day/night terminator, **city lights glowing on the night side**,
+  wildfires visible from orbit, sun-glint oceans, drifting cloud layers, an
+  atmosphere that matches the world (blue for the living, red for hell,
+  gold for heaven), a starfield, and particle debris that falls back under
+  **spherical gravity**. Meteors streak in from orbit; lightning stabs down
+  from the sky; shockwaves race across the curve of the world; doomed cores
+  bleed magma through the crust as the countdown runs out. The heavens and
+  hells render as their own orbs.
 - **16 peoples + your own** — Humans, Elves, Orcs, Dwarves, Gnomes, Halflings,
   Goblins, Tieflings, Dragonborn, Lizardfolk, Merfolk, Fairies, Giants… plus
   vampires, werewolves, trolls, dragons, angels, demons — or design a custom
@@ -48,13 +96,36 @@ You are the One True God of a **round pixel multiverse**:
   where the orphan grows into a superpowered **Paragon**.
 - **Primordial evolution** — seed an ooze world and guide it from microbes
   to sapience. You created evolution, after all.
-- **Time travel** — the chronicle snapshots your world; rewind it, or
+- **A time dial, not a speed button** — one scale spans **−1000× through
+  1000×**: bullet-time to watch a meteor fall, or millennia-per-minute to
+  watch empires rise and fall. A live readout tells you how fast history is
+  moving.
+- **Time actually runs backwards** — hold reverse and the world un-happens:
+  cities unbuild, the dead rise out of the Beyond, fires un-burn, the sun
+  crosses the sky the wrong way. Rewind to the edge of the record and it stops
+  there — unless you hold the leftmost notch, **⧏⧏⧏ Unmaking**, through a
+  two-second arming hold. Then you pass the first moment into **un-creation**:
+  the works undone, the land unshaped, then **the formless Deep** (one
+  lightless ocean, no sun) and finally **Nothing** — the planet dissolves, the
+  stars go out, and time itself stops. Press **U** at any point in it to take
+  the whole thing back.
+- **Then you create it again** — from Nothing, the **Genesis** suite gives
+  you the seven words, one at a time: light, firmament, dry land, grass,
+  the lights that start time moving, life, and rest.
+- **Time travel** — the chronicle also snapshots your world; rewind it, or
   **branch a parallel universe** from any recorded moment.
-- **A story, if you want it** — the **Testament tab** unfolds 12 chapters
-  (Genesis → the Wired Age → Eternity) with hints hidden behind a button.
-- **Idle to the bone** — faith from worshippers, temples, faiths, and
-  answered prayers; autosave every 20s; true offline progression with an
+- **A story, if you want it** — the **Testament tab** unfolds 15 chapters
+  (The Shaping → the Wired Age → Turn Back → Before the Beginning → Let There
+  Be Light → Eternity) with hints hidden behind a button.
+- **Idle to the bone** — faith from worshippers, temples, faiths, wonders,
+  and answered prayers; autosave every 20s; true offline progression with an
   away report; nothing ever ends.
+- **OVERPOWERED endgame** — an Omnipotence power tier (black holes, raptures,
+  armageddons, titans, instant necropolises); golden **Wonders** that pour
+  faith; cosmic **omens** (blood moons that empower every monster, auroras,
+  eclipses, golden ages, krakens, monster hordes); 12 **achievements**; and
+  **Transcendence** — a prestige reset that permanently multiplies all faith
+  gain, forever, every time.
 
 ## ⚡ Divine powers
 
@@ -64,10 +135,13 @@ You are the One True God of a **round pixel multiverse**:
 | **Life** | Spawn any people or beast · Found instant Settlement · your custom races |
 | **Terraform** | Raise/Lower Land · Grow Forest/Grass · Desertify · Raise Peaks |
 | **Blessings** | Bless · Rain |
-| **Wrath** | Lightning · Ignite · Meteor · Plague · Earthquake · Freeze · Raise Dead · Thunderstorm · Tornado |
+| **Wrath** | Lightning · Ignite · Meteor · Plague · Earthquake · Freeze · Raise Dead · Thunderstorm · Tornado · Volcano |
 | **Godhead** | Divine Voice · Empower Hero (Paragons) · Miracle · Calm the Core · Guide Evolution |
 | **Dominion** | Install Leader · Force Peace · Incite War · Revolution |
 | **Testament** | Great Flood · Ten Plagues · Anoint Prophet · Commandments · Confusion of Tongues |
+| **Omnipotence** | Midas Touch · Black Hole · Heaven's Host · Hell's Legion · Armageddon · Necropolis · Polymorph · Fountain of Youth · Fertility Rite · Rapture · Divine Aegis · Titanize |
+| **Godhead** | Divine Voice · Empower Hero · Miracle · Calm the Core · Guide Evolution · **Judgment Day** · **Omniscience** · **Unmake From History** · **Breath of Life** · **Sabbath** |
+| **Genesis** | Let There Be Light · Separate the Waters · Let Dry Land Appear · Bring Forth Grass · Lights in the Firmament · Bring Forth Life · Rest · **Undo the Unmaking** |
 
 Plus panel-driven powers: create/destroy/rename planets (Cosmos), answer or
 refuse prayers, resurrect/ascend/condemn souls (the Beyond), rewind or branch
@@ -81,7 +155,11 @@ time, and the Genesis Lab race designer.
 | Right-drag / ✋ tool | Pan the map |
 | Wheel / pinch | Zoom (to the cursor) |
 | `WASD` / arrows | Pan |
-| `Space`, `1` `2` `3`, `0` | Pause · speed ×1 ×2 ×4 · pause |
+| `Space` · `0` | Pause |
+| `1`–`5` | Forward speeds (1× → 1000×) |
+| `,` `.` | Step the time dial down / up |
+| `R` | Reverse time (hold `⧏⧏⧏` past the record to un-create the world) |
+| `U` | Undo the unmaking |
 | `[` `]` | Brush size |
 | `L` | Toggle town labels |
 | `Esc` | Close panel / deselect |
@@ -97,14 +175,15 @@ buildless so the "built version" *is* the source:
 ```
 index.html       shell + HUD/toolbar/tab-rail/panels
 styles.css       retro UI theme
-js/util.js       seeded RNG, fractal value noise, 8-bit WebAudio synth
+js/util.js       seeded RNG, fractal value noise, cinematic WebAudio score
 js/codec.js      RLE + quantized typed-array save codec (a planet ≈ tens of KB)
 js/world.js      procgen → 18 biomes, ROUND wrap worlds, terraforming, fire sim
 js/sim.js        21 races, units w/ identity+karma, villages, ecology, combat
 js/society.js    nations, politics, religion, prayers, tech eras, PixelNet, history
 js/afterlife.js  souls, the five planes of the Beyond, angels/demons, resurrection
 js/cosmos.js     the multiverse: planets, spinning globes, doomed cores, evolution, Genesis Lab
-js/render.js     cached terrain, seam-wrapped camera, sprites, particles, minimap
+js/render.js     terrain baking helpers + colour tables
+js/render3d.js   HD WebGL planet engine: albedo/normal bake, PBR-ish shading, FX
 js/powers.js     the god's toolbox (40 powers)
 js/game.js       loop, faith economy, floods/storms/time travel, panels, save/load
 ```

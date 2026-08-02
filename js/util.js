@@ -72,94 +72,149 @@
     return { noise2, fbm };
   }
 
-  // ---- Audio: 8-bit chiptune synth ------------------------------------
+  // ---- Audio: cinematic ambient engine --------------------------------
+  // The opposite of chiptune: convolution-reverbed pads, detuned voices,
+  // sub-bass rumbles, airy shimmer — all synthesized, zero assets.
   const Audio8 = (function () {
-    let ctx = null, master = null, musicGain = null, sfxGain = null;
+    let ctx = null, master = null, musicGain = null, sfxGain = null, verb = null, verbGain = null;
     let enabled = true, musicOn = true, started = false;
-    let musicTimer = null, step = 0;
+    let musicTimer = null, windSrc = null, step = 0, timeDir = 1;
 
     function ensure() {
       if (ctx) return ctx;
       const AC = global.AudioContext || global.webkitAudioContext;
       if (!AC) { enabled = false; return null; }
       ctx = new AC();
-      master = ctx.createGain(); master.gain.value = 0.5; master.connect(ctx.destination);
-      musicGain = ctx.createGain(); musicGain.gain.value = 0.22; musicGain.connect(master);
-      sfxGain = ctx.createGain(); sfxGain.gain.value = 0.55; sfxGain.connect(master);
+      master = ctx.createGain(); master.gain.value = 0.6; master.connect(ctx.destination);
+      // generated impulse response: a big soft hall
+      verb = ctx.createConvolver();
+      const len = ctx.sampleRate * 2.4;
+      const ir = ctx.createBuffer(2, len, ctx.sampleRate);
+      for (let ch = 0; ch < 2; ch++) {
+        const d = ir.getChannelData(ch);
+        for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 2.6);
+      }
+      verb.buffer = ir;
+      verbGain = ctx.createGain(); verbGain.gain.value = 0.5;
+      verb.connect(verbGain); verbGain.connect(master);
+      musicGain = ctx.createGain(); musicGain.gain.value = 0.28; musicGain.connect(master); musicGain.connect(verb);
+      sfxGain = ctx.createGain(); sfxGain.gain.value = 0.5; sfxGain.connect(master); sfxGain.connect(verb);
       return ctx;
     }
     function resume() { if (ctx && ctx.state === 'suspended') ctx.resume(); }
 
-    function blip(freq, dur, type, vol, dest, slideTo) {
+    // one soft voice: detuned pair through a lowpass with envelope
+    function voice(freq, dur, opts) {
       if (!enabled) return;
       const c = ensure(); if (!c) return; resume();
-      const o = c.createOscillator();
+      opts = opts || {};
       const g = c.createGain();
-      o.type = type || 'square';
-      o.frequency.setValueAtTime(freq, c.currentTime);
-      if (slideTo) o.frequency.exponentialRampToValueAtTime(Math.max(1, slideTo), c.currentTime + dur);
+      const f = c.createBiquadFilter();
+      f.type = 'lowpass'; f.frequency.value = opts.lp || 2200; f.Q.value = 0.6;
+      const atk = opts.atk != null ? opts.atk : 0.02;
+      const vol = opts.vol || 0.2;
       g.gain.setValueAtTime(0.0001, c.currentTime);
-      g.gain.exponentialRampToValueAtTime(vol || 0.3, c.currentTime + 0.005);
+      g.gain.linearRampToValueAtTime(vol, c.currentTime + atk);
       g.gain.exponentialRampToValueAtTime(0.0001, c.currentTime + dur);
-      o.connect(g); g.connect(dest || sfxGain);
-      o.start(); o.stop(c.currentTime + dur + 0.02);
+      f.connect(g); g.connect(opts.dest || sfxGain);
+      const detunes = opts.detune || [0, 7];
+      for (const dt of detunes) {
+        const o = c.createOscillator();
+        o.type = opts.type || 'sine';
+        o.frequency.setValueAtTime(freq, c.currentTime);
+        if (opts.slideTo) o.frequency.exponentialRampToValueAtTime(Math.max(1, opts.slideTo), c.currentTime + dur);
+        o.detune.value = dt;
+        o.connect(f);
+        o.start(); o.stop(c.currentTime + dur + 0.05);
+      }
     }
-
-    // Noise burst (for explosions / fire / thunder)
-    function noiseBurst(dur, vol, lp) {
+    function blip(freq, dur, type, vol, dest, slideTo) {
+      voice(freq, dur, { type: type === 'square' ? 'triangle' : type, vol: (vol || 0.3) * 0.9, dest, slideTo, lp: 3200 });
+    }
+    function noiseBurst(dur, vol, lp, hp) {
       if (!enabled) return;
       const c = ensure(); if (!c) return; resume();
       const n = Math.floor(c.sampleRate * dur);
       const buf = c.createBuffer(1, n, c.sampleRate);
       const d = buf.getChannelData(0);
-      for (let i = 0; i < n; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / n);
+      for (let i = 0; i < n; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / n, 1.6);
       const src = c.createBufferSource(); src.buffer = buf;
       const g = c.createGain(); g.gain.value = vol || 0.4;
       const f = c.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = lp || 1200;
-      src.connect(f); f.connect(g); g.connect(sfxGain); src.start();
+      src.connect(f);
+      if (hp) { const h = c.createBiquadFilter(); h.type = 'highpass'; h.frequency.value = hp; f.connect(h); h.connect(g); }
+      else f.connect(g);
+      g.connect(sfxGain); src.start();
+    }
+    function subHit(freq, dur, vol) {
+      voice(freq, dur, { type: 'sine', vol: vol || 0.4, lp: 300, detune: [0], slideTo: freq * 0.4 });
     }
 
-    // Named sound effects
     const SFX = {
-      click:   () => blip(660, 0.05, 'square', 0.25),
-      select:  () => { blip(523, 0.05, 'square', 0.25); setTimeout(() => blip(784, 0.06, 'square', 0.22), 45); },
-      spawn:   () => { blip(392, 0.06, 'triangle', 0.3); setTimeout(() => blip(587, 0.08, 'triangle', 0.28), 55); },
-      terra:   () => blip(196, 0.12, 'sawtooth', 0.2, null, 320),
-      lightning: () => { noiseBurst(0.35, 0.5, 900); blip(120, 0.3, 'sawtooth', 0.25, null, 40); },
-      meteor:  () => { blip(90, 0.6, 'sawtooth', 0.3, null, 30); noiseBurst(0.7, 0.6, 700); },
-      fire:    () => noiseBurst(0.25, 0.25, 1600),
-      rain:    () => noiseBurst(0.5, 0.18, 500),
-      bless:   () => { blip(659, 0.1, 'triangle', 0.25); setTimeout(() => blip(988, 0.12, 'triangle', 0.22), 90); setTimeout(() => blip(1319, 0.14, 'triangle', 0.2), 190); },
-      plague:  () => blip(146, 0.4, 'sawtooth', 0.2, null, 90),
-      quake:   () => { noiseBurst(0.8, 0.5, 300); blip(60, 0.7, 'sine', 0.35, null, 30); },
-      death:   () => blip(220, 0.12, 'square', 0.18, null, 90),
-      build:   () => { blip(440, 0.04, 'square', 0.2); setTimeout(() => blip(554, 0.05, 'square', 0.18), 40); },
-      war:     () => { blip(311, 0.08, 'sawtooth', 0.22); setTimeout(() => blip(233, 0.1, 'sawtooth', 0.2), 70); },
-      levelup: () => { [523, 659, 784, 1047].forEach((f, i) => setTimeout(() => blip(f, 0.1, 'square', 0.25), i * 70)); },
-      error:   () => blip(120, 0.15, 'sawtooth', 0.2, null, 80)
+      click:   () => voice(720, 0.09, { vol: 0.14, lp: 4000, detune: [0] }),
+      select:  () => { voice(523, 0.14, { vol: 0.14 }); setTimeout(() => voice(784, 0.18, { vol: 0.12 }), 60); },
+      spawn:   () => { voice(392, 0.3, { vol: 0.16, type: 'triangle' }); setTimeout(() => voice(587, 0.4, { vol: 0.14 }), 80); },
+      terra:   () => { noiseBurst(0.5, 0.14, 500); subHit(90, 0.5, 0.25); },
+      lightning: () => { noiseBurst(0.9, 0.5, 3200, 200); subHit(70, 1.1, 0.5); },
+      meteor:  () => { voice(160, 1.2, { type: 'sawtooth', vol: 0.16, lp: 900, slideTo: 40 }); noiseBurst(1.4, 0.5, 900); subHit(55, 1.6, 0.6); },
+      fire:    () => noiseBurst(0.6, 0.2, 1800),
+      rain:    () => noiseBurst(1.2, 0.14, 900, 400),
+      bless:   () => { [659, 831, 988, 1319].forEach((f, i) => setTimeout(() => voice(f, 0.8, { vol: 0.1, atk: 0.05 }), i * 90)); },
+      plague:  () => voice(130, 1.2, { type: 'sawtooth', vol: 0.12, lp: 500, slideTo: 60, detune: [0, -15, 15] }),
+      quake:   () => { noiseBurst(1.6, 0.45, 260); subHit(40, 1.8, 0.7); },
+      death:   () => voice(220, 0.35, { vol: 0.1, slideTo: 90 }),
+      build:   () => { voice(440, 0.12, { vol: 0.1 }); setTimeout(() => voice(554, 0.14, { vol: 0.1 }), 70); },
+      war:     () => { voice(311, 0.3, { type: 'sawtooth', vol: 0.12, lp: 1200 }); subHit(90, 0.5, 0.3); },
+      levelup: () => { [523, 659, 784, 1047, 1319].forEach((f, i) => setTimeout(() => voice(f, 0.7, { vol: 0.12, atk: 0.03 }), i * 90)); },
+      error:   () => voice(150, 0.25, { type: 'sawtooth', vol: 0.1, lp: 600, slideTo: 90 })
     };
 
-    // Simple generative ambient music (procedural chiptune arpeggios)
-    const SCALE = [0, 2, 3, 5, 7, 8, 10]; // natural minor
-    const ROOT = 220;
-    const CHORDS = [[0, 3, 7], [ -2, 2, 5], [3, 7, 10], [ -4, 0, 3]];
-    function noteFreq(semi) { return ROOT * Math.pow(2, semi / 12); }
+    // generative ambient score: slow chord pads + sparse celestial melody
+    const CHORDS = [
+      [220.0, 277.18, 329.63, 415.30],  // Amaj7-ish
+      [174.61, 220.0, 261.63, 329.63],  // Fmaj7
+      [196.0, 246.94, 293.66, 369.99],  // G add
+      [146.83, 220.0, 293.66, 349.23]   // Dm-ish
+    ];
+    const LEAD = [440, 493.88, 554.37, 659.26, 739.99, 880];
     function musicStep() {
       if (!musicOn || !enabled) return;
-      const chord = CHORDS[(step >> 3) % CHORDS.length];
-      const bassNote = chord[0] - 12;
-      if (step % 4 === 0) blip(noteFreq(bassNote), 0.32, 'triangle', 0.28, musicGain);
-      const arp = chord[step % chord.length] + (Math.random() < 0.25 ? 12 : 0);
-      blip(noteFreq(arp), 0.18, 'square', 0.13, musicGain);
-      if (step % 8 === 6) blip(noteFreq(SCALE[(step) % SCALE.length] + 12), 0.15, 'square', 0.1, musicGain);
+      const chord = CHORDS[(step >> 1) % CHORDS.length];
+      const bend = timeDir < 0 ? 0.62 : 1;   // reversed time sags a fifth down
+      if (step % 2 === 0) {
+        for (const f of chord) {
+          voice(f * bend, 7.5, { vol: 0.045, atk: 2.5, lp: timeDir < 0 ? 700 : 1100, detune: [-6, 5], dest: musicGain });
+        }
+        voice(chord[0] / 2 * bend, 8, { vol: 0.06, atk: 2.0, lp: 300, detune: [0], dest: musicGain });
+      }
+      if (Math.random() < 0.65) {
+        const f = LEAD[(Math.random() * LEAD.length) | 0] * bend;
+        voice(f, 2.4, { vol: 0.035, atk: 0.4, lp: 2600, detune: [0, 4], dest: musicGain });
+      }
       step++;
     }
     function startMusic() {
       if (musicTimer || !enabled) return;
-      ensure();
-      musicTimer = setInterval(musicStep, 200);
+      const c = ensure(); if (!c) return;
+      musicStep();
+      musicTimer = setInterval(musicStep, 4000);
+      // gentle stellar wind under everything
+      if (!windSrc) {
+        const n = c.sampleRate * 4;
+        const buf = c.createBuffer(1, n, c.sampleRate);
+        const d = buf.getChannelData(0);
+        for (let i = 0; i < n; i++) d[i] = Math.random() * 2 - 1;
+        windSrc = c.createBufferSource(); windSrc.buffer = buf; windSrc.loop = true;
+        const f = c.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 380;
+        const g = c.createGain(); g.gain.value = 0.05;
+        windSrc.connect(f); f.connect(g); g.connect(musicGain);
+        windSrc.start();
+      }
     }
-    function stopMusic() { if (musicTimer) { clearInterval(musicTimer); musicTimer = null; } }
+    function stopMusic() {
+      if (musicTimer) { clearInterval(musicTimer); musicTimer = null; }
+      if (windSrc) { try { windSrc.stop(); } catch (e) {} windSrc = null; }
+    }
 
     return {
       init() { ensure(); },
@@ -169,15 +224,43 @@
       setMusic(v) { musicOn = v; if (v && started) startMusic(); else stopMusic(); },
       isEnabled() { return enabled; },
       isMusic() { return musicOn; },
-      // stop creating oscillator nodes while the tab is hidden
+      // reversed time: drop the score into a detuned, sluggish drone
+      setTimeDirection(d) {
+        timeDir = d;
+        if (!ctx) return;
+        if (musicGain) musicGain.gain.setTargetAtTime(d < 0 ? 0.16 : 0.28, ctx.currentTime, 0.4);
+        if (verbGain) verbGain.gain.setTargetAtTime(d < 0 ? 0.85 : 0.5, ctx.currentTime, 0.4);
+      },
       suspend() { stopMusic(); if (ctx && ctx.state === 'running') ctx.suspend(); },
       resumeAll() { if (!enabled || !started) return; resume(); if (musicOn) startMusic(); }
+    };
+  })();
+
+  // ---- Persistent storage --------------------------------------------
+  // In the native Android app a JavascriptInterface bridge writes saves to
+  // app-private files; everywhere else this falls back to localStorage.
+  const store = (function () {
+    const bridge = global.PixelDeityBridge;
+    if (bridge && typeof bridge.getItem === 'function') {
+      return {
+        getItem(k) { try { return bridge.getItem(k); } catch (e) { return null; } },
+        setItem(k, v) {
+          const ok = bridge.setItem(k, String(v));
+          if (ok === false) throw new Error('save write failed');
+        },
+        removeItem(k) { try { bridge.removeItem(k); } catch (e) {} }
+      };
+    }
+    return {
+      getItem(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
+      setItem(k, v) { localStorage.setItem(k, v); },
+      removeItem(k) { try { localStorage.removeItem(k); } catch (e) {} }
     };
   })();
 
   global.PD = global.PD || {};
   Object.assign(global.PD, {
     makeRNG, hashSeed, makeNoise, Audio8,
-    clamp, lerp, smooth, dist, dist2
+    clamp, lerp, smooth, dist, dist2, store
   });
 })(window);

@@ -35,7 +35,7 @@
   }
 
   function createPlanet(type, seedStr, name) {
-    if (C.planets.length >= 8) return null; // the void holds only so much
+    if (C.planets.length >= 10) return null; // the void holds only so much
     const t = PLANET_TYPES[type] || PLANET_TYPES.verdant;
     seedStr = seedStr || ('' + Date.now() + (Math.random() * 1e6 | 0));
     const rng = PD.makeRNG(PD.hashSeed(seedStr));
@@ -147,7 +147,7 @@
       world.struct[i] = 0; world.owner[i] = -1; world.fert[i] = 0;
     }
     world.mode = 'hell';
-    world.dirty = true; world.dirtyMini = true;
+    world.dirty = true; world.dirtyMini = true; world.dirtyGlobe = true;
     for (const u of sim.units) if (!u.dead) PD.Sim.killUnit(sim, u, 'apocalypse');
     sim.villages.length = 0;
     if (PD.Society) PD.Society.hist(sim, `${p.name} HAS SHATTERED. ${p.name} is no more. The Beyond weeps with new souls.`, 'fall');
@@ -253,7 +253,7 @@
   // color cache per planet for globe sampling
   function planetColors(p) {
     const world = p.world;
-    if (!p._cols || (p._colsTick || 0) < (p.sim.tick - 60) || world.dirtyGlobe) {
+    if (!p._cols || Math.abs(p.sim.tick - (p._colsTick || 0)) > 60 || world.dirtyGlobe) {
       const cols = p._cols || (p._cols = new Uint8Array(world.n * 3));
       for (let i = 0; i < world.n; i++) {
         const c = PD.Render.hexToRgb(W.BIOME_COLORS[world.biome[i]]);
