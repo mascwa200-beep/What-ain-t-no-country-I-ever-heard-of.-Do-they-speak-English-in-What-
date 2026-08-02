@@ -1,0 +1,94 @@
+# Pixel Deity — CI
+#
+# The repo had no CI at all: every pull request reported zero check runs, so
+# "the suites pass" was only ever a claim made in the description. This runs
+# all five of them on the actual diff.
+#
+# Deliberately ONE job, so there is exactly one required status check to
+# configure in branch protection rather than five.
+name: tests
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # a new push supersedes an in-flight run for the same ref
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    name: tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # The layout suite drives a real headless browser. The runner image
+      # ships Chrome/Chromium, but not always at the same path, so probe
+      # rather than hardcode — and fail loudly instead of silently skipping.
+      - name: Locate a browser
+        id: browser
+        run: |
+          for p in \
+            /usr/bin/google-chrome \
+            /usr/bin/google-chrome-stable \
+            /usr/bin/chromium-browser \
+            /usr/bin/chromium \
+            /opt/google/chrome/chrome
+          do
+            if [ -x "$p" ]; then
+              echo "CHROME_PATH=$p" >> "$GITHUB_ENV"
+              echo "found: $p"
+              exit 0
+            fi
+          done
+          echo "::error::no Chrome/Chromium found on the runner"
+          exit 1
+
+      - name: Syntax-check every module
+        run: |
+          fail=0
+          for f in js/*.js tools/*.js; do
+            node --check "$f" || { echo "::error file=$f::syntax error"; fail=1; }
+          done
+          exit $fail
+
+      # 67 powers applied against a real world, no exceptions
+      - name: core
+        run: node tools/test-core.js .
+
+      # 34 assertions: traits and trades actually drive the simulation
+      - name: lives
+        run: node tools/test-lives.js .
+
+      # 27 assertions against a recording WebAudio stub
+      - name: audio
+        run: node tools/test-audio.js .
+
+      # every element fits, across 6 viewports incl. landscape phone
+      - name: layout
+        run: node tools/test-layout.js . "$CHROME_PATH"
+
+      # the slow one (~2 min): boot, loop, powers, save/load, rewind,
+      # un-creation, genesis, story
+      - name: integration
+        run: node tools/test-integration.js .
+
+      # the shipped single-file build must still build
+      - name: dist builds
+        run: |
+          node tools/build-dist.js
+          test -s dist/PixelDeity.html || { echo "::error::dist is empty"; exit 1; }
