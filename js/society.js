@@ -11,6 +11,19 @@
   const W = PD.World;
 
   const ERAS = ['Stone Age', 'Bronze Age', 'Iron Age', 'Medieval', 'Renaissance', 'Industrial', 'Modern', 'Space Age'];
+  // what each age actually hands its people — announced in the chronicle so
+  // an era means something you can watch happen, not just a label change
+  const DISCOVERY = [null, 'smelting', 'the forge', 'the plough and the keep',
+    'the printing press', 'the engine', 'medicine and the grid', 'the rocket'];
+  // resolved lazily: sim.js may not have registered on PD yet at load time,
+  // and hardcoding the index would silently break if the list is reordered
+  let _scholarIdx = -2;
+  function scholarIdx() {
+    if (_scholarIdx === -2) {
+      _scholarIdx = (PD.Sim && PD.Sim.PROFESSIONS) ? PD.Sim.PROFESSIONS.indexOf('scholar') : -1;
+    }
+    return _scholarIdx;
+  }
   const GOVERNMENTS = ['Tribal Council', 'Monarchy', 'Theocracy', 'Republic', 'Empire', 'Technocracy'];
   const FAITH_NAMES = ['Way of the Flame', 'Church of the Sky Father', 'The Green Communion', 'Cult of the Deep', 'Order of the Silver Moon', 'The Last Dawn', 'Choir of Stars', 'The Quiet Path'];
 
@@ -119,19 +132,37 @@
 
     // politics per nation
     for (const n of soc.nations) {
-      let pop = 0, prosperity = 0;
-      for (const id of n.villages) { const v = PD.Sim.villageById(sim, id); if (v) { pop += v.pop; prosperity += v.prosperity; } }
+      let pop = 0, prosperity = 0, scholarship = 0, scholars = 0;
+      for (const id of n.villages) {
+        const v = PD.Sim.villageById(sim, id);
+        if (v) {
+          pop += v.pop; prosperity += v.prosperity;
+          // the nation learns because particular people study
+          if (v.labour) scholarship += v.labour.science;
+          const si = scholarIdx();
+          if (v.jobs && si >= 0) scholars += v.jobs[si] || 0;
+          v.era = n.era;   // the age a town lives in drives what it can build
+        }
+      }
       prosperity /= Math.max(1, n.villages.length);
       n.pop = pop;
+      n.scholars = scholars;
 
-      // ---- science & eras: bigger, more prosperous nations advance ----
-      // paced so a healthy nation reaches the Modern era in about an hour
-      // of watched time, not weeks
+      // ---- science & eras ----
+      // Discovery used to be a function of headcount alone: a nation of ten
+      // thousand illiterate farmers advanced exactly as fast as one that
+      // built libraries. Scholars now carry most of the weight, so a god who
+      // wants a space age has to make a people who can afford thinkers —
+      // and a plague that takes the learned actually sets the age back.
       const tinker = PD.Sim.RACES[n.race] && PD.Sim.RACES[n.race].tinker ? 1.6 : 1;
-      n.science += (pop * 0.045 + prosperity * 0.8) * tinker;
+      n.science += (pop * 0.012 + prosperity * 0.55 + scholarship * 1.35) * tinker;
       const need = 40 * Math.pow(1.9, n.era);
       if (n.science >= need && n.era < ERAS.length - 1) {
         n.era++; n.science = 0;
+        const disc = DISCOVERY[n.era];
+        if (disc) {
+          hist(sim, `${n.name} discovers ${disc}.`, 'era');
+        }
         hist(sim, `${n.name} enters the ${ERAS[n.era]}!`, 'era');
         PD.Sim.logEvent(sim, `${n.name} enters the ${ERAS[n.era]}!`, 'grow');
         if (n.era >= 6 && !soc.internetOn) {
