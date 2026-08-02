@@ -66,13 +66,20 @@ jobs:
           done
           exit $fail
 
-      # 67 powers applied against a real world, no exceptions
+      # every power applied against a real world, no exceptions
       - name: core
         run: node tools/test-core.js .
 
       # 34 assertions: traits and trades actually drive the simulation
       - name: lives
         run: node tools/test-lives.js .
+
+      # the planet is Earth: real places at the right altitude, orientation
+      # traps, real cities on real land. This one guards a BAKED ASSET, so it
+      # is the only thing standing between a bad rebuild of js/earthdata.js
+      # and a planet with no Antarctica.
+      - name: earth
+        run: node tools/test-earth.js .
 
       # 27 assertions against a recording WebAudio stub
       - name: audio
