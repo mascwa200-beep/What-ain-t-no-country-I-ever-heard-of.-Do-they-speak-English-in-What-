@@ -164,4 +164,14 @@ const afSer = PD.Afterlife.serialize();
 console.log('afterlife serializes, planes:', Object.keys(afSer).length);
 console.log('cosmos serializes, planets:', Cosmos.serialize().planets.length);
 
-console.log('\nALL GENESIS CORE TESTS PASSED (no exceptions).');
+// This suite signals most failures by throwing, which exits non-zero on its
+// own — but power errors were CAUGHT into `perrs`, reported, and then the
+// script printed PASSED and exited 0 regardless. A broken power would have
+// shown a green check. Make the counted failures actually fail the run.
+if (perrs > 0) {
+  console.error('\n=== core failures: ' + perrs + ' power(s) threw ===');
+  console.error('CORE TEST FAILED');
+  process.exitCode = 1;
+} else {
+  console.log('\nALL GENESIS CORE TESTS PASSED (no exceptions).');
+}
