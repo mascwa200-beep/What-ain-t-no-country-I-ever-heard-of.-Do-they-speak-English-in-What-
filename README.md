@@ -100,11 +100,16 @@ You are the One True God of a **3D pixel multiverse**:
   1000×**: bullet-time to watch a meteor fall, or millennia-per-minute to
   watch empires rise and fall. A live readout tells you how fast history is
   moving.
-- **Time actually runs backwards** — hold reverse and the world un-happens:
-  cities unbuild, the dead rise out of the Beyond, fires un-burn, the sun
-  crosses the sky the wrong way. Rewind to the edge of the record and it stops
-  there — unless you hold the leftmost notch, **⧏⧏⧏ Unmaking**, through a
-  two-second arming hold. Then you pass the first moment into **un-creation**:
+- **Time actually runs backwards — all the way to the world's first morning.**
+  Hold reverse and the world un-happens: cities unbuild, the dead rise out of
+  the Beyond, fires un-burn, the sun crosses the sky the wrong way. Past the
+  detailed record, **the ages reverse** — whole eras at a time, out of a deep
+  archive that is thinned *geometrically* (dense in living memory, sparse in
+  antiquity), so a fixed 28 slots reach the beginning of a world of any age.
+  Only when there is genuinely nothing earlier do you hit **THE FIRST
+  MORNING** — and going past *that* takes the leftmost notch, **⧏⧏⧏
+  Unmaking**, held through a two-second arming meter. Then comes
+  **un-creation**:
   the works undone, the land unshaped, then **the formless Deep** (one
   lightless ocean, no sun) and finally **Nothing** — the planet dissolves, the
   stars go out, and time itself stops. Press **U** at any point in it to take
@@ -202,6 +207,16 @@ Design notes:
 - **Saves** — full typed-array world state is base64-packed into
   `localStorage`; elapsed real time is re-simulated on load (bounded by a
   wall-clock budget) with the remainder credited as idle faith, capped at 24h.
+- **Rewind is three tiers, not one buffer.** A snapshot of a mature world
+  measures **610 KB**, so storing every moment densely is impossible. Instead:
+  motion-only frames (typed arrays, ~17 KB) drive what you *see*; true restore
+  points every 60 ticks restore what *is*; and a geometrically-thinned deep
+  archive every 5 years reaches the beginning of history. Total residency tops
+  out near **38 MB** — measured, not estimated. It is RAM-only and deliberately
+  not saved; a reload starts a fresh record.
+- **Tests** — `node tools/test-core.js .` (sim, society, codec, powers) and
+  `node tools/test-integration.js .` (boot, loop, save/load, rewind,
+  un-creation, Genesis, story) run headless against a stubbed DOM.
 
 ## 📜 License
 

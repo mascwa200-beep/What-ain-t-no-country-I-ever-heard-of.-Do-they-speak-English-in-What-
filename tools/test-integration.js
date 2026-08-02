@@ -178,13 +178,11 @@ icheck('every living unit is on the map',
        G2.sim.units.every(u => u.dead || (u.x >= 0 && u.x <= G2.world.W && u.y >= 0 && u.y <= G2.world.H)));
 console.log('rewind invariant failures:', invFails);
 
-// ---- un-creation must be armed, not stumbled into ----
-console.log('\n--- un-creation gate ---');
-let gateFails = 0;
-function gcheck(name, cond) {
-  console.log('  ' + (cond ? 'PASS' : 'FAIL') + ' — ' + name);
-  if (!cond) gateFails++;
-}
+// ---- ONE monotonic clock for every section below ----
+// rAF timestamps never run backwards in a real browser, and loop() computes
+// dt from them. A section that runs its own clock ahead of this one leaves
+// every later section feeding the loop a NEGATIVE dt, which silently freezes
+// the HUD timer and the story. Everything past here shares `pump`.
 let clock = Date.now() + 80000;
 function pump(n, stepMs) {
   for (let i = 0; i < n; i++) {
@@ -193,6 +191,88 @@ function pump(n, stepMs) {
   }
 }
 
+// ============ DEEP ARCHIVE: reversal must reach the first morning ============
+// The fine+full buffers only span ~13 in-game years. A world that has run for
+// centuries must still rewind all the way back, through the thinned archive.
+console.log('\n--- deep archive ---');
+let archFails = 0;
+function acheck(name, cond) {
+  console.log('  ' + (cond ? 'PASS' : 'FAIL') + ' — ' + name);
+  if (!cond) archFails++;
+}
+{
+  // run a fresh world hard enough to age it well past the detailed record
+  ctx.PixelDeity.newMultiverse('archive-seed');
+  const A = ctx.G;
+  A.speed = 1; A.paused = false; A.speedIdx = 7;
+  // drive the sim directly so the test isn't at the mercy of the frame budget
+  for (let i = 0; i < 9000; i++) {
+    PD.Sim.step(A.sim, 1);
+    ctx.PixelDeity.recordRewind(PD.Cosmos.active());
+  }
+  const peakTick = A.sim.tick, peakYear = Math.floor(peakTick / 120);
+  console.log('aged world to year', peakYear, '| fine', A.rewind.fine.length,
+              'full', A.rewind.full.length, 'arch', A.rewind.arch.length);
+  acheck('archive filled and stayed within its cap', A.rewind.arch.length > 8 && A.rewind.arch.length <= 28);
+  acheck('archive is ordered oldest-first',
+         A.rewind.arch.every((f,i,a) => i === 0 || f.tick > a[i-1].tick));
+  // the detailed record alone cannot reach anywhere near the beginning
+  const detailedSpan = peakTick - (A.rewind.full[0] ? A.rewind.full[0].tick : peakTick);
+  acheck('detailed record spans far less than the world\'s life (' +
+         Math.floor(detailedSpan/120) + 'y of ' + peakYear + 'y)', detailedSpan < peakTick / 2);
+  const arch = A.rewind.arch;
+  acheck('the world\'s earliest recorded moment is kept',
+         arch.length > 0 && arch[0].tick <= 1200);
+
+  // Thinning only bites past the cap, which needs a world older than any test
+  // wants to simulate — so exercise it directly on synthetic ticks. This is
+  // the property that lets 28 slots cover a world of any age.
+  {
+    const CAP = ctx.PixelDeity.REWIND.archCap, EVERY = ctx.PixelDeity.REWIND.archEvery;
+    const a = [];
+    for (let t = 0; t <= EVERY * 500; t += EVERY) {   // a 2500-year world
+      a.push({ tick: t });
+      ctx.PixelDeity.thinArchive(a, t);
+    }
+    const now = a[a.length - 1].tick;
+    console.log('  thinned 500 ages ->', a.length, 'slots, spanning year 0 to',
+                Math.floor(now / 120));
+    acheck('thinning holds the cap', a.length <= CAP);
+    acheck('the first morning is never thinned away', a[0].tick === 0);
+    acheck('the present is never thinned away', a[a.length - 1].tick === now);
+    acheck('entries stay ordered', a.every((f,i) => i === 0 || f.tick > a[i-1].tick));
+    const oldGap = a[1].tick - a[0].tick;
+    const newGap = a[a.length-1].tick - a[a.length-2].tick;
+    console.log('  spacing: oldest gap', oldGap, 'ticks | newest gap', newGap, 'ticks');
+    acheck('antiquity is stored more sparsely than living memory (' +
+           oldGap + ' vs ' + newGap + ')', oldGap > newGap);
+  }
+
+  // now actually rewind: it must walk back through the ages, not un-create
+  A.speed = -100; A.speedIdx = 1;
+  let guard = 0;
+  while (A.rewind.arch.length && guard++ < 4000) pump(1, 100);
+  console.log('after reversing: year', Math.floor(A.sim.tick/120),
+              '| arch left', A.rewind.arch.length, '| mode', A.world.mode,
+              '| inArchive', A.rewind.inArchive);
+  acheck('reversal consumed the whole archive', A.rewind.arch.length === 0);
+  acheck('reversal reached the world\'s first years',
+         Math.floor(A.sim.tick / 120) < Math.max(20, peakYear * 0.15));
+  acheck('the world was NOT un-created along the way', A.world.mode !== 'nothing' && A.world.mode !== 'deep');
+  acheck('units survived every archive restore', A.sim.units.length > 0);
+  const aids = new Set(); let adup = 0;
+  for (const u of A.sim.units) { if (aids.has(u.id)) adup++; aids.add(u.id); }
+  acheck('no duplicated unit ids after archive restores (' + adup + ')', adup === 0);
+}
+console.log('deep archive failures:', archFails);
+
+// ---- un-creation must be armed, not stumbled into ----
+console.log('\n--- un-creation gate ---');
+let gateFails = 0;
+function gcheck(name, cond) {
+  console.log('  ' + (cond ? 'PASS' : 'FAIL') + ' — ' + name);
+  if (!cond) gateFails++;
+}
 // the record is already spent from the reverse run above
 gcheck('record is exhausted', G2.rewind.fine.length === 0);
 // 1. a non-Unmaking reverse speed must stop at the floor, not destroy anything
