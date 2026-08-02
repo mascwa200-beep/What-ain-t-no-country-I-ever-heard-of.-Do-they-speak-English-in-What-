@@ -74,6 +74,12 @@ jobs:
       - name: lives
         run: node tools/test-lives.js .
 
+      # the profiler must actually measure, and Stage 0's two renderer defects
+      # must stay fixed. A profiler that silently records nothing is worse
+      # than none at all, because it makes a claim.
+      - name: perf
+        run: node tools/test-perf.js .
+
       # the planet is Earth: real places at the right altitude, orientation
       # traps, real cities on real land. This one guards a BAKED ASSET, so it
       # is the only thing standing between a bad rebuild of js/earthdata.js

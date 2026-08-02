@@ -653,7 +653,14 @@ void main(){
       const r0 = y0 * W2, r1 = y1 * W2;
       const nrow = (py & (NT - 1)) * NT;
       const nrow2 = ((py >> 2) & (NT - 1)) * NT;
-      const sy = (py * invHD + 0.5) | 0;
+      // Structures are looked up by WHICH TILE this pixel is in, which is a
+      // floor, not a round. Tile ty owns pixels [ty*HD, ty*HD+HD), so
+      // py*invHD is already inside [ty, ty+1); the + 0.5 that used to be here
+      // pushed the second half of every tile into its neighbour and shifted
+      // every rooftop half a tile north-west of the town it belongs to.
+      // (The - 0.5 on the terrain path above is a different thing entirely —
+      // bilinear pixel-centre alignment — and is correct as written.)
+      const sy = (py * invHD) | 0;
       const srow = (sy < H2 ? sy : H2 - 1) * W2;
 
       for (let xx = 0; xx < pw; xx++) {
@@ -717,7 +724,7 @@ void main(){
           const micro = 0.92 + nse * 0.16;
           rr *= micro; gg *= micro; bb *= micro;
           // settlements: warm rooftops, plazas, gilded wonders
-          const st = struct[srow + ((px * invHD + 0.5) | 0) % W2];
+          const st = struct[srow + ((px * invHD) | 0) % W2];
           if (st) {
             const cellN = nt[((py * 3) & (NT - 1)) * NT + ((px * 3) & (NT - 1))];
             if (cellN > 0.45) {
@@ -757,6 +764,10 @@ void main(){
   }
 
   function bakeTerrain(r) {
+    PD.Prof.begin('bake.full');
+    try { return bakeTerrainInner(r); } finally { PD.Prof.end(); PD.Prof.add('bake.fullCount'); }
+  }
+  function bakeTerrainInner(r) {
     const w = r.world;
     const Wp = w.W * HD, Hp = w.H * HD;
     ensureFields(r);
@@ -797,6 +808,10 @@ void main(){
   }
 
   function bakeDirtyTiles(r) {
+    PD.Prof.begin('bake.tiles');
+    try { return bakeDirtyTilesInner(r); } finally { PD.Prof.end(); }
+  }
+  function bakeDirtyTilesInner(r) {
     const w = r.world, tiles = w.dirtyTiles;
     const Wp = w.W * HD, Hp = w.H * HD;
     if (!r.albedo || !r.f) { bakeTerrain(r); return; }
@@ -1118,6 +1133,10 @@ void main(){
   // it, ground goes wet and then dries, snow settles by latitude and altitude
   // and melts back. Advanced on a slow cadence — it is weather, not physics.
   function updateClim(r, sim, dt) {
+    PD.Prof.begin('upd.clim');
+    try { return updateClimInner(r, sim, dt); } finally { PD.Prof.end(); }
+  }
+  function updateClimInner(r, sim, dt) {
     const w = r.world, gl = r.gl, c = r.climBuf;
     const G = global.G || {};
     const global_ = G.weather || 'clear';
@@ -1191,6 +1210,10 @@ void main(){
 
   // city lights / water mask / fire / crack mask, rebuilt cheaply per frame
   function updateDataTex(r, sim) {
+    PD.Prof.begin('upd.data');
+    try { return updateDataTexInner(r, sim); } finally { PD.Prof.end(); }
+  }
+  function updateDataTexInner(r, sim) {
     const w = r.world, gl = r.gl, d = r.dataBuf;
     const S = W.S;
     for (let i = 0; i < w.n; i++) {
@@ -1204,6 +1227,7 @@ void main(){
       }
     }
     r.crackDirty = false;
+    PD.Prof.add('upload.dataTex');
     gl.bindTexture(gl.TEXTURE_2D, r.texData);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, w.W, w.H, 0, gl.RGBA, gl.UNSIGNED_BYTE, d);
   }
@@ -1262,7 +1286,12 @@ void main(){
   // point at its own drama instead of leaving you to find it.
   function flyTo(r, tx, ty, dist, ms) {
     const cam = r.cam, w = r.world;
-    const lon = (tx / w.W) * Math.PI * 2 + Math.PI;
+    // No + Math.PI. Every other mapping in this file — tileToSphere,
+    // sphereToTile, centerTile — uses (x / W) * 2pi, and camEye reads cam.lon
+    // in that same parameterisation. The half-turn that used to be here aimed
+    // the camera at the antipode of wherever it was asked to look. It went
+    // unnoticed because flyTo was exported and never called.
+    const lon = (tx / w.W) * Math.PI * 2;
     const lat = (0.5 - ty / w.H) * Math.PI * 0.98;
     cam.from = { lon: cam.lon, lat: cam.lat, dist: cam.dist };
     cam.to = {
@@ -1330,7 +1359,14 @@ void main(){
   }
 
   // ---------- draw ----------
+  // The whole frame, so 'it got slower' becomes a number. drawInner is the
+  // original body; the fold into the smoothed view happens once per frame
+  // here rather than at every call site.
   function draw(r, sim, ui) {
+    PD.Prof.begin('draw');
+    try { drawInner(r, sim, ui); } finally { PD.Prof.end(); PD.Prof.frame(); }
+  }
+  function drawInner(r, sim, ui) {
     if (r.world.dirty) bakeTerrain(r);
     else if (r.world.dirtyTiles.length) bakeDirtyTiles(r);
     if (r.headless) return;

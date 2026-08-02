@@ -274,6 +274,7 @@
 
   // ================= Sim stepping =================
   function simStep() {
+    PD.Prof.begin('sim.step');
     Sim.step(G.sim, 1);
     if (G.view.kind === 'planet' && G.speed > 0) {
       const ap = Cosmos.active();
@@ -289,6 +290,8 @@
     stepEvents();
     let pop = 0; for (const k of Sim.SENTIENT) pop += G.sim.counts[k] || 0;
     if (pop > G.stats.peakPop) G.stats.peakPop = pop;
+    PD.Prof.end();
+    PD.Prof.add('sim.steps');
   }
 
   // ---- flood / storm / tornado (divine weather events) ----
