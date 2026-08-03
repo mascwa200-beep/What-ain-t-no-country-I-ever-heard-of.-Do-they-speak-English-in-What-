@@ -37,13 +37,17 @@
     return PLANET_NAMES[(rng() * PLANET_NAMES.length) | 0] + '-' + ((rng() * 90 + 10) | 0);
   }
 
-  function createPlanet(type, seedStr, name) {
+  // opts.earth  -> {seaLevelM, tempOffsetC}, the physical record of a date
+  // opts.epoch   -> Unix seconds the sim's clock starts at
+  // opts.histYear-> the year this world was entered at, or null for the present
+  function createPlanet(type, seedStr, name, opts) {
     if (C.planets.length >= 10) return null; // the void holds only so much
     const t = PLANET_TYPES[type] || PLANET_TYPES.verdant;
     seedStr = seedStr || ('' + Date.now() + (Math.random() * 1e6 | 0));
     const rng = PD.makeRNG(PD.hashSeed(seedStr));
     const world = W.createWorld(180, 120, seedStr, t.opts);
-    const sim = PD.Sim.createSim(world, PD.makeRNG(PD.hashSeed(seedStr) ^ 0x9e3779b9));
+    const sim = PD.Sim.createSim(world, PD.makeRNG(PD.hashSeed(seedStr) ^ 0x9e3779b9),
+      (opts && opts.epoch != null) ? { epoch: opts.epoch } : null);
     const p = {
       id: C.nextId++, name: name || planetName(rng), type,
       seed: seedStr, world, sim,
@@ -52,11 +56,16 @@
       rot: rng() * 1
     };
     sim.planetName = p.name;
+    // The year this world was ENTERED at, and whether you have touched it yet.
+    // Untouched, it is the world as the record has it; the first act of a god
+    // forks it away and the record stops being consulted.
+    p.histYear = (opts && opts.histYear != null) ? opts.histYear : null;
+    p.forked = false;
     // Earth's surface is not noise, so replace the generated field with the
     // real one. If the data could not be decoded the world stays as generated
     // and the planet is honestly relabelled rather than pretending.
     if (t.real && PD.Earth && PD.Earth.loaded()) {
-      if (PD.Earth.build(world)) { p.name = name || 'Earth'; sim.planetName = p.name; p.isEarth = true; }
+      if (PD.Earth.build(world, opts && opts.earth)) { p.name = name || 'Earth'; sim.planetName = p.name; p.isEarth = true; }
       else p.type = 'verdant';
     } else if (t.real) {
       p.type = 'verdant';

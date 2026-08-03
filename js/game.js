@@ -69,6 +69,10 @@
     const y = d.getUTCFullYear();
     // past a few thousand years the day and month stop being interesting and
     // the year is the only thing anyone reads
+    // Before Christ the year is what matters and the sign is easy to misread,
+    // so it is spelled out. PD.History owns the wording so the dial, the panel
+    // and the HUD cannot drift apart.
+    if (y < 1000) return PD.History ? PD.History.label(y) : ('Year ' + y);
     if (Math.abs(sim.clock) > Sim.YEAR * 2000) return 'Year ' + y.toLocaleString();
     return d.getUTCDate() + ' ' + MONTHS[d.getUTCMonth()] + ' ' + y +
       ' · ' + String(d.getUTCHours()).padStart(2, '0') + ':' +
@@ -151,19 +155,56 @@
   // On the real Earth, people start where people are. The city list is real
   // (name, latitude, longitude, population), so this places a settlement at
   // each one that lands on land, sized by how large the city actually is.
-  function seedEarthLife(sim, world) {
+  // The first cities — Uruk, Eridu — are about six thousand years old. Before
+  // that there is nobody to put in one, and seeding Tokyo into the Ice Age
+  // because the city list does not carry a date would be the loudest possible
+  // way to say the record is decoration.
+  const URBAN_FROM = -4000;
+
+  // st is the physical record of the date, or null for the present.
+  function seedEarthLife(sim, world, st) {
     for (let k = 0; k < 60; k++) {
       const x = (sim.rng() * world.W) | 0, y = (sim.rng() * world.H) | 0;
       const s = W.nearestLand(world, x, y, 12);
       if (s) Sim.spawnUnit(sim, sim.rng() < 0.15 ? 'wolf' : 'critter', s.x, s.y);
     }
+
+    // How many of them there were. Sub-linear in population because the count
+    // here is CITIES, and the share of people living in one rose with the
+    // total — 28 today, about ten at the discovery of the Americas, none at all
+    // before there were any.
+    let cap = 28;
+    if (st && PD.History) {
+      const now = PD.History.populationAt(PD.History.PRESENT) || 8e9;
+      const then = st.population || now;
+      cap = st.year < URBAN_FROM ? 0
+        : Math.max(1, Math.round(28 * Math.pow(Math.min(1, then / now), 0.35)));
+    }
+    if (!cap) {
+      // Before the cities: scattered bands, on foot, and no walls anywhere.
+      let bands = 0;
+      for (let k = 0; k < 240 && bands < 40; k++) {
+        const x = (sim.rng() * world.W) | 0, y = (sim.rng() * world.H) | 0;
+        const spot = W.nearestLand(world, x, y, 10);
+        if (!spot) continue;
+        const b = world.biome[W.idx(world, spot.x, spot.y)];
+        if (b === W.B.SNOW || b === W.B.ROCK) continue;      // not on the ice sheet
+        Sim.spawnUnit(sim, 'human', spot.x, spot.y); bands++;
+      }
+      if (PD.Society) {
+        PD.Society.hist(sim, 'No city stands anywhere on the Earth. ' + bands +
+          ' bands walk it.', 'era');
+      }
+      return;
+    }
+
     const places = PD.Earth.places(world);
     // largest first, so if two real cities collapse onto the same coarse tile
     // the bigger one wins the spot
     places.sort((a, b) => b.pop - a.pop);
     let placed = 0;
     for (const c of places) {
-      if (placed >= 28) break;
+      if (placed >= cap) break;
       if (!W.inBounds(world, c.x, c.y)) continue;
       if (world.owner[W.idx(world, c.x, c.y)] >= 0) continue;   // already a town here
       const v = Sim.foundVillage(sim, 'human', c.x, c.y);
@@ -171,7 +212,11 @@
       v.name = c.name;                       // it is called what it is called
       placed++;
     }
-    if (PD.Society) PD.Society.hist(sim, 'The Earth, as it is. ' + placed + ' cities stand where they stand.', 'era');
+    if (PD.Society) {
+      PD.Society.hist(sim, st && st.year < 1900
+        ? ('The Earth as the record has it. ' + placed + ' cities stand.')
+        : ('The Earth, as it is. ' + placed + ' cities stand where they stand.'), 'era');
+    }
   }
 
   function seedInitialLife(sim, world) {
@@ -677,6 +722,49 @@
     });
     if (G.timeline.length > 10) G.timeline.shift();
   }
+  // Date.UTC() reads a year under 100 as 19xx, which would silently send
+  // "AD 33" to 1933. setUTCFullYear does not, and it handles BC as well.
+  function yearToEpoch(y) {
+    const d = new Date(0);
+    d.setUTCFullYear(y, 0, 1);
+    d.setUTCHours(0, 0, 0, 0);
+    return d.getTime() / 1000;
+  }
+
+  // Go to a year. This is the thing the old time travel could not do: it
+  // replayed snapshots of YOUR game, so there was no 1492 to visit — the world
+  // began when you pressed start.
+  //
+  // Always a BRANCH. The Earth you are watching is never destroyed by a
+  // mistyped date, and the cosmos ends up holding the ages side by side.
+  function travelToYear(year) {
+    const H = PD.History;
+    if (!H) { flashToast('The record is not loaded'); return null; }
+    if (Cosmos.C.planets.length >= 10) {
+      flashToast('The void is full — destroy a world first'); Audio8.sfx('error'); return null;
+    }
+    const st = H.stateAt(year);
+    const p = Cosmos.createPlanet('earth', G.world.seedStr || 'earth',
+      'Earth · ' + H.label(st.year), {
+        earth: { seaLevelM: st.seaLevelM, tempOffsetC: st.tempOffsetC },
+        epoch: yearToEpoch(st.year),
+        histYear: st.year
+      });
+    if (!p) { flashToast('The void is full'); return null; }
+    Cosmos.C.planets.push(p);
+    seedEarthLife(p.sim, p.world, st);
+    gotoPlanet(p.id);
+    G._histSeen = st.year;
+    const bits = [H.label(st.year), st.era];
+    if (st.seaLevelM < -5) bits.push('the sea ' + Math.round(-st.seaLevelM) + ' m lower');
+    if (st.tempOffsetC < -1) bits.push(st.tempOffsetC.toFixed(1) + '\u00b0 colder');
+    if (st.projected) bits.push('projected, not recorded');
+    flashToast(bits.join(' · '));
+    if (PD.Society) PD.Society.hist(p.sim, 'You stepped into ' + H.label(st.year) + '.', 'legend');
+    ach('timetravels');
+    return p;
+  }
+
   function timeTravel(idx, branch) {
     const snap = G.timeline[idx]; if (!snap) return;
     const pd = JSON.parse(snap.data);
@@ -1247,6 +1335,17 @@
   // power no longer means editing three hardcoded lists in this file.
   function onPowerUsed(p, spent) {
     if (spent != null) G.faith -= spent;
+    // THE FORK. A world entered at a date is the world as the record has it,
+    // until a god touches it — and then it is not, and the game says so once,
+    // permanently, rather than pretending the record still describes it.
+    const pl = Cosmos.active();
+    if (pl && pl.histYear != null && !pl.forked) {
+      pl.forked = true;
+      const lbl = PD.History ? PD.History.label(pl.histYear) : ('year ' + pl.histYear);
+      flashToast('History forks. This is no longer ' + lbl + ' as it was.');
+      if (PD.Society) PD.Society.hist(G.sim, 'History forked away from the record here.', 'legend');
+      refreshToggleState();
+    }
     refreshHUD();
     const story = p.story || (p.cat === 'terra' ? 'terra' : (p.cat === 'wrath' ? 'wrath' : null));
     if (story === 'terra') G._usedTerra = true;
@@ -1377,6 +1476,7 @@
       if (G.saveTimer > 20000) { save(); G.saveTimer = 0; }
       G.snapTimer += dt;
       if (G.snapTimer > 90000) { takeSnapshot(); G.snapTimer = 0; }
+      fireHistory();
     }
 
     if (G.openPanel === 'cosmos') drawCosmos(t);
@@ -2473,6 +2573,67 @@
         </div>
       </div>`).join('') +
       '<div class="panel-note">Rewind replaces the world with its past. Branch forks a parallel universe from that moment.</div>';
+    el.innerHTML = dateJumpHTML() + el.innerHTML;
+  }
+
+  // The dates worth offering, drawn from the two records so the list cannot
+  // drift from the data behind it.
+  const JUMPS = [-18000, -10000, -4004, -2348, -1491, -753, 33, 1066, 1492, 1815, 1969, 2100, 2300];
+  function dateJumpHTML() {
+    const H = PD.History;
+    if (!H) return '';
+    const opts = JUMPS.map((y) => {
+      const st = H.stateAt(y);
+      const evs = H.eventsBetween(y - 60, y + 60);
+      const what = evs.length ? evs[0].name : st.era;
+      return '<button class="jump-btn" data-y="' + y + '">' +
+        H.label(y) + ' <small>' + what + '</small></button>';
+    }).join('');
+    return '<div class="panel-subtitle">Go to a year</div>' +
+      '<div class="jump-row"><input id="jump-year" type="number" step="1" ' +
+      'min="' + H.FIRST_YEAR + '" max="' + H.LAST_YEAR + '" placeholder="year, − for BC">' +
+      '<button id="jump-go" class="jump-btn jump-go">Go</button></div>' +
+      '<div class="jump-list">' + opts + '</div>' +
+      '<div class="panel-note">A year is a branch: the Earth you are watching is never lost. ' +
+      'Untouched, it is the world as the record has it — the first act of a god forks it away. ' +
+      '✝ is scripture, ○ is the record; they disagree, and both are shown.</div>';
+  }
+
+  // ---- the record, as it happens ----
+  // Everything below fires a power THAT ALREADY EXISTS, at a place the record
+  // names. Nothing here is new machinery; the Flood is the Great Flood a god
+  // can already call down, Sinai is the Commandments, Babel is Babel.
+  function fireHistory() {
+    const H = PD.History;
+    if (!H || !G.sim || G.sim.clock == null) return;
+    const p = Cosmos.active();
+    if (!p || !p.isEarth) return;
+    const y = new Date((G.sim.epoch + G.sim.clock) * 1000).getUTCFullYear();
+    if (G._histSeen == null) { G._histSeen = y; return; }
+    if (y === G._histSeen) return;
+    // A forked world has left the record behind, and saying otherwise would be
+    // the game claiming a history it no longer has.
+    if (p.forked) { G._histSeen = y; return; }
+    const evts = H.eventsBetween(G._histSeen, y);
+    G._histSeen = y;
+    // The dial reaches a century a second; a jump can span thousands of years,
+    // so cap what is announced rather than flooding the chronicle.
+    for (const e of evts.slice(0, 6)) {
+      // The cross and the circle are the two RECORDS, kept apart on the page
+      // the same way they are kept apart in the data.
+      const tag = e.source === 'scripture' ? '\u271d' : '\u25cb';
+      Sim.logEvent(G.sim, tag + ' ' + e.name + (e.ref ? ' \u00b7 ' + e.ref : ''),
+        e.source === 'scripture' ? 'legend' : 'event');
+      if (PD.Society) PD.Society.hist(G.sim, e.name + (e.ref ? ' (' + e.ref + ')' : ''),
+        e.source === 'scripture' ? 'legend' : 'era');
+    }
+    if (evts.length > 6) {
+      Sim.logEvent(G.sim, '\u2026and ' + (evts.length - 6) + ' more pass unremarked.', 'event');
+    }
+    // The events that NAME A POWER do not invoke it yet — see the note on
+    // travelToYear. Collecting them into an array nothing reads would be the
+    // seventh fully-implemented mechanic in this project that never fires, so
+    // they are simply announced until the hand that calls them is written.
   }
 
   // ---- Testament panel ----
@@ -2620,6 +2781,14 @@
     });
 
     $('#panel-time').addEventListener('click', (e) => {
+      const jb = e.target.closest('.jump-btn');
+      if (jb) { travelToYear(parseInt(jb.dataset.y, 10)); return; }
+      if (e.target.closest('#jump-go')) {
+        const v = parseInt(($('#jump-year') || {}).value, 10);
+        if (!isFinite(v)) { flashToast('A year, please — negative for BC'); return; }
+        travelToYear(v);
+        return;
+      }
       const b = e.target.closest('button'); if (!b) return;
       if (b.classList.contains('snap-restore')) timeTravel(+b.dataset.i, false);
       else if (b.classList.contains('snap-branch')) timeTravel(+b.dataset.i, true);

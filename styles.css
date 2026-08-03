@@ -587,6 +587,27 @@ body{
 }
 .snap-btns button:hover{background:var(--panel2);border-color:var(--gold);}
 
+/* Going to a year. Deliberately NOT reusing .snap-restore / .snap-branch:
+   those classes carry the snapshot panel's click handler, and a button that
+   is styled by the same name it is dispatched by is a reorder away from
+   calling the wrong thing with the wrong argument. */
+.jump-row{display:flex;gap:var(--s2);margin:var(--s2) 0;}
+.jump-row input{
+  flex:1 1 auto;min-width:0;
+  background:var(--panel2);border:1px solid var(--edge2);color:var(--ink);
+  font-family:var(--f-mono);font-size:var(--t-sm);padding:var(--s2);border-radius:2px;
+}
+.jump-list{display:flex;flex-direction:column;gap:var(--s1);}
+.jump-btn{
+  background:var(--panel);border:1px solid var(--edge2);color:var(--ink);
+  font-family:var(--f-ui);font-size:var(--t-sm);padding:var(--s2);
+  border-radius:2px;cursor:pointer;text-align:left;
+  transition:background .12s,border-color .12s;
+}
+.jump-btn small{color:var(--dim);display:block;font-size:var(--t-xs);}
+.jump-btn:hover{background:var(--panel2);border-color:var(--gold);}
+.jump-go{flex:0 0 auto;text-align:center;}
+
 /* testament */
 /* the Testament reads like a book, because it is one */
 .chapter{background:rgba(3,6,14,0.42);border:1px solid var(--edge);border-radius:var(--r-sm);padding:var(--s3) var(--s4);margin-bottom:var(--s3);}
