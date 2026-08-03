@@ -1,5 +1,5 @@
 /* Pixel Deity service worker — cache-first so the god works with no signal. */
-const CACHE = 'pixeldeity-v21';
+const CACHE = 'pixeldeity-v22';
 const ASSETS = [
   './', './index.html', './styles.css', './manifest.webmanifest',
   './js/util.js', './js/codec.js', './js/world.js',
@@ -9,7 +9,7 @@ const ASSETS = [
   // is not an optimisation when the app degrades silently without it.
   './js/earthdata.js', './js/earth.js',
   './js/sim.js',
-  './js/render.js', './js/lod.js', './js/render3d.js',
+  './js/render.js', './js/lod.js', './js/buildings.js', './js/render3d.js',
   './js/society.js', './js/afterlife.js',
   './js/cosmos.js', './js/powers.js', './js/game.js'
 ];

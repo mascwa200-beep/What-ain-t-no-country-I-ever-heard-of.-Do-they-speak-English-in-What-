@@ -4794,15 +4794,32 @@ body{
   function makeDetail(seed) {
     const nz = PD.makeNoise((seed ^ 0x5EA17E) >>> 0);
     const cap = DETAIL_MAX / MAX_LAND_M * (1 - SEA);   // in elevation units
-    return function (w, lon, lat, level, elev) {
+    // Where settlements stand, in tile space: {x, y, r2}. Kept on the closure
+    // rather than read off the tree, because detail() is handed around as a
+    // bare function and must not depend on who is holding it.
+    let towns = [];
+    const fn = function (w, lon, lat, level, elev) {
       if (level <= 2 || elev <= SEA) return 0;
-      const t = lonLatToTile(w, lon, lat);
+      const tt = lonLatToTile(w, lon, lat);
+      const t = tt;
       // local slope from the tile field, in elevation units per tile
       const W2 = w.W, H2 = w.H, e = w.elev;
       const xi = Math.floor(t.tx), yi = PD.clamp(Math.floor(t.ty), 1, H2 - 2);
       const xr = ((xi + 1) % W2 + W2) % W2, xl = ((xi - 1) % W2 + W2) % W2;
       const slope = Math.abs(e[yi * W2 + xr] - e[yi * W2 + xl]) +
                     Math.abs(e[(yi + 1) * W2 + xi % W2] - e[(yi - 1) * W2 + xi % W2]);
+      // People build on level ground. `groundRadius` — which the camera
+      // clamp, the picking ray and every building's foundation read — does
+      // NOT include this invented relief, so a hut placed against it would
+      // sink into or float over a hillside the patch geometry made up after
+      // the fact. Inside a settlement's built area the invention stops.
+      if (towns.length) {
+        for (let i = 0; i < towns.length; i++) {
+          const t2 = towns[i];
+          const dx = Math.abs(tt.tx - t2.x), dxw = Math.min(dx, w.W - dx);
+          if (dxw * dxw + (tt.ty - t2.y) * (tt.ty - t2.y) < t2.r2) return 0;
+        }
+      }
       // rises with level (0 at 2, full by ~8) so the shape only appears once
       // the geometry is fine enough to carry it
       const lk = PD.clamp((level - 2) / 6, 0, 1);
@@ -4813,6 +4830,10 @@ body{
       const d = (nz.fbm(t.tx * f * 0.01, t.ty * f * 0.01, 4) - 0.5) * 2 * amp;
       return PD.clamp(d, -cap, cap);
     };
+    // The renderer publishes the settlements each time one is founded or
+    // grows; patches rebuild through the ordinary invalidate path.
+    fn.setTowns = (list) => { towns = list || []; };
+    return fn;
   }
 
   // ---- shared grid -------------------------------------------------------
@@ -5309,6 +5330,219 @@ body{
 
 </script>
 <script>
+// A settlement, as buildings you can fly between.
+//
+// Until now a village was a colour tint painted into the albedo bake — a
+// slightly warmer patch of ground, readable from orbit and meaningless up
+// close. This turns one into geometry: individual huts, houses, halls,
+// temples and towers, standing on the terrain at the size they would really
+// be.
+//
+// ---------------------------------------------------------------------------
+// TRUE SCALE, AND WHAT THAT COSTS
+//
+// A village is about five hundred metres across and stays five hundred metres
+// across. It does not swell on the altitude curve the mountains use. From
+// orbit this planet therefore looks like the real Earth from orbit: no
+// buildings at all, only the tinted ground that was always there. You have to
+// go and look.
+//
+// That is the honest choice and it has a consequence that is built rather
+// than assumed — a thing only visible below a few kilometres is invisible
+// unless there is a way down to it. See flyTo, which this stage finally wires
+// up after two releases of being exported and called from nowhere.
+// ---------------------------------------------------------------------------
+//
+// FOOTPRINT COMES FROM POPULATION, NOT FROM TERRITORY. A mature settlement
+// claims up to 177 tiles, and a tile is 222 km — that is the land it farms
+// and defends, not the land it has built on. Sizing the cluster from claimed
+// tiles would produce a city four hundred kilometres wide.
+//
+// There are no GL calls in this file. It builds plain arrays, so the whole
+// thing runs under Node exactly like js/lod.js and js/sim.js do — which is
+// what lets the layout be asserted rather than eyeballed.
+(function (global) {
+  'use strict';
+  const PD = global.PD;
+  const W = PD.World;
+
+  const R_EARTH_M = 6371000;
+
+  // Building kinds. The index is what the renderer uses to pick a mesh, so
+  // the order is part of the contract.
+  const HUT = 0, HOUSE = 1, HALL = 2, TEMPLE = 3, TOWER = 4, FARM = 5;
+  const KINDS = ['hut', 'house', 'hall', 'temple', 'tower', 'farm'];
+
+  // Real-world dwelling densities, in people per building. A hut holds a
+  // family; a city block holds rather more.
+  const PER_BUILDING = 4.5;
+
+  // How tightly people build, in buildings per square kilometre. A hamlet
+  // sprawls; a city stacks. These are the numbers that decide whether a
+  // settlement reads as a real place or as a model village.
+  const DENSITY_MIN = 120;     // scattered farmsteads
+  const DENSITY_MAX = 2600;    // dense old-town streets
+
+  // Nothing is drawn above this altitude, because at true scale there is
+  // nothing to see: a 500 m village is under a pixel from 50 km up.
+  const VISIBLE_ALT_M = 55000;
+
+  // A hard ceiling on instances, so that flying into the largest possible
+  // city cannot stall a frame.
+  const MAX_INSTANCES = 6000;
+
+  // ---- size -------------------------------------------------------------
+  // Built radius in METRES, from the population that lives there.
+  //
+  // Density rises with size, which is why a city is not simply a village
+  // scaled up: doubling the people less than doubles the ground.
+  function footprintM(pop, level) {
+    const n = Math.max(1, buildingCount(pop, level));
+    // interpolate density by settlement level (1 hamlet .. 8+ metropolis)
+    const t = PD.clamp((level - 1) / 7, 0, 1);
+    const density = DENSITY_MIN + (DENSITY_MAX - DENSITY_MIN) * t * t;
+    const areaKm2 = n / density;
+    return Math.max(60, Math.sqrt(areaKm2 / Math.PI) * 1000);
+  }
+
+  // The simulation's `pop` is not a headcount. It is capped at 120 by
+  // `v.cap`, so a metropolis and a hamlet differ by a factor of twenty when
+  // the real difference is a factor of thousands — and sizing buildings from
+  // it directly produced a level-8 city 77 m across, SMALLER than a
+  // twenty-person hamlet at 103 m, because density climbed faster than the
+  // building count did.
+  //
+  // Settlement LEVEL is what actually carries scale in this game. Each level
+  // is roughly a doubling and a bit of the people a unit of `pop` stands for,
+  // so a level-8 town of 120 reads as about twenty thousand souls.
+  function realPopulation(pop, level) {
+    return Math.max(1, pop) * Math.pow(2.1, Math.max(0, (level || 1) - 1));
+  }
+
+  function buildingCount(pop, level) {
+    // houses the settlement has actually raised, plus the civic buildings a
+    // town of that level has earned
+    const homes = Math.max(1, Math.round(realPopulation(pop, level) / PER_BUILDING));
+    return Math.min(MAX_INSTANCES, homes + Math.max(0, (level || 1) - 1) * 3);
+  }
+
+  // ---- layout -----------------------------------------------------------
+  // Deterministic from the settlement's own identity, so a town looks the
+  // same every time you visit it and after a reload, with not one byte of
+  // per-building state saved.
+  //
+  // Returns instances in TILE space plus a metre offset, because the caller
+  // has to put them on the terrain and only it knows the exaggeration.
+  //
+  //   out.x, out.y     tile coordinates (fractional)
+  //   out.kind         index into KINDS
+  //   out.rot          yaw, radians
+  //   out.w, out.d     footprint in metres
+  //   out.h            height in metres
+  function layout(v, world, opts) {
+    const cap = (opts && opts.max) || MAX_INSTANCES;
+    const pop = v.pop || 1, level = v.level || 1;
+    const n = Math.min(cap, buildingCount(pop, level));
+    const radM = footprintM(pop, level);
+
+    // The seed is the settlement's identity, not its address: a town that is
+    // renamed or grows keeps its streets.
+    const rng = PD.makeRNG(((v.id + 1) * 2654435761) >>> 0);
+
+    // metres per tile, which is latitude-dependent in x
+    const mPerTileY = (Math.PI * R_EARTH_M) / world.H;
+    const lat = Math.PI / 2 - (v.y / world.H) * Math.PI;
+    const mPerTileX = Math.max(1, Math.cos(lat)) * (2 * Math.PI * R_EARTH_M) / world.W;
+
+    const out = [];
+    // A settlement is not a disc of randomly scattered boxes. It has a centre
+    // that is denser than its edge, and the civic buildings are in the middle
+    // where they belong — which is the difference between a town and a rash.
+    for (let i = 0; i < n; i++) {
+      // sqrt keeps the area density uniform; the extra power pulls it inward
+      const rr = Math.pow(rng(), 0.65);
+      const ang = rng() * Math.PI * 2;
+      const dM = rr * radM;
+
+      let kind = HUT;
+      if (i === 0 && level >= 2) kind = HALL;                 // the moot hall
+      else if (i < (v.temples || 0) + 1 && level >= 2) kind = TEMPLE;
+      else if (i < 4 && level >= 3) kind = TOWER;
+      else if (rr > 0.72 && rng() < 0.45) kind = FARM;        // fields at the edge
+      else kind = (level >= 3 && rr < 0.5) ? HOUSE : (rng() < 0.35 ? HOUSE : HUT);
+
+      const size = kindSize(kind, level, rng);
+      out.push({
+        x: W.wrapX(world, v.x + (Math.cos(ang) * dM) / mPerTileX),
+        y: PD.clamp(v.y + (Math.sin(ang) * dM) / mPerTileY, 0, world.H - 0.001),
+        kind,
+        // buildings face the centre of town, roughly, because streets radiate
+        rot: ang + Math.PI / 2 + (rng() - 0.5) * 0.5,
+        w: size.w, d: size.d, h: size.h
+      });
+    }
+    return { items: out, radiusM: radM, count: n };
+  }
+
+  function kindSize(kind, level, rng) {
+    const j = 0.8 + rng() * 0.4;             // no two the same
+    switch (kind) {
+      case HALL:   return { w: 14 * j, d: 22 * j, h: 9 * j };
+      case TEMPLE: return { w: 16 * j, d: 24 * j, h: (10 + level * 1.6) * j };
+      case TOWER:  return { w: 7 * j, d: 7 * j, h: (14 + level * 3.2) * j };
+      case FARM:   return { w: 26 * j, d: 26 * j, h: 2.2 * j };
+      case HOUSE:  return { w: 8 * j, d: 10 * j, h: (5 + Math.min(level, 6) * 1.4) * j };
+      default:     return { w: 6 * j, d: 7 * j, h: 3.4 * j };   // HUT
+    }
+  }
+
+  // Which settlements are worth building geometry for at this altitude and
+  // this camera position. At true scale the answer is usually "none", which
+  // is why this exists rather than a blanket loop over every village.
+  function visible(sim, world, camTx, camTy, altM, budget) {
+    const out = [];
+    if (!sim || !sim.villages || altM > VISIBLE_ALT_M) return out;
+    // how far away a settlement can be and still be worth drawing: roughly
+    // the horizon at this altitude, in tiles
+    const horizonM = Math.sqrt(Math.max(0, 2 * R_EARTH_M * altM)) + 20000;
+    const mPerTileY = (Math.PI * R_EARTH_M) / world.H;
+    const maxTiles = horizonM / mPerTileY;
+    for (const v of sim.villages) {
+      if (!v || v.pop <= 0) continue;
+      const d = W.wdist(world, camTx, camTy, v.x, v.y);
+      if (d <= maxTiles) out.push({ v, d });
+    }
+    out.sort((a, b) => a.d - b.d);
+    // nearest first, to the instance budget
+    let total = 0;
+    const keep = [];
+    for (const e of out) {
+      const n = buildingCount(e.v.pop, e.v.level);
+      if (total + n > (budget || MAX_INSTANCES)) break;
+      total += n; keep.push(e.v);
+    }
+    return keep;
+  }
+
+  // Is (tx, ty) inside a settlement's built area? The quadtree asks this so
+  // it can stop inventing sub-tile relief under a town — see lod.js. People
+  // build on level ground, and a building placed against a smooth
+  // interpolated surface would otherwise sink into a hill that the patch
+  // geometry invented after the fact.
+  function builtRadiusTiles(v, world) {
+    const mPerTileY = (Math.PI * R_EARTH_M) / world.H;
+    return footprintM(v.pop || 1, v.level || 1) / mPerTileY;
+  }
+
+  global.PD.Buildings = {
+    layout, footprintM, buildingCount, realPopulation, visible, builtRadiusTiles, kindSize,
+    KINDS, HUT, HOUSE, HALL, TEMPLE, TOWER, FARM,
+    VISIBLE_ALT_M, MAX_INSTANCES, PER_BUILDING, R_EARTH_M
+  };
+})(window);
+
+</script>
+<script>
 /* =========================================================================
    PIXEL DEITY — render3d.js
    The Solar-Smash view: a real 3D planet in space. Custom WebGL engine —
@@ -5371,6 +5605,44 @@ body{
     const s = PD.Sim.subsolar(sim.epoch + sim.clock);
     const cl = Math.cos(s.dec);
     return [cl * Math.sin(s.lon), Math.sin(s.dec), cl * Math.cos(s.lon)];
+  }
+
+  // ---------- the surface, and everything that stands on it ----------
+  //
+  // Six different places used to lift things off the sphere by a constant —
+  // 0.010 to 0.029 Earth radii, which is 64 km to 185 km. Every one of them
+  // was chosen when the camera could not get closer than 1,593 km, where a
+  // hundred kilometres of float is invisible.
+  //
+  // The camera now stands at 80 m, and terrain reaches 12.4 km at ground
+  // exaggeration. So a unit sprite at 0.014 was 89 km up: SEVENTY-SEVEN
+  // KILOMETRES ABOVE THE SUMMIT OF EVEREST. Every person, label, ring and
+  // bolt the game drew on the surface was in the sky.
+  //
+  // There is one surface now and it is the one the quadtree builds, the
+  // camera clamps against and the picking ray refines against. `lift` is a
+  // real altitude in METRES above the ground, not a fraction of the planet.
+  function surfaceRadius(world, tx, ty, exag) {
+    if (!PD.LOD || !world || !world.elev) return 1;
+    const lon = (tx / world.W) * Math.PI * 2;
+    const lat = Math.PI / 2 - (ty / world.H) * Math.PI;
+    return PD.LOD.groundRadius(world, lon, lat, exag);
+  }
+  // The exaggeration a renderer is currently drawing with. FX and the minimap
+  // reach this without a renderer in hand, so it falls back to the camera's
+  // own altitude rather than assuming one.
+  // FX is bound to a world, not to a renderer, so it cannot ask the camera
+  // what exaggeration this frame is using. The frame publishes it.
+  let curExag = 1;
+  function exagOf(r) {
+    if (!PD.LOD) return 1;
+    if (r && r.cam) return PD.LOD.exagFor(r.cam.sDist != null ? r.cam.sDist : r.cam.dist);
+    return 1;
+  }
+  // Put a point ON the ground at (tx, ty), `liftM` metres above it.
+  function onSurface(world, tx, ty, out, liftM, exag) {
+    const rad = surfaceRadius(world, tx, ty, exag) + (liftM || 0) / R_EARTH_M;
+    return tileToSphere(world, tx, ty, out, rad - 1);
   }
 
   // ---------- world <-> sphere mapping ----------
@@ -5489,6 +5761,47 @@ void main(){
   // the clouds and the explosions all get graded on the same curve.
   gl_FragColor = vec4(max(col, 0.0), 1.0);
 }`;
+  // ---------- buildings ----------
+  // One box mesh, drawn once per building. Eye-relative like the terrain
+  // patches, for the same reason: at 80 m altitude a float32 position near
+  // radius 1 quantises to 0.38 m, and a six-metre hut cannot be built out of
+  // parts that jitter by a third of a metre.
+  //
+  // The instance carries its own local frame — east/north/up at its point on
+  // the globe — because a building three kilometres away is standing on
+  // measurably different "up" than you are.
+  const VS_BLDG = `
+attribute vec3 aPos; attribute vec3 aNorm;
+attribute vec3 iOff;      // building origin, relative to the eye
+attribute vec3 iUp;       // local up at that point on the globe
+attribute vec3 iEast;     // local east, already rotated by the building's yaw
+attribute vec3 iSize;     // width, depth, height in world units
+attribute vec3 iCol;
+uniform mat4 uMVP;
+varying vec3 vN; varying vec3 vCol; varying float vUpDot;
+void main(){
+  vec3 north = cross(iUp, iEast);
+  // the unit box is centred in x/z and sits ON the ground in y
+  vec3 local = iEast * (aPos.x * iSize.x)
+             + north * (aPos.z * iSize.y)
+             + iUp   * ((aPos.y + 0.5) * iSize.z);
+  vN = normalize(iEast * aNorm.x + north * aNorm.z + iUp * aNorm.y);
+  vCol = iCol;
+  vUpDot = aNorm.y;
+  gl_Position = uMVP * vec4(local + iOff, 1.0);
+}`;
+  const FS_BLDG = `
+precision highp float;
+varying vec3 vN; varying vec3 vCol; varying float vUpDot;
+uniform vec3 uSun; uniform vec3 uAtmo;
+void main(){
+  float diff = max(dot(vN, uSun), 0.0);
+  // roofs catch the sky, walls catch the ground bounce
+  vec3 sky = mix(vec3(0.10, 0.11, 0.15), uAtmo * 0.55, max(vUpDot, 0.0));
+  vec3 col = vCol * (0.20 + 1.0 * diff) + vCol * sky;
+  gl_FragColor = vec4(max(col, 0.0), 1.0);
+}`;
+
   // ---------- postprocess: the whole frame, graded as one image ----------
   // Everything above used to write straight to the backbuffer, and only the
   // planet was tonemapped (inside its own shader), so clouds, atmosphere,
@@ -5764,7 +6077,7 @@ void main(){
     // tile coords + tile-space velocity -> 3D pos/vel on the sphere
     function emit(x, y, vx, vy, life, color, size, grav) {
       if (!world || parts.length >= MAX) return;
-      tileToSphere(world, x, y, tmp, 0.012);
+      onSurface(world, x, y, tmp, 20, curExag);
       const p = [tmp[0], tmp[1], tmp[2]];
       // tangent basis: east & south
       const lon = (x / world.W) * Math.PI * 2;
@@ -5803,7 +6116,7 @@ void main(){
       // an incoming orbital streak toward (x,y)
       streak(x, y) {
         if (!world) return;
-        const target = tileToSphere(world, x, y, [0, 0, 0], 0.01);
+        const target = onSurface(world, x, y, [0, 0, 0], 0, curExag);
         const dir = [Math.random() - 0.5, Math.random() * 0.6 + 0.4, Math.random() - 0.5];
         const dl = Math.hypot(dir[0], dir[1], dir[2]);
         for (let i = 0; i < 16; i++) {
@@ -6259,6 +6572,60 @@ void main(){
     r.bufQuad = glBuf(gl, new Float32Array([-1, -1, 3, -1, -1, 3]));
 
     initPost(r);
+
+    // ---- buildings ----
+    // Instancing is NOT guaranteed. It is core on WebGL2 and an optional
+    // extension on WebGL1, so the capability is probed once and recorded —
+    // never assumed, and never allowed to fail silently the way a missing
+    // vertex texture unit would (that renders a smooth sphere and raises
+    // nothing). Where it is absent the draw path falls back to a smaller
+    // number of buildings drawn one at a time, which is worse but is not
+    // nothing.
+    r.progBldg = compile(gl, VS_BLDG, FS_BLDG);
+    r.inst = null;
+    if (r.gl2) {
+      r.inst = {
+        divisor: (loc, d) => gl.vertexAttribDivisor(loc, d),
+        draw: (mode, count, type, offset, n) => gl.drawElementsInstanced(mode, count, type, offset, n)
+      };
+    } else {
+      const ext = gl.getExtension('ANGLE_instanced_arrays');
+      if (ext) {
+        r.inst = {
+          divisor: (loc, d) => ext.vertexAttribDivisorANGLE(loc, d),
+          draw: (mode, count, type, offset, n) => ext.drawElementsInstancedANGLE(mode, count, type, offset, n)
+        };
+      }
+    }
+    {
+      // a unit box, centred in x/z, resting on y = -0.5 so the shader can
+      // lift it by half its height and have it stand on the ground
+      const P = [], N = [], I = [];
+      const faces = [
+        [[0, 0, 1], [[-.5, -.5, .5], [.5, -.5, .5], [.5, .5, .5], [-.5, .5, .5]]],
+        [[0, 0, -1], [[.5, -.5, -.5], [-.5, -.5, -.5], [-.5, .5, -.5], [.5, .5, -.5]]],
+        [[1, 0, 0], [[.5, -.5, .5], [.5, -.5, -.5], [.5, .5, -.5], [.5, .5, .5]]],
+        [[-1, 0, 0], [[-.5, -.5, -.5], [-.5, -.5, .5], [-.5, .5, .5], [-.5, .5, -.5]]],
+        [[0, 1, 0], [[-.5, .5, .5], [.5, .5, .5], [.5, .5, -.5], [-.5, .5, -.5]]],
+        [[0, -1, 0], [[-.5, -.5, -.5], [.5, -.5, -.5], [.5, -.5, .5], [-.5, -.5, .5]]]
+      ];
+      for (const [nrm, quad] of faces) {
+        const b = P.length / 3;
+        for (const v of quad) { P.push(v[0], v[1], v[2]); N.push(nrm[0], nrm[1], nrm[2]); }
+        I.push(b, b + 1, b + 2, b, b + 2, b + 3);
+      }
+      r.bldgPos = glBuf(gl, new Float32Array(P));
+      r.bldgNrm = glBuf(gl, new Float32Array(N));
+      r.bldgIdx = gl.createBuffer();
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, r.bldgIdx);
+      gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(I), gl.STATIC_DRAW);
+      r.bldgNIdx = I.length;
+      // instance streams, grown on demand
+      r.bldgCap = 0;
+      r.bBufOff = gl.createBuffer(); r.bBufUp = gl.createBuffer();
+      r.bBufEast = gl.createBuffer(); r.bBufSize = gl.createBuffer();
+      r.bBufCol = gl.createBuffer();
+    }
 
     // ---- the quadtree's shared grid ----
     // One (u,v) array and one index buffer for every patch that will ever
@@ -6812,7 +7179,7 @@ void main(){
 
   function worldToScreen(r, wx, wy) {
     if (r.headless || !r._vp) return null;
-    const p = tileToSphere(r.world, wx, wy, [0, 0, 0], 0.02);
+    const p = onSurface(r.world, wx, wy, [0, 0, 0], 40, exagOf(r));
     // cull back hemisphere
     const eye = camEye(r.cam);
     if (p[0] * eye[0] + p[1] * eye[1] + p[2] * eye[2] < 1.0) return null;
@@ -6941,6 +7308,7 @@ void main(){
       PD.Prof.n('lod.culled', r.lod.stats.culled);
       PD.Prof.n('lod.exag', exag);
     }
+    curExag = exag;          // FX and the minimap read this
 
     // The sun is where the sun is. This used to be `(sim.tick % 480) / 480`
     // — one revolution every 480 steps, which was four of the years the HUD
@@ -7027,6 +7395,11 @@ void main(){
     gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D, r.texNorm); gl.uniform1i(pp.u.uNorm, 2);
     gl.activeTexture(gl.TEXTURE3); gl.bindTexture(gl.TEXTURE_2D, r.texClim); gl.uniform1i(pp.u.uClim, 3);
     if (patches) drawPatches(r, pp, patches, eye);
+
+    // Settlements, as buildings. Opaque and depth-tested, so it goes with the
+    // terrain rather than with the transparent passes below. Returns straight
+    // away above ~55 km, which is almost always.
+    drawBuildings(r, sim, eye, exag, vpEye, sun, atmo);
 
     // units as living embers on the surface
     drawUnits(r, sim, vp);
@@ -7180,6 +7553,140 @@ void main(){
     PD.Prof.n('lod.resident', tab.size);
   }
 
+  // ---------- settlements, as buildings ----------
+  // At true scale there is usually nothing to draw: a 500 m village is under
+  // a pixel from 50 km up, so this returns immediately at almost every
+  // altitude the game is normally played at. That is the design, not an
+  // optimisation — and it is why flyTo had to become live in the same change.
+  const BLDG_COLS = [
+    [0.62, 0.50, 0.38], [0.70, 0.60, 0.48], [0.55, 0.44, 0.34],
+    [0.82, 0.76, 0.62], [0.58, 0.56, 0.54], [0.44, 0.42, 0.26]
+  ];
+  function drawBuildings(r, sim, eye, exag, vpEye, sun, atmo) {
+    const gl = r.gl;
+    if (!PD.Buildings || !r.progBldg || !sim || !sim.villages) return 0;
+    const cam = r.cam, world = r.world;
+    const altM = Math.max(0, ((cam.sDist != null ? cam.sDist : cam.dist) - 1) * R_EARTH_M);
+    if (altM > PD.Buildings.VISIBLE_ALT_M) { PD.Prof.n('bldg.instances', 0); return 0; }
+
+    PD.Prof.begin('bldg');
+    // Publish where the towns are so the quadtree stops inventing hillsides
+    // under them. Only when the set actually changes — this rebuilds patches.
+    {
+      let sig = '';
+      for (const v of sim.villages) if (v.pop > 0) sig += v.id + ':' + v.level + ',';
+      if (sig !== r._townSig) {
+        r._townSig = sig;
+        const towns = [];
+        for (const v of sim.villages) {
+          if (v.pop <= 0) continue;
+          const rt = PD.Buildings.builtRadiusTiles(v, world) * 1.35;
+          towns.push({ x: v.x, y: v.y, r2: rt * rt });
+        }
+        if (r.lod && r.lod.detail && r.lod.detail.setTowns) {
+          r.lod.detail.setTowns(towns);
+          PD.LOD.invalidate(r.lod);
+        }
+      }
+    }
+    const ct = centerTile(r);
+    // an unaccelerated fallback draws far fewer, because each one is a call
+    const budget = r.inst ? PD.Buildings.MAX_INSTANCES : 220;
+    const towns = PD.Buildings.visible(sim, world, ct.x, ct.y, altM, budget);
+
+    let n = 0;
+    const need = budget;
+    if (!r._bOff || r._bOff.length < need * 3) {
+      r._bOff = new Float32Array(need * 3); r._bUp = new Float32Array(need * 3);
+      r._bEast = new Float32Array(need * 3); r._bSize = new Float32Array(need * 3);
+      r._bCol = new Float32Array(need * 3);
+    }
+    const P = [0, 0, 0];
+    for (const v of towns) {
+      const lay = PD.Buildings.layout(v, world, { max: need - n });
+      for (const b of lay.items) {
+        if (n >= need) break;
+        // stand it on the ground, using the same surface everything else uses
+        onSurface(world, b.x, b.y, P, 0, exag);
+        r._bOff[n * 3] = P[0] - eye[0];
+        r._bOff[n * 3 + 1] = P[1] - eye[1];
+        r._bOff[n * 3 + 2] = P[2] - eye[2];
+        // local frame at this point on the globe
+        const L = Math.hypot(P[0], P[1], P[2]) || 1;
+        const ux = P[0] / L, uy = P[1] / L, uz = P[2] / L;
+        r._bUp[n * 3] = ux; r._bUp[n * 3 + 1] = uy; r._bUp[n * 3 + 2] = uz;
+        // east, then spun by the building's own yaw
+        let ex = uz, ey = 0, ez = -ux;
+        const el = Math.hypot(ex, ey, ez) || 1; ex /= el; ez /= el;
+        // north = up x east
+        const nx = uy * ez - uz * ey, ny = uz * ex - ux * ez, nz = ux * ey - uy * ex;
+        const c = Math.cos(b.rot), s = Math.sin(b.rot);
+        r._bEast[n * 3] = ex * c + nx * s;
+        r._bEast[n * 3 + 1] = ey * c + ny * s;
+        r._bEast[n * 3 + 2] = ez * c + nz * s;
+        // metres -> world units (the sphere is one Earth radius)
+        r._bSize[n * 3] = b.w / R_EARTH_M;
+        r._bSize[n * 3 + 1] = b.d / R_EARTH_M;
+        r._bSize[n * 3 + 2] = b.h / R_EARTH_M;
+        const col = BLDG_COLS[b.kind] || BLDG_COLS[0];
+        r._bCol[n * 3] = col[0]; r._bCol[n * 3 + 1] = col[1]; r._bCol[n * 3 + 2] = col[2];
+        n++;
+      }
+      if (n >= need) break;
+    }
+    PD.Prof.n('bldg.instances', n);
+    PD.Prof.n('bldg.towns', towns.length);
+    if (n === 0) { PD.Prof.end(); return 0; }
+
+    const pb = r.progBldg;
+    gl.useProgram(pb.p);
+    gl.uniformMatrix4fv(pb.u.uMVP, false, vpEye);
+    gl.uniform3fv(pb.u.uSun, sun);
+    gl.uniform3fv(pb.u.uAtmo, atmo);
+    bindAttr(gl, pb.a.aPos, r.bldgPos, 3);
+    bindAttr(gl, pb.a.aNorm, r.bldgNrm, 3);
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, r.bldgIdx);
+
+    const streams = [
+      [pb.a.iOff, r.bBufOff, r._bOff], [pb.a.iUp, r.bBufUp, r._bUp],
+      [pb.a.iEast, r.bBufEast, r._bEast], [pb.a.iSize, r.bBufSize, r._bSize],
+      [pb.a.iCol, r.bBufCol, r._bCol]
+    ];
+    let tris = 0;
+    if (r.inst) {
+      for (const [loc, buf, arr] of streams) {
+        if (loc == null || loc < 0) continue;
+        gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+        gl.bufferData(gl.ARRAY_BUFFER, arr.subarray(0, n * 3), gl.DYNAMIC_DRAW);
+        gl.enableVertexAttribArray(loc);
+        gl.vertexAttribPointer(loc, 3, gl.FLOAT, false, 0, 0);
+        r.inst.divisor(loc, 1);
+      }
+      r.inst.draw(gl.TRIANGLES, r.bldgNIdx, gl.UNSIGNED_SHORT, 0, n);
+      tris = (r.bldgNIdx / 3) * n;
+      // The divisors are GLOBAL attribute state. Leaving them at 1 makes the
+      // NEXT program that reuses those attribute slots read one value for the
+      // whole draw — the terrain would collapse to a single vertex. Reset.
+      for (const [loc] of streams) if (loc != null && loc >= 0) r.inst.divisor(loc, 0);
+    } else {
+      // No instancing anywhere on this device. Draw a reduced set the slow
+      // way rather than drawing nothing at all.
+      for (let i = 0; i < n; i++) {
+        for (const [loc, , arr] of streams) {
+          if (loc == null || loc < 0) continue;
+          gl.disableVertexAttribArray(loc);
+          gl.vertexAttrib3f(loc, arr[i * 3], arr[i * 3 + 1], arr[i * 3 + 2]);
+        }
+        gl.drawElements(gl.TRIANGLES, r.bldgNIdx, gl.UNSIGNED_SHORT, 0);
+      }
+      tris = (r.bldgNIdx / 3) * n;
+    }
+    PD.Prof.add('gl.tris', tris);
+    PD.Prof.add('gl.draws', r.inst ? 1 : n);
+    PD.Prof.end();
+    return n;
+  }
+
   function bindAttr(gl, loc, buf, size) {
     if (loc == null || loc < 0) return;
     gl.bindBuffer(gl.ARRAY_BUFFER, buf);
@@ -7211,12 +7718,15 @@ void main(){
     // pixels, silently clamped by the driver so every unit becomes the same
     // giant square. Size against ALTITUDE and clamp it ourselves.
     const zoomSize = PD.clamp(0.9 / Math.max(1e-6, r.cam.dist - 1), 8, 900);
+    // hoisted: every unit stands on the same terrain, at the same vertical
+    // exaggeration the patches under them are being drawn with
+    const uExag = exagOf(r);
     for (let i = 0; i < units.length && n < cap; i++) {
       const u = units[i];
       if (u.dead) continue;
       const R = PD.Sim.RACES[u.race];
       if (!R) continue;
-      tileToSphere(r.world, u.x, u.y, _upos, 0.014 + (R.flies ? 0.015 : 0));
+      onSurface(r.world, u.x, u.y, _upos, R.flies ? 120 : 1, uExag);
       r._uP[n * 3] = _upos[0]; r._uP[n * 3 + 1] = _upos[1]; r._uP[n * 3 + 2] = _upos[2];
       // A paragon wears their people's garb. col2 was read by nothing in the
       // shipping renderer, so the Genesis Lab's Garb picker had no effect at
@@ -7299,7 +7809,7 @@ void main(){
     for (const ring of FX.rings) {
       const alpha = ring.life / ring.max2;
       const segs = 40;
-      const c = tileToSphere(r.world, ring.x, ring.y, _rtmp, 0.015);
+      const c = onSurface(r.world, ring.x, ring.y, _rtmp, 15, exagOf(r));
       const cl = Math.hypot(c[0], c[1], c[2]);
       const nx = c[0] / cl, ny = c[1] / cl, nz = c[2] / cl;
       // tangent basis
@@ -7322,7 +7832,7 @@ void main(){
     for (const b of FX.bolts) {
       const alpha = b.life / b.max;
       const t = b.pts[0];
-      const surf = tileToSphere(r.world, t[0], t[1], [0, 0, 0], 0.01);
+      const surf = onSurface(r.world, t[0], t[1], [0, 0, 0], 0, exagOf(r));
       const top = [surf[0] * 1.8, surf[1] * 1.8, surf[2] * 1.8];
       let prev = top;
       const segs = 7;
@@ -11516,6 +12026,50 @@ void main(){
       chargeRelease(lastX, lastY);
       if (panning && moved < 5 && G.power && G.power.id === 'inspect') applyPower(lastX, lastY);
       dragging = false; panning = false;
+    });
+    // ---- the way down ----
+    // Settlements are TRUE SCALE: a village is five hundred metres across, so
+    // its buildings are under a pixel above about 55 km and there is simply
+    // nothing to see from anywhere you would normally be. A feature that can
+    // only be reached by knowing to hold the zoom key for a very long time
+    // over exactly the right spot is not a feature.
+    //
+    // `flyTo` has been sitting exported and called from nowhere for three
+    // releases. This is what it was for.
+    // The settlement nearest a point, or null. Territory first — a click
+    // inside a town's claim means that town whatever its centre is doing —
+    // then proximity, which is what lets you aim at a village on open ground.
+    const nearestVillage = (wx, wy, maxTiles) => {
+      const ix = Math.floor(wx), iy = Math.floor(wy);
+      if (W.inBounds(G.world, ix, iy)) {
+        const o = G.world.owner[W.idx(G.world, ix, iy)];
+        if (o >= 0) { const v = Sim.villageById(G.sim, o); if (v) return v; }
+      }
+      let bv = null, bd = maxTiles;
+      for (const v of G.sim.villages) {
+        const d = W.wdist(G.world, v.x, v.y, wx, wy);
+        if (d < bd) { bd = d; bv = v; }
+      }
+      return bv;
+    };
+    cv.addEventListener('dblclick', (e) => {
+      if (G.ui.overUI) return;
+      const rect = cv.getBoundingClientRect();
+      const wc = Render.screenToWorld(G.r, e.clientX - rect.left, e.clientY - rect.top);
+      if (!wc) return;
+      const v = nearestVillage(wc.x, wc.y, 14);
+      const t = v ? { x: v.x, y: v.y } : wc;
+      // arrive just above the rooftops, where the town fills the view
+      const altM = v && PD.Buildings
+        ? Math.max(400, PD.Buildings.footprintM(v.pop || 1, v.level || 1) * 2.2)
+        : 1200;
+      Render.flyTo(G.r, t.x, t.y, 1 + altM / 6371000, 1600);
+      if (v) {
+        G.selected = { type: 'village', ref: v };
+        refreshPanelSel();
+        flashToast('Descending on ' + v.name);
+      }
+      Audio8.sfx('select');
     });
     cv.addEventListener('contextmenu', (e) => e.preventDefault());
 

@@ -29,6 +29,7 @@ const R_EARTH_M = 6371000;
 const ALTS = [
   { name: 'orbit',   m: 1600000 },
   { name: '100 km',  m: 100000 },
+  { name: '2 km',    m: 2000 },
   { name: 'ground',  m: 80 }
 ];
 
@@ -60,9 +61,26 @@ function run() {
     // and meaningless.
     var w = G.world, peak = -1, px = 0, py = 0;
     for (var t = 0; t < w.n; t++) if (w.elev[t] > peak) { peak = w.elev[t]; px = t % w.W; py = (t / w.W) | 0; }
+    // Prefer the largest SETTLEMENT: buildings are true scale, so aiming at a
+    // bare mountain would report zero instances at every altitude and the
+    // true-scale assertion below would pass while proving nothing.
+    var bigV = null;
+    for (var vi = 0; vi < G.sim.villages.length; vi++) {
+      var vv = G.sim.villages[vi];
+      if (!bigV || (vv.pop || 0) > (bigV.pop || 0)) bigV = vv;
+    }
+    if (bigV) {
+      px = bigV.x; py = bigV.y;
+      // This probe measures the RENDERER, not the simulation. At boot a
+      // freshly-seeded settlement has a population of four, which is one
+      // building — enough to satisfy "some buildings appear" while proving
+      // almost nothing about drawing a town. Grow it here rather than running
+      // the sim for a century to get the same effect.
+      bigV.pop = 110; bigV.level = 7; bigV.temples = 3;
+    }
     var aimLon = (px / w.W) * Math.PI * 2;
     var aimLat = Math.PI / 2 - (py / w.H) * Math.PI;
-    out.peak = { x: px, y: py, elev: peak };
+    out.peak = { x: px, y: py, elev: peak, town: bigV ? (bigV.name + ' pop ' + bigV.pop) : null };
 
     for (var i = 0; i < ALTS.length; i++) {
       var a = ALTS[i];
@@ -100,6 +118,8 @@ function run() {
         cloudTris: c['gl.cloudTris'] || 0,
         atmoTris: c['gl.atmoTris'] || 0,
         patches: c['lod.patches'] || 0,
+        bldg: c['bldg.instances'] || 0,
+        towns: c['bldg.towns'] || 0,
         // where the camera ENDED UP, which is not where we put it if
         // anything clamps it — that is the terrain-collision signal
         endDist: r.cam.dist,
@@ -207,21 +227,20 @@ if (rep.fatal) {
 const R = 6371000;
 console.log('\n--- what the GPU is asked to draw (WebGL' + (rep.gl2 ? '2' : '1') + ') ---');
 if (rep.peak) {
-  console.log('  aimed at the highest ground on the planet: tile ' +
-    rep.peak.x + ',' + rep.peak.y + ' at elevation ' + rep.peak.elev.toFixed(3));
+  console.log('  aimed at ' + (rep.peak.town ? ('the largest settlement: ' + rep.peak.town) :
+    'the highest ground') + ' — tile ' + Math.round(rep.peak.x) + ',' + Math.round(rep.peak.y));
 }
-console.log('  altitude    triangles  draws  patches  eye above r=1  ground reaches');
+console.log('  altitude   triangles  draws  patches  buildings  eye above r=1');
 for (const a of rep.alts) {
-  console.log('  ' + a.name.padEnd(10) +
+  console.log('  ' + a.name.padEnd(9) +
     String(a.tris).padStart(10) + String(a.draws).padStart(7) +
-    String(a.patches).padStart(9) +
-    (Math.round(a.altAboveGroundM).toLocaleString() + ' m').padStart(15) +
-    (Math.round((a.groundR - 1) * R).toLocaleString() + ' m').padStart(16));
+    String(a.patches).padStart(9) + String(a.bldg).padStart(11) +
+    (Math.round(a.altAboveGroundM).toLocaleString() + ' m').padStart(15));
 }
 
 console.log('\n--- assertions ---');
 check('every altitude rendered without throwing', rep.errs.length === 0, rep.errs.join(' | '));
-check('all three altitudes reported', rep.alts.length === ALTS.length, rep.alts.length + '/' + ALTS.length);
+check('every altitude reported', rep.alts.length === ALTS.length, rep.alts.length + '/' + ALTS.length);
 for (const a of rep.alts) {
   check('the planet is drawn at ' + a.name, a.tris > 0, a.tris + ' tris');
 }
@@ -245,6 +264,27 @@ for (const a of rep.alts) {
   check('vertical exaggeration eases to near-true scale on the ground',
     g.exag < 2.5, g.exag.toFixed(2) + 'x');
   check('and is dramatic from orbit', rep.alts[0].exag > 5, rep.alts[0].exag.toFixed(1) + 'x');
+}
+
+// ---- true scale, measured ------------------------------------------------
+// The zero is the assertion that matters. A village is five hundred metres
+// across and is not exaggerated the way the mountains are, so from orbit
+// there must be NOTHING — and it is far easier to write a renderer that draws
+// buildings everywhere and call it correct than to prove it draws none.
+console.log('\n--- settlements are true scale ---');
+{
+  const byName = {};
+  for (const a of rep.alts) byName[a.name] = a;
+  check('no buildings are drawn from orbit', byName['orbit'].bldg === 0,
+    byName['orbit'].bldg + ' instances');
+  check('nor from 100 km', byName['100 km'].bldg === 0, byName['100 km'].bldg + ' instances');
+  check('a town is drawn at two kilometres', byName['2 km'].bldg > 50,
+    byName['2 km'].bldg + ' instances across ' + byName['2 km'].towns + ' settlements');
+  check('and on the ground', byName['ground'].bldg > 50,
+    byName['ground'].bldg + ' instances');
+  check('the instance count stays inside its budget',
+    Math.max(byName['2 km'].bldg, byName['ground'].bldg) <= 6000,
+    Math.max(byName['2 km'].bldg, byName['ground'].bldg) + ' instances');
 }
 
 console.log('\n--- detail follows the camera ---');

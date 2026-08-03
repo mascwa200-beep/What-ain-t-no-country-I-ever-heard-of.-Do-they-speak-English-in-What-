@@ -1629,6 +1629,50 @@
       if (panning && moved < 5 && G.power && G.power.id === 'inspect') applyPower(lastX, lastY);
       dragging = false; panning = false;
     });
+    // ---- the way down ----
+    // Settlements are TRUE SCALE: a village is five hundred metres across, so
+    // its buildings are under a pixel above about 55 km and there is simply
+    // nothing to see from anywhere you would normally be. A feature that can
+    // only be reached by knowing to hold the zoom key for a very long time
+    // over exactly the right spot is not a feature.
+    //
+    // `flyTo` has been sitting exported and called from nowhere for three
+    // releases. This is what it was for.
+    // The settlement nearest a point, or null. Territory first — a click
+    // inside a town's claim means that town whatever its centre is doing —
+    // then proximity, which is what lets you aim at a village on open ground.
+    const nearestVillage = (wx, wy, maxTiles) => {
+      const ix = Math.floor(wx), iy = Math.floor(wy);
+      if (W.inBounds(G.world, ix, iy)) {
+        const o = G.world.owner[W.idx(G.world, ix, iy)];
+        if (o >= 0) { const v = Sim.villageById(G.sim, o); if (v) return v; }
+      }
+      let bv = null, bd = maxTiles;
+      for (const v of G.sim.villages) {
+        const d = W.wdist(G.world, v.x, v.y, wx, wy);
+        if (d < bd) { bd = d; bv = v; }
+      }
+      return bv;
+    };
+    cv.addEventListener('dblclick', (e) => {
+      if (G.ui.overUI) return;
+      const rect = cv.getBoundingClientRect();
+      const wc = Render.screenToWorld(G.r, e.clientX - rect.left, e.clientY - rect.top);
+      if (!wc) return;
+      const v = nearestVillage(wc.x, wc.y, 14);
+      const t = v ? { x: v.x, y: v.y } : wc;
+      // arrive just above the rooftops, where the town fills the view
+      const altM = v && PD.Buildings
+        ? Math.max(400, PD.Buildings.footprintM(v.pop || 1, v.level || 1) * 2.2)
+        : 1200;
+      Render.flyTo(G.r, t.x, t.y, 1 + altM / 6371000, 1600);
+      if (v) {
+        G.selected = { type: 'village', ref: v };
+        refreshPanelSel();
+        flashToast('Descending on ' + v.name);
+      }
+      Audio8.sfx('select');
+    });
     cv.addEventListener('contextmenu', (e) => e.preventDefault());
 
     cv.addEventListener('wheel', (e) => {

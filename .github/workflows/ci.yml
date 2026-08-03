@@ -94,6 +94,12 @@ jobs:
       - name: lod
         run: node tools/test-lod.js .
 
+      # settlements as buildings, and the rule that NOTHING FLOATS. Six fixed
+      # lifts used to put every person, label, ring and bolt 77 km above the
+      # summit of Everest, and no test in this project would have noticed.
+      - name: buildings
+        run: node tools/test-buildings.js .
+
       # the planet is Earth: real places at the right altitude, orientation
       # traps, real cities on real land. This one guards a BAKED ASSET, so it
       # is the only thing standing between a bad rebuild of js/earthdata.js

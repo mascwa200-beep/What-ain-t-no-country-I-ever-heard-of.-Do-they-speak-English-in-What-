@@ -229,15 +229,32 @@
   function makeDetail(seed) {
     const nz = PD.makeNoise((seed ^ 0x5EA17E) >>> 0);
     const cap = DETAIL_MAX / MAX_LAND_M * (1 - SEA);   // in elevation units
-    return function (w, lon, lat, level, elev) {
+    // Where settlements stand, in tile space: {x, y, r2}. Kept on the closure
+    // rather than read off the tree, because detail() is handed around as a
+    // bare function and must not depend on who is holding it.
+    let towns = [];
+    const fn = function (w, lon, lat, level, elev) {
       if (level <= 2 || elev <= SEA) return 0;
-      const t = lonLatToTile(w, lon, lat);
+      const tt = lonLatToTile(w, lon, lat);
+      const t = tt;
       // local slope from the tile field, in elevation units per tile
       const W2 = w.W, H2 = w.H, e = w.elev;
       const xi = Math.floor(t.tx), yi = PD.clamp(Math.floor(t.ty), 1, H2 - 2);
       const xr = ((xi + 1) % W2 + W2) % W2, xl = ((xi - 1) % W2 + W2) % W2;
       const slope = Math.abs(e[yi * W2 + xr] - e[yi * W2 + xl]) +
                     Math.abs(e[(yi + 1) * W2 + xi % W2] - e[(yi - 1) * W2 + xi % W2]);
+      // People build on level ground. `groundRadius` — which the camera
+      // clamp, the picking ray and every building's foundation read — does
+      // NOT include this invented relief, so a hut placed against it would
+      // sink into or float over a hillside the patch geometry made up after
+      // the fact. Inside a settlement's built area the invention stops.
+      if (towns.length) {
+        for (let i = 0; i < towns.length; i++) {
+          const t2 = towns[i];
+          const dx = Math.abs(tt.tx - t2.x), dxw = Math.min(dx, w.W - dx);
+          if (dxw * dxw + (tt.ty - t2.y) * (tt.ty - t2.y) < t2.r2) return 0;
+        }
+      }
       // rises with level (0 at 2, full by ~8) so the shape only appears once
       // the geometry is fine enough to carry it
       const lk = PD.clamp((level - 2) / 6, 0, 1);
@@ -248,6 +265,10 @@
       const d = (nz.fbm(t.tx * f * 0.01, t.ty * f * 0.01, 4) - 0.5) * 2 * amp;
       return PD.clamp(d, -cap, cap);
     };
+    // The renderer publishes the settlements each time one is founded or
+    // grows; patches rebuild through the ordinary invalidate path.
+    fn.setTowns = (list) => { towns = list || []; };
+    return fn;
   }
 
   // ---- shared grid -------------------------------------------------------

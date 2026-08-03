@@ -62,6 +62,44 @@
     return [cl * Math.sin(s.lon), Math.sin(s.dec), cl * Math.cos(s.lon)];
   }
 
+  // ---------- the surface, and everything that stands on it ----------
+  //
+  // Six different places used to lift things off the sphere by a constant —
+  // 0.010 to 0.029 Earth radii, which is 64 km to 185 km. Every one of them
+  // was chosen when the camera could not get closer than 1,593 km, where a
+  // hundred kilometres of float is invisible.
+  //
+  // The camera now stands at 80 m, and terrain reaches 12.4 km at ground
+  // exaggeration. So a unit sprite at 0.014 was 89 km up: SEVENTY-SEVEN
+  // KILOMETRES ABOVE THE SUMMIT OF EVEREST. Every person, label, ring and
+  // bolt the game drew on the surface was in the sky.
+  //
+  // There is one surface now and it is the one the quadtree builds, the
+  // camera clamps against and the picking ray refines against. `lift` is a
+  // real altitude in METRES above the ground, not a fraction of the planet.
+  function surfaceRadius(world, tx, ty, exag) {
+    if (!PD.LOD || !world || !world.elev) return 1;
+    const lon = (tx / world.W) * Math.PI * 2;
+    const lat = Math.PI / 2 - (ty / world.H) * Math.PI;
+    return PD.LOD.groundRadius(world, lon, lat, exag);
+  }
+  // The exaggeration a renderer is currently drawing with. FX and the minimap
+  // reach this without a renderer in hand, so it falls back to the camera's
+  // own altitude rather than assuming one.
+  // FX is bound to a world, not to a renderer, so it cannot ask the camera
+  // what exaggeration this frame is using. The frame publishes it.
+  let curExag = 1;
+  function exagOf(r) {
+    if (!PD.LOD) return 1;
+    if (r && r.cam) return PD.LOD.exagFor(r.cam.sDist != null ? r.cam.sDist : r.cam.dist);
+    return 1;
+  }
+  // Put a point ON the ground at (tx, ty), `liftM` metres above it.
+  function onSurface(world, tx, ty, out, liftM, exag) {
+    const rad = surfaceRadius(world, tx, ty, exag) + (liftM || 0) / R_EARTH_M;
+    return tileToSphere(world, tx, ty, out, rad - 1);
+  }
+
   // ---------- world <-> sphere mapping ----------
   // tile (x,y) -> unit sphere point. y=0 is the north pole row.
   function tileToSphere(world, x, y, out, lift) {
@@ -178,6 +216,47 @@ void main(){
   // the clouds and the explosions all get graded on the same curve.
   gl_FragColor = vec4(max(col, 0.0), 1.0);
 }`;
+  // ---------- buildings ----------
+  // One box mesh, drawn once per building. Eye-relative like the terrain
+  // patches, for the same reason: at 80 m altitude a float32 position near
+  // radius 1 quantises to 0.38 m, and a six-metre hut cannot be built out of
+  // parts that jitter by a third of a metre.
+  //
+  // The instance carries its own local frame — east/north/up at its point on
+  // the globe — because a building three kilometres away is standing on
+  // measurably different "up" than you are.
+  const VS_BLDG = `
+attribute vec3 aPos; attribute vec3 aNorm;
+attribute vec3 iOff;      // building origin, relative to the eye
+attribute vec3 iUp;       // local up at that point on the globe
+attribute vec3 iEast;     // local east, already rotated by the building's yaw
+attribute vec3 iSize;     // width, depth, height in world units
+attribute vec3 iCol;
+uniform mat4 uMVP;
+varying vec3 vN; varying vec3 vCol; varying float vUpDot;
+void main(){
+  vec3 north = cross(iUp, iEast);
+  // the unit box is centred in x/z and sits ON the ground in y
+  vec3 local = iEast * (aPos.x * iSize.x)
+             + north * (aPos.z * iSize.y)
+             + iUp   * ((aPos.y + 0.5) * iSize.z);
+  vN = normalize(iEast * aNorm.x + north * aNorm.z + iUp * aNorm.y);
+  vCol = iCol;
+  vUpDot = aNorm.y;
+  gl_Position = uMVP * vec4(local + iOff, 1.0);
+}`;
+  const FS_BLDG = `
+precision highp float;
+varying vec3 vN; varying vec3 vCol; varying float vUpDot;
+uniform vec3 uSun; uniform vec3 uAtmo;
+void main(){
+  float diff = max(dot(vN, uSun), 0.0);
+  // roofs catch the sky, walls catch the ground bounce
+  vec3 sky = mix(vec3(0.10, 0.11, 0.15), uAtmo * 0.55, max(vUpDot, 0.0));
+  vec3 col = vCol * (0.20 + 1.0 * diff) + vCol * sky;
+  gl_FragColor = vec4(max(col, 0.0), 1.0);
+}`;
+
   // ---------- postprocess: the whole frame, graded as one image ----------
   // Everything above used to write straight to the backbuffer, and only the
   // planet was tonemapped (inside its own shader), so clouds, atmosphere,
@@ -453,7 +532,7 @@ void main(){
     // tile coords + tile-space velocity -> 3D pos/vel on the sphere
     function emit(x, y, vx, vy, life, color, size, grav) {
       if (!world || parts.length >= MAX) return;
-      tileToSphere(world, x, y, tmp, 0.012);
+      onSurface(world, x, y, tmp, 20, curExag);
       const p = [tmp[0], tmp[1], tmp[2]];
       // tangent basis: east & south
       const lon = (x / world.W) * Math.PI * 2;
@@ -492,7 +571,7 @@ void main(){
       // an incoming orbital streak toward (x,y)
       streak(x, y) {
         if (!world) return;
-        const target = tileToSphere(world, x, y, [0, 0, 0], 0.01);
+        const target = onSurface(world, x, y, [0, 0, 0], 0, curExag);
         const dir = [Math.random() - 0.5, Math.random() * 0.6 + 0.4, Math.random() - 0.5];
         const dl = Math.hypot(dir[0], dir[1], dir[2]);
         for (let i = 0; i < 16; i++) {
@@ -948,6 +1027,60 @@ void main(){
     r.bufQuad = glBuf(gl, new Float32Array([-1, -1, 3, -1, -1, 3]));
 
     initPost(r);
+
+    // ---- buildings ----
+    // Instancing is NOT guaranteed. It is core on WebGL2 and an optional
+    // extension on WebGL1, so the capability is probed once and recorded —
+    // never assumed, and never allowed to fail silently the way a missing
+    // vertex texture unit would (that renders a smooth sphere and raises
+    // nothing). Where it is absent the draw path falls back to a smaller
+    // number of buildings drawn one at a time, which is worse but is not
+    // nothing.
+    r.progBldg = compile(gl, VS_BLDG, FS_BLDG);
+    r.inst = null;
+    if (r.gl2) {
+      r.inst = {
+        divisor: (loc, d) => gl.vertexAttribDivisor(loc, d),
+        draw: (mode, count, type, offset, n) => gl.drawElementsInstanced(mode, count, type, offset, n)
+      };
+    } else {
+      const ext = gl.getExtension('ANGLE_instanced_arrays');
+      if (ext) {
+        r.inst = {
+          divisor: (loc, d) => ext.vertexAttribDivisorANGLE(loc, d),
+          draw: (mode, count, type, offset, n) => ext.drawElementsInstancedANGLE(mode, count, type, offset, n)
+        };
+      }
+    }
+    {
+      // a unit box, centred in x/z, resting on y = -0.5 so the shader can
+      // lift it by half its height and have it stand on the ground
+      const P = [], N = [], I = [];
+      const faces = [
+        [[0, 0, 1], [[-.5, -.5, .5], [.5, -.5, .5], [.5, .5, .5], [-.5, .5, .5]]],
+        [[0, 0, -1], [[.5, -.5, -.5], [-.5, -.5, -.5], [-.5, .5, -.5], [.5, .5, -.5]]],
+        [[1, 0, 0], [[.5, -.5, .5], [.5, -.5, -.5], [.5, .5, -.5], [.5, .5, .5]]],
+        [[-1, 0, 0], [[-.5, -.5, -.5], [-.5, -.5, .5], [-.5, .5, .5], [-.5, .5, -.5]]],
+        [[0, 1, 0], [[-.5, .5, .5], [.5, .5, .5], [.5, .5, -.5], [-.5, .5, -.5]]],
+        [[0, -1, 0], [[-.5, -.5, -.5], [.5, -.5, -.5], [.5, -.5, .5], [-.5, -.5, .5]]]
+      ];
+      for (const [nrm, quad] of faces) {
+        const b = P.length / 3;
+        for (const v of quad) { P.push(v[0], v[1], v[2]); N.push(nrm[0], nrm[1], nrm[2]); }
+        I.push(b, b + 1, b + 2, b, b + 2, b + 3);
+      }
+      r.bldgPos = glBuf(gl, new Float32Array(P));
+      r.bldgNrm = glBuf(gl, new Float32Array(N));
+      r.bldgIdx = gl.createBuffer();
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, r.bldgIdx);
+      gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(I), gl.STATIC_DRAW);
+      r.bldgNIdx = I.length;
+      // instance streams, grown on demand
+      r.bldgCap = 0;
+      r.bBufOff = gl.createBuffer(); r.bBufUp = gl.createBuffer();
+      r.bBufEast = gl.createBuffer(); r.bBufSize = gl.createBuffer();
+      r.bBufCol = gl.createBuffer();
+    }
 
     // ---- the quadtree's shared grid ----
     // One (u,v) array and one index buffer for every patch that will ever
@@ -1501,7 +1634,7 @@ void main(){
 
   function worldToScreen(r, wx, wy) {
     if (r.headless || !r._vp) return null;
-    const p = tileToSphere(r.world, wx, wy, [0, 0, 0], 0.02);
+    const p = onSurface(r.world, wx, wy, [0, 0, 0], 40, exagOf(r));
     // cull back hemisphere
     const eye = camEye(r.cam);
     if (p[0] * eye[0] + p[1] * eye[1] + p[2] * eye[2] < 1.0) return null;
@@ -1630,6 +1763,7 @@ void main(){
       PD.Prof.n('lod.culled', r.lod.stats.culled);
       PD.Prof.n('lod.exag', exag);
     }
+    curExag = exag;          // FX and the minimap read this
 
     // The sun is where the sun is. This used to be `(sim.tick % 480) / 480`
     // — one revolution every 480 steps, which was four of the years the HUD
@@ -1716,6 +1850,11 @@ void main(){
     gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D, r.texNorm); gl.uniform1i(pp.u.uNorm, 2);
     gl.activeTexture(gl.TEXTURE3); gl.bindTexture(gl.TEXTURE_2D, r.texClim); gl.uniform1i(pp.u.uClim, 3);
     if (patches) drawPatches(r, pp, patches, eye);
+
+    // Settlements, as buildings. Opaque and depth-tested, so it goes with the
+    // terrain rather than with the transparent passes below. Returns straight
+    // away above ~55 km, which is almost always.
+    drawBuildings(r, sim, eye, exag, vpEye, sun, atmo);
 
     // units as living embers on the surface
     drawUnits(r, sim, vp);
@@ -1869,6 +2008,140 @@ void main(){
     PD.Prof.n('lod.resident', tab.size);
   }
 
+  // ---------- settlements, as buildings ----------
+  // At true scale there is usually nothing to draw: a 500 m village is under
+  // a pixel from 50 km up, so this returns immediately at almost every
+  // altitude the game is normally played at. That is the design, not an
+  // optimisation — and it is why flyTo had to become live in the same change.
+  const BLDG_COLS = [
+    [0.62, 0.50, 0.38], [0.70, 0.60, 0.48], [0.55, 0.44, 0.34],
+    [0.82, 0.76, 0.62], [0.58, 0.56, 0.54], [0.44, 0.42, 0.26]
+  ];
+  function drawBuildings(r, sim, eye, exag, vpEye, sun, atmo) {
+    const gl = r.gl;
+    if (!PD.Buildings || !r.progBldg || !sim || !sim.villages) return 0;
+    const cam = r.cam, world = r.world;
+    const altM = Math.max(0, ((cam.sDist != null ? cam.sDist : cam.dist) - 1) * R_EARTH_M);
+    if (altM > PD.Buildings.VISIBLE_ALT_M) { PD.Prof.n('bldg.instances', 0); return 0; }
+
+    PD.Prof.begin('bldg');
+    // Publish where the towns are so the quadtree stops inventing hillsides
+    // under them. Only when the set actually changes — this rebuilds patches.
+    {
+      let sig = '';
+      for (const v of sim.villages) if (v.pop > 0) sig += v.id + ':' + v.level + ',';
+      if (sig !== r._townSig) {
+        r._townSig = sig;
+        const towns = [];
+        for (const v of sim.villages) {
+          if (v.pop <= 0) continue;
+          const rt = PD.Buildings.builtRadiusTiles(v, world) * 1.35;
+          towns.push({ x: v.x, y: v.y, r2: rt * rt });
+        }
+        if (r.lod && r.lod.detail && r.lod.detail.setTowns) {
+          r.lod.detail.setTowns(towns);
+          PD.LOD.invalidate(r.lod);
+        }
+      }
+    }
+    const ct = centerTile(r);
+    // an unaccelerated fallback draws far fewer, because each one is a call
+    const budget = r.inst ? PD.Buildings.MAX_INSTANCES : 220;
+    const towns = PD.Buildings.visible(sim, world, ct.x, ct.y, altM, budget);
+
+    let n = 0;
+    const need = budget;
+    if (!r._bOff || r._bOff.length < need * 3) {
+      r._bOff = new Float32Array(need * 3); r._bUp = new Float32Array(need * 3);
+      r._bEast = new Float32Array(need * 3); r._bSize = new Float32Array(need * 3);
+      r._bCol = new Float32Array(need * 3);
+    }
+    const P = [0, 0, 0];
+    for (const v of towns) {
+      const lay = PD.Buildings.layout(v, world, { max: need - n });
+      for (const b of lay.items) {
+        if (n >= need) break;
+        // stand it on the ground, using the same surface everything else uses
+        onSurface(world, b.x, b.y, P, 0, exag);
+        r._bOff[n * 3] = P[0] - eye[0];
+        r._bOff[n * 3 + 1] = P[1] - eye[1];
+        r._bOff[n * 3 + 2] = P[2] - eye[2];
+        // local frame at this point on the globe
+        const L = Math.hypot(P[0], P[1], P[2]) || 1;
+        const ux = P[0] / L, uy = P[1] / L, uz = P[2] / L;
+        r._bUp[n * 3] = ux; r._bUp[n * 3 + 1] = uy; r._bUp[n * 3 + 2] = uz;
+        // east, then spun by the building's own yaw
+        let ex = uz, ey = 0, ez = -ux;
+        const el = Math.hypot(ex, ey, ez) || 1; ex /= el; ez /= el;
+        // north = up x east
+        const nx = uy * ez - uz * ey, ny = uz * ex - ux * ez, nz = ux * ey - uy * ex;
+        const c = Math.cos(b.rot), s = Math.sin(b.rot);
+        r._bEast[n * 3] = ex * c + nx * s;
+        r._bEast[n * 3 + 1] = ey * c + ny * s;
+        r._bEast[n * 3 + 2] = ez * c + nz * s;
+        // metres -> world units (the sphere is one Earth radius)
+        r._bSize[n * 3] = b.w / R_EARTH_M;
+        r._bSize[n * 3 + 1] = b.d / R_EARTH_M;
+        r._bSize[n * 3 + 2] = b.h / R_EARTH_M;
+        const col = BLDG_COLS[b.kind] || BLDG_COLS[0];
+        r._bCol[n * 3] = col[0]; r._bCol[n * 3 + 1] = col[1]; r._bCol[n * 3 + 2] = col[2];
+        n++;
+      }
+      if (n >= need) break;
+    }
+    PD.Prof.n('bldg.instances', n);
+    PD.Prof.n('bldg.towns', towns.length);
+    if (n === 0) { PD.Prof.end(); return 0; }
+
+    const pb = r.progBldg;
+    gl.useProgram(pb.p);
+    gl.uniformMatrix4fv(pb.u.uMVP, false, vpEye);
+    gl.uniform3fv(pb.u.uSun, sun);
+    gl.uniform3fv(pb.u.uAtmo, atmo);
+    bindAttr(gl, pb.a.aPos, r.bldgPos, 3);
+    bindAttr(gl, pb.a.aNorm, r.bldgNrm, 3);
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, r.bldgIdx);
+
+    const streams = [
+      [pb.a.iOff, r.bBufOff, r._bOff], [pb.a.iUp, r.bBufUp, r._bUp],
+      [pb.a.iEast, r.bBufEast, r._bEast], [pb.a.iSize, r.bBufSize, r._bSize],
+      [pb.a.iCol, r.bBufCol, r._bCol]
+    ];
+    let tris = 0;
+    if (r.inst) {
+      for (const [loc, buf, arr] of streams) {
+        if (loc == null || loc < 0) continue;
+        gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+        gl.bufferData(gl.ARRAY_BUFFER, arr.subarray(0, n * 3), gl.DYNAMIC_DRAW);
+        gl.enableVertexAttribArray(loc);
+        gl.vertexAttribPointer(loc, 3, gl.FLOAT, false, 0, 0);
+        r.inst.divisor(loc, 1);
+      }
+      r.inst.draw(gl.TRIANGLES, r.bldgNIdx, gl.UNSIGNED_SHORT, 0, n);
+      tris = (r.bldgNIdx / 3) * n;
+      // The divisors are GLOBAL attribute state. Leaving them at 1 makes the
+      // NEXT program that reuses those attribute slots read one value for the
+      // whole draw — the terrain would collapse to a single vertex. Reset.
+      for (const [loc] of streams) if (loc != null && loc >= 0) r.inst.divisor(loc, 0);
+    } else {
+      // No instancing anywhere on this device. Draw a reduced set the slow
+      // way rather than drawing nothing at all.
+      for (let i = 0; i < n; i++) {
+        for (const [loc, , arr] of streams) {
+          if (loc == null || loc < 0) continue;
+          gl.disableVertexAttribArray(loc);
+          gl.vertexAttrib3f(loc, arr[i * 3], arr[i * 3 + 1], arr[i * 3 + 2]);
+        }
+        gl.drawElements(gl.TRIANGLES, r.bldgNIdx, gl.UNSIGNED_SHORT, 0);
+      }
+      tris = (r.bldgNIdx / 3) * n;
+    }
+    PD.Prof.add('gl.tris', tris);
+    PD.Prof.add('gl.draws', r.inst ? 1 : n);
+    PD.Prof.end();
+    return n;
+  }
+
   function bindAttr(gl, loc, buf, size) {
     if (loc == null || loc < 0) return;
     gl.bindBuffer(gl.ARRAY_BUFFER, buf);
@@ -1900,12 +2173,15 @@ void main(){
     // pixels, silently clamped by the driver so every unit becomes the same
     // giant square. Size against ALTITUDE and clamp it ourselves.
     const zoomSize = PD.clamp(0.9 / Math.max(1e-6, r.cam.dist - 1), 8, 900);
+    // hoisted: every unit stands on the same terrain, at the same vertical
+    // exaggeration the patches under them are being drawn with
+    const uExag = exagOf(r);
     for (let i = 0; i < units.length && n < cap; i++) {
       const u = units[i];
       if (u.dead) continue;
       const R = PD.Sim.RACES[u.race];
       if (!R) continue;
-      tileToSphere(r.world, u.x, u.y, _upos, 0.014 + (R.flies ? 0.015 : 0));
+      onSurface(r.world, u.x, u.y, _upos, R.flies ? 120 : 1, uExag);
       r._uP[n * 3] = _upos[0]; r._uP[n * 3 + 1] = _upos[1]; r._uP[n * 3 + 2] = _upos[2];
       // A paragon wears their people's garb. col2 was read by nothing in the
       // shipping renderer, so the Genesis Lab's Garb picker had no effect at
@@ -1988,7 +2264,7 @@ void main(){
     for (const ring of FX.rings) {
       const alpha = ring.life / ring.max2;
       const segs = 40;
-      const c = tileToSphere(r.world, ring.x, ring.y, _rtmp, 0.015);
+      const c = onSurface(r.world, ring.x, ring.y, _rtmp, 15, exagOf(r));
       const cl = Math.hypot(c[0], c[1], c[2]);
       const nx = c[0] / cl, ny = c[1] / cl, nz = c[2] / cl;
       // tangent basis
@@ -2011,7 +2287,7 @@ void main(){
     for (const b of FX.bolts) {
       const alpha = b.life / b.max;
       const t = b.pts[0];
-      const surf = tileToSphere(r.world, t[0], t[1], [0, 0, 0], 0.01);
+      const surf = onSurface(r.world, t[0], t[1], [0, 0, 0], 0, exagOf(r));
       const top = [surf[0] * 1.8, surf[1] * 1.8, surf[2] * 1.8];
       let prev = top;
       const segs = 7;
