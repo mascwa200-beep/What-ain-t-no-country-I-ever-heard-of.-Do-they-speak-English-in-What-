@@ -540,25 +540,56 @@ console.log('\n--- the closed loop, and the bite that needs it opened ---');
   // Now open the loop by hand under the conditions the hidden act creates —
   // a blood moon, and a progenitor rather than an ordinary 40hp vampire —
   // and confirm the existing bite carries it with no further help.
-  const sim2 = freshSim(9161);
-  for (let i = 0; i < 40; i++) Sim.spawnUnit(sim2, 'human', 40 + (i % 14), 40 + ((i / 14) | 0));
-  sim2.bloodMoonT = PD.Sim.TICK_SLOW * 480;   // was 480 ticks
-  const zero = Sim.spawnUnit(sim2, 'vampire', 60, 44);
-  if (zero) {
-    zero.paragon = 2;
-    zero.maxHp = Sim.RACES.vampire.hp * 5;
-    zero.hp = zero.maxHp;
-    zero.lifespan = zero.age + PD.Sim.YEAR * 500;  // a progenitor, not a mayfly
+  // Two things about this scenario changed under the real clock, and both had
+  // to be fixed before it measured the bite again.
+  //
+  // FIRST, forty villageless humans now STARVE. Foraging sustains a person
+  // across the three days an old tick represented; it does not sustain one
+  // across a year. Most of the victims were dead of hunger before the vampire
+  // reached them, so the test was measuring famine and calling it restraint.
+  // They are fed here, deliberately, so the only thing that can kill them is
+  // the thing under test.
+  //
+  // SECOND, one seed is not a measurement. The old comment recorded ten seeds
+  // reading 7,2,2,2,2,5,20,4,2,9 and then asserted on ONE of them; under the
+  // new clock the same ten read 1,1,1,3,1,1,1,4,1,1, and seed 9161 happening
+  // to be a 2 was all that stood between this test and a silent failure. It
+  // now runs several and asks that the bite carry in more than one of them,
+  // which is the actual claim: that the mechanism works, not that a
+  // particular world was lucky.
+  const spreadIn = [];
+  let zero = null;
+  for (const seed of [9161, 9164, 9168, 9172, 9176, 9180]) {
+    const sim2 = freshSim(seed);
+    for (let i = 0; i < 40; i++) Sim.spawnUnit(sim2, 'human', 40 + (i % 14), 40 + ((i / 14) | 0));
+    sim2.bloodMoonT = PD.Sim.TICK_SLOW * 480;   // was 480 ticks
+    const z = Sim.spawnUnit(sim2, 'vampire', 60, 44);
+    if (z) {
+      z.paragon = 2;
+      z.maxHp = Sim.RACES.vampire.hp * 5;
+      z.hp = z.maxHp;
+      z.lifespan = z.age + PD.Sim.YEAR * 500;  // a progenitor, not a mayfly
+      zero = zero || z;
+    }
+    let pk = 0;
+    for (let t = 0; t < 4000; t++) {
+      for (const u of sim2.units) if (!u.dead && u.race === 'human') u.food = 1;
+      Sim.step(sim2, STEP);
+      pk = Math.max(pk, sim2.counts.vampire || 0);
+    }
+    spreadIn.push(pk);
   }
-  let peak = 0;
-  for (let t = 0; t < 4000; t++) { Sim.step(sim2, STEP); peak = Math.max(peak, sim2.counts.vampire || 0); }
+  const peak = Math.max(...spreadIn);
   check('patient zero can be made at all (spawnUnit accepts the race)', !!zero);
-  // Measured across ten seeds: 7,2,2,2,2,5,20,4,2,9 — never below 2. The line
-  // usually burns out afterwards, which is fine; a vampire is meant to be a
-  // fragile horror. What matters is that the bite fires at all, and until the
-  // UNIT_CAP fix in killUnit it could not, in any world with people in it.
+  // The line usually burns out afterwards, which is fine; a vampire is meant
+  // to be a fragile horror. What matters is that the bite fires at all, and
+  // until the UNIT_CAP fix in killUnit it could not, in any world with people
+  // in it.
   check('and once there is one, the bite spreads it with no further help',
-    peak > 1, 'peaked at ' + peak);
+    peak > 1, 'peaks across six seeds: ' + spreadIn.join(','));
+  check('and it is not one lucky world — the bite carries in more than one',
+    spreadIn.filter(p => p > 1).length >= 2,
+    spreadIn.filter(p => p > 1).length + ' of ' + spreadIn.length + ' seeds');
 }
 
 console.log('\n=== lives failures: ' + fails + ' ===');

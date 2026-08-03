@@ -126,10 +126,21 @@ console.log('\n--- a life is a life ---');
     // inside the run and the test read a clock fault that was a funeral
     p.lifespan = YEAR * 1e6;
     const label = step === TICK_SLOW ? '3 days' : step === MONTH ? 'a month' : 'half a year';
-    for (let i = 0; i < 200; i++) { p.food = 1; p.hp = p.maxHp; Sim.step(sm, step); }
+    // Stop at death rather than through it. Ambient wildlife now spawns on
+    // the calendar rather than on the step count, which is a fix — and it
+    // means a lone unfed human in the wilderness can be eaten. Stepping past
+    // that reads the gap between a corpse's age and a running clock as a
+    // clock fault, which is the third time in this file that a death has been
+    // mistaken for one.
+    let steps = 0;
+    for (let i = 0; i < 200 && !p.dead; i++) { p.food = 1; p.hp = p.maxHp; Sim.step(sm, step); steps++; }
+    // the guard is on the SPAN simulated, not the step count — fifteen
+    // half-year steps is seven years of life and plenty to measure, while
+    // fifteen three-day steps would be six weeks and nearly vacuous
     check('a person ages exactly as fast as the calendar, stepped by ' + label,
-      !p.dead && Math.abs(p.age - sm.clock) < 1e-6,
-      (p.age / YEAR).toFixed(2) + ' yr old after ' + (sm.clock / YEAR).toFixed(2) + ' yr');
+      sm.clock > YEAR && Math.abs(p.age - sm.clock) < 1e-6,
+      (p.age / YEAR).toFixed(2) + ' yr old after ' + (sm.clock / YEAR).toFixed(2) +
+      ' yr (' + steps + ' steps' + (p.dead ? ', then eaten' : '') + ')');
   }
   // and old age is what finally does it
   {
@@ -216,17 +227,19 @@ console.log('\n--- the same century, whatever the step size ---');
   // six-month steps over the same century: coarse steps found more, smaller
   // towns while the total population lands within 9%.
   //
-  // Colonisation itself was the first suspect and is fixed — it was a
-  // cooldown, which can only fire once per step and so runs faster at coarse
-  // steps; as a hazard it is step-independent, and that took the spread from
-  // 131% to 104%. What remains is somewhere in the conditions that gate it
-  // (a settlement's population and stores), and chasing it properly is worth
-  // its own change rather than a guess bolted onto this one.
+  // Four cadence bugs have been found and fixed chasing it — colonisation's
+  // cooldown, the building cycle, the grace period before an emptied village
+  // is razed, and the two ambient cadences below — taking the spread from
+  // 131% to 96%. What remains is not a fifth rate bug but a FEEDBACK LOOP:
+  // coarse steps end up with smaller settlements, small settlements meet the
+  // colonisation conditions more readily than large ones, and so they split
+  // instead of growing. Breaking that needs a change to how carrying capacity
+  // and colonisation relate, which is a design question and not a units one.
   //
   // It is asserted at the level it actually achieves so a REGRESSION still
   // fails, and it is named here so nobody reads the suite as claiming more
   // than it proves.
-  agree('the number of settlements', 1.20, 'the number of settlements');
+  agree('the number of settlements', 1.00, 'the number of settlements');
 
   // A world that is merely EMPTY would satisfy every tolerance above, so the
   // runs have to have actually done something first.

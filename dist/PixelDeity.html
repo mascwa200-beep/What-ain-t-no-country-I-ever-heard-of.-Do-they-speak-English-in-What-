@@ -2795,6 +2795,11 @@ body{
   const GESTATION = MONTH * 9;
   // Seconds between blows in a fight. 18 ticks of the old clock was 3 s.
   const ATTACK_CD = 3;
+  // How many rounds of building a single step may catch up on. A step of a
+  // year has earned twenty-three of them; letting it run all twenty-three is
+  // correct and letting it run unbounded is not, because the cost is paid on
+  // one frame.
+  const BUILD_CYCLE_CAP = 24;
 
   // Adulthood as a fraction of the lifespan, floored so nothing short-lived
   // is born an adult and capped so nothing long-lived spends four centuries
@@ -2898,7 +2903,7 @@ body{
       col: R.col2, prosperity: 0.6, aggro: R.aggr,
       buildTimer: 0, colonizeCd: TICK_SLOW * (400 + (sim.rng() * 300 | 0)),
       temples: 0, houses: 0, age: 0, rival: -1,
-      founded: sim.tick
+      founded: sim.clock
     };
     sim.villages.push(v);
     // town center
@@ -3495,7 +3500,21 @@ body{
     // every few weeks, not every sixteenth step
     v.buildTimer -= dt;
     if (v.buildTimer <= 0) {
-      v.buildTimer = TICK_SLOW * 16;
+      // A gate of the form `if (timer <= 0) { do(); timer = T; }` can only
+      // fire ONCE PER STEP, so above dt = T it stops tracking the calendar
+      // and starts tracking the frame rate. Six months of world time bought
+      // one round of building instead of the three and a half it had earned,
+      // which is why coarse steps produced a map of small towns: less
+      // building means a smaller radius, fewer farms, a lower carrying
+      // capacity, and settlements that colonise rather than grow.
+      //
+      // Running the body as many times as the elapsed time actually paid for
+      // makes it step-independent. The cap is there so that a single enormous
+      // step cannot spend an unbounded amount of CPU building a city.
+      const BUILD_EVERY = TICK_SLOW * 16;
+      const cycles = Math.min(BUILD_CYCLE_CAP, 1 + Math.floor(-v.buildTimer / BUILD_EVERY));
+      v.buildTimer = BUILD_EVERY;
+      for (let cy = 0; cy < cycles; cy++) {
       // grow radius with pop
       const wantRad = Math.min(15, 3 + Math.floor(v.pop / 3));
       if (v.radius < wantRad) v.radius++;
@@ -3518,6 +3537,7 @@ body{
           world.structHp[i] = 100; W.markTile(world, i); world.dirtyMini = true;
           v.food -= 1.5;
         }
+      }
       }
     }
 
@@ -3743,7 +3763,10 @@ body{
     recount(sim);
     for (let i = sim.villages.length - 1; i >= 0; i--) {
       const v = sim.villages[i];
-      if (v.pop === 0 && v.age > 60) {
+      // 60 was 60 TICKS — half a year of grace before an emptied settlement
+      // became a ruin. As seconds it is a minute, so any village that ever
+      // has a moment with nobody in it is razed on the spot.
+      if (v.pop === 0 && v.age > TICK_SLOW * 60) {
         // village falls -> ruins
         ruinVillage(sim, v);
         logEvent(sim, `${v.name} has fallen to ruin.`, 'fall');
@@ -3754,11 +3777,21 @@ body{
     // world fire spread (every other tick)
     if (sim.tick % 2 === 0) W.stepFire(sim.world, sim.rng);
 
-    // ambient wildlife spawns to keep ecology alive
-    if (sim.tick % 120 === 0) ambientSpawns(sim);
+    // ambient wildlife spawns to keep ecology alive — on the calendar, for
+    // the same reason: an ecology that only replenishes itself when the dial
+    // is at Real Time is an ecology that empties out the moment you use the
+    // dial for what it is for.
+    sim.wildCd = (sim.wildCd || 0) - dt;
+    if (sim.wildCd <= 0) { sim.wildCd = TICK_SLOW * 120; ambientSpawns(sim); }
 
     // emergent civilization: clusters of wild folk settle down
-    if (sim.tick % 90 === 0) emergentFounding(sim);
+    // Another step cadence, and a worse one than it looks: at three-day steps
+    // wild folk got the chance to settle every 274 days, and at six-month
+    // steps twice in a century. "Clusters of wild folk settle down" simply did
+    // not happen if you moved the dial, which is exactly when you would be
+    // watching for it.
+    sim.foundCd = (sim.foundCd || 0) - dt;
+    if (sim.foundCd <= 0) { sim.foundCd = TICK_SLOW * 90; emergentFounding(sim); }
 
     // society layer: nations, religion, tech, prayers, history, heroes
     if (PD.Society) PD.Society.step(sim);
