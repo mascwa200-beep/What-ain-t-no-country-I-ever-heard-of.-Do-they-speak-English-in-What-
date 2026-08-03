@@ -574,6 +574,22 @@ const PROBE = `
         return 'a 55-character unbroken seed';
       });
 
+      // The record is 184 rows inside a scroller. It is the longest list the
+      // game has, and it is new — so it gets measured at every viewport rather
+      // than assumed to behave like the panels that were already there.
+      await state('record-open', async function () {
+        $('#tab-history').click();
+        await settle(30);
+        var b = $('#record-open');
+        if (!b) throw new Error('the record has no way in');
+        b.click();
+        await settle(40);
+        var rows = document.querySelectorAll('.rec-row');
+        if (rows.length < 100) throw new Error('only ' + rows.length + ' rows');
+        return rows.length + ' dated rows + ' +
+          document.querySelectorAll('.rec-proph').length + ' foretold';
+      });
+
       // The imagery chip is the acknowledgement NASA asks for, so it has to be
       // legible rather than merely present — and it lands in the top HUD next
       // to the sabbath and omniscience chips, which is the row most likely to

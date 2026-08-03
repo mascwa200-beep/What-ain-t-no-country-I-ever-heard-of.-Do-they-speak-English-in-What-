@@ -2508,11 +2508,56 @@
   }
 
   // ---- History panel ----
+  // THE RECORD, READABLE. 184 dated events that only surface if the clock
+  // happens to cross their year are less discoverable than the 58 that came
+  // before, not more — this project has already fixed exactly that fault once,
+  // for nine races nobody could reach. So the record is a list you can read,
+  // and every line is a place you can go.
+  let recordOpen = false;
+  function renderRecordList() {
+    const H = PD.History;
+    if (!H) return '';
+    if (!recordOpen) {
+      return '<div class="panel-subtitle">The record</div>' +
+        '<button class="jump-btn" id="record-open">Read the record ' +
+        '<small>' + (H.SCRIPTURE.length + H.RECORD.length) + ' dated events, and ' +
+        H.prophecies().length + ' foretold</small></button>';
+    }
+    const all = H.eventsBetween(H.FIRST_YEAR, H.LAST_YEAR);
+    const rows = all.map((e) => {
+      const mark = e.source === 'scripture' ? '\u271d' : '\u25cb';
+      return '<button class="jump-btn rec-row" data-y="' + e.year + '">' +
+        mark + ' ' + esc(e.name) +
+        '<small>' + (e.circa ? 'c. ' : '') + H.label(e.year) +
+        (e.ref ? ' \u00b7 ' + esc(e.ref) : '') + '</small></button>';
+    }).join('');
+    // Prophecy has no date, so it cannot sit in the list by year. It gets its
+    // own foot, with the reason it has no date attached to it.
+    const proph = H.prophecies().map((e) =>
+      '<div class="rec-proph">\u271d ' + esc(e.name) +
+      '<small>' + esc(e.ref) + '</small></div>').join('');
+    return '<div class="panel-subtitle">The record</div>' +
+      '<button class="jump-btn" id="record-close">Close the record</button>' +
+      '<div class="jump-list">' + rows + '</div>' +
+      '<div class="panel-subtitle">Foretold</div>' +
+      '<div class="rec-proph-note">No year is given for these, and none is ' +
+      'invented here: <i>of that day and hour knoweth no man</i> ' +
+      '(Matthew 24:36). They come to pass only by your own hand.</div>' +
+      proph;
+  }
+  function esc(t) {
+    return String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
   function renderHistory() {
     const el = $('#history-list');
     const soc = G.sim.soc;
-    if (!soc || !soc.history.length) { el.innerHTML = '<div class="empty">History is still unwritten.</div>'; return; }
-    el.innerHTML = soc.history.slice(0, 60).map(h =>
+    const rec = renderRecordList();
+    if (!soc || !soc.history.length) {
+      el.innerHTML = rec + '<div class="empty">History is still unwritten.</div>';
+      return;
+    }
+    el.innerHTML = rec + soc.history.slice(0, 60).map(h =>
       `<div class="hist-line hist-${h.kind}"><span class="hist-year">Y${Math.floor(h.t / Sim.YEAR)}</span> ${h.text}</div>`).join('');
     // nations summary
     const ns = $('#nations-list');
@@ -2864,6 +2909,13 @@
         if (PD.Afterlife.judgeSoul(soul, 'condemn')) { flashToast(soul + ' descends. Harsh.'); Audio8.sfx('plague'); }
       }
       renderSouls(true);
+    });
+
+    $('#panel-history').addEventListener('click', (e) => {
+      if (e.target.closest('#record-open')) { recordOpen = true; renderHistory(); return; }
+      if (e.target.closest('#record-close')) { recordOpen = false; renderHistory(); return; }
+      const row = e.target.closest('.rec-row');
+      if (row) travelToYear(parseInt(row.dataset.y, 10));
     });
 
     $('#panel-time').addEventListener('click', (e) => {

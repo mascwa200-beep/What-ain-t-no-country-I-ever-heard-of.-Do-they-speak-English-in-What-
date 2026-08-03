@@ -330,6 +330,97 @@ console.log('\n--- two records, never merged ---');
     a + ' + ' + b + ' = ' + both);
 }
 
+// ---------------------------------------------------------------------------
+console.log('\n--- the record, unabridged ---');
+{
+  const s = H.SCRIPTURE, r = H.RECORD;
+  const books = [...new Set(s.map((e) => H.bookOf(e.ref)))].filter(Boolean);
+  check('the record spans the Bible rather than a corner of it',
+    books.length >= 30, books.length + ' of 66 books cited');
+  check('and it is not all Genesis',
+    s.filter((e) => H.bookOf(e.ref) === 'Genesis').length < s.length * 0.25,
+    s.filter((e) => H.bookOf(e.ref) === 'Genesis').length + ' of ' + s.length);
+  check('the secular record grew with it, so this is not scripture with footnotes',
+    r.length >= 40, r.length + ' entries');
+
+  // EVERY CITATION NAMES A REAL BOOK. In a record this size, written out by
+  // hand, a mistyped or invented reference is the likeliest defect there is —
+  // and it is the one a reader would take entirely at face value.
+  const wrong = s.filter((e) => !H.citesRealBook(e.ref));
+  check('every citation names a real book of the King James Bible',
+    wrong.length === 0, wrong.length ? wrong.map((e) => e.ref).join(', ') : 'all 66 known');
+  check('and the book parser handles the awkward ones',
+    H.bookOf('1 Kings 6:1') === '1 Kings' &&
+    H.bookOf('Song of Solomon 2:1') === 'Song of Solomon' &&
+    H.bookOf('Exodus 7:1') === 'Exodus' &&
+    !H.citesRealBook('Hezekiah 3:1'));
+
+  // Every entry has to be reachable by the dial that is supposed to reach it.
+  const outside = s.concat(r).filter((e) => e.year < H.FIRST_YEAR || e.year > H.LAST_YEAR);
+  check('every event lies inside the range the dial can reach', outside.length === 0,
+    outside.length ? outside.map((e) => e.name).join(', ') : 'all reachable');
+
+  // A duplicated entry double-fires and double-counts.
+  const seen = new Set(), dupes = [];
+  for (const e of s.concat(r)) {
+    const k = e.name + '@' + e.year;
+    if (seen.has(k)) dupes.push(k); else seen.add(k);
+  }
+  check('no event appears twice', dupes.length === 0, dupes.join(', ') || 'none');
+}
+
+// ---------------------------------------------------------------------------
+console.log('\n--- of that day and hour knoweth no man ---');
+{
+  // Prophecy is IN the record and has no date. The year on a prophetic entry
+  // is where it sits in the book, not when it happens — and the Bible refuses
+  // to say when, so the game must not either.
+  const proph = H.prophecies();
+  check('the end of days is in the record', proph.length >= 5, proph.length + ' foretold');
+  check('and every one of them is scripture', proph.every((e) => e.source === 'scripture'));
+
+  // THE ASSERTION THAT MATTERS: no span of time can reach one, including a
+  // span containing the nominal year it is filed under.
+  let leaked = 0;
+  for (let y = -20000; y < 2300; y += 50) {
+    if (H.eventsBetween(y, y + 50).some((e) => e.prophecy)) leaked++;
+  }
+  check('no range of years ever returns a prophecy', leaked === 0, leaked + ' ranges leaked');
+  check('not even the range around the year it is filed under',
+    H.eventsBetween(90, 100).every((e) => !e.prophecy),
+    H.eventsBetween(90, 100).length + ' events in AD 90-100, none foretold');
+  check('but they can be asked for deliberately',
+    H.eventsBetween(-20000, 2300, { includeProphecy: true }).some((e) => e.prophecy));
+
+  // ...and it must still be possible to bring one to pass by hand.
+  const arm = proph.find((e) => e.power === 'armageddon');
+  check('the end can still be fulfilled by your own hand',
+    !!arm && !!H.matchAct('armageddon', arm.year, arm.lat, arm.lon),
+    arm ? arm.name + ' · ' + arm.ref : 'missing');
+  check('and every prophesied power is one the game really has',
+    proph.every((e) => !e.power || H.ENACTABLE.has(e.power)),
+    proph.map((e) => e.power).join(', '));
+}
+
+// ---------------------------------------------------------------------------
+console.log('\n--- how much happens at once ---');
+{
+  // enactRecord fires for EVERY event in a crossing, not just the six that get
+  // announced. Tripling the record tripled that, so it is measured rather than
+  // assumed still comfortable.
+  const DESTRUCTIVE = new Set(['flood', 'plagues', 'judgment', 'fire', 'quake', 'armageddon']);
+  let worst = 0, worstY = 0, worstD = 0;
+  for (let y = -20000; y < 2300; y += 100) {
+    const e = H.eventsBetween(y, y + 100).filter((x) => H.enactable(x));
+    if (e.length > worst) { worst = e.length; worstY = y; }
+    const d = e.filter((x) => DESTRUCTIVE.has(x.power)).length;
+    if (d > worstD) worstD = d;
+  }
+  check('a century crossing never fires an unreasonable number of powers',
+    worst <= 20, worst + ' at ' + H.label(worstY));
+  check('and the destructive ones stay a handful', worstD <= 8, worstD + ' at worst');
+}
+
 console.log('\n=== history failures: ' + fails + ' ===');
 console.log(fails === 0 ? 'HISTORY TEST PASSED' : 'HISTORY TEST FAILED');
 process.exit(fails === 0 ? 0 : 1);
