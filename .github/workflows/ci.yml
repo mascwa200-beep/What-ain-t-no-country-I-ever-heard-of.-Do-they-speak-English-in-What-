@@ -108,6 +108,15 @@ jobs:
       - name: buildings
         run: node tools/test-buildings.js .
 
+      # the past. The headline claim is that -125 m of sea level and -7 C turn
+      # the present Earth into the Ice Age Earth using only real elevation and
+      # the classifier the generated worlds already use — so the assertions are
+      # geography: Doggerland, Beringia, Sundaland and the Persian Gulf come up
+      # while the abyssal plains stay ocean. Also guards the two event records
+      # against being quietly merged into one confident history.
+      - name: history
+        run: node tools/test-history.js .
+
       # the planet is Earth: real places at the right altitude, orientation
       # traps, real cities on real land. This one guards a BAKED ASSET, so it
       # is the only thing standing between a bad rebuild of js/earthdata.js

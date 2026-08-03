@@ -1,5 +1,5 @@
 /* Pixel Deity service worker — cache-first so the god works with no signal. */
-const CACHE = 'pixeldeity-v25';
+const CACHE = 'pixeldeity-v26';
 const ASSETS = [
   './', './index.html', './styles.css', './manifest.webmanifest',
   './js/util.js', './js/codec.js', './js/world.js',
@@ -8,6 +8,9 @@ const ASSETS = [
   // offline instead of Earth, and said nothing about it. Precaching an asset
   // is not an optimisation when the app degrades silently without it.
   './js/earthdata.js', './js/earth.js',
+  // the past: historydata.js is FETCHED at build time, history.js is the
+  // records. Both must be here or the dial silently loses the past offline.
+  './js/historydata.js', './js/history.js',
   './js/sim.js',
   './js/render.js', './js/tiles.js', './js/lod.js', './js/buildings.js', './js/render3d.js',
   './js/society.js', './js/afterlife.js',

@@ -32,6 +32,22 @@
   }
 
   // Resolves to true once the real Earth is in memory, false if it cannot be.
+  // Hand the module an already-decoded height field.
+  //
+  // This exists because build() — the function the entire planet comes out of
+  // — could not be called from a test at all. tools/test-earth.js had to
+  // reimplement metresAt against the raw bytes to check anything, so the real
+  // build() was never once executed outside a browser, and the classifier it
+  // drives was only ever asserted through a copy of itself.
+  //
+  // It is also the seam a synchronous decode would use on a WebView with no
+  // DecompressionStream, where ready() currently just gives up.
+  function useGrid(bytes, w, h) {
+    if (!bytes || !w || !h || bytes.length !== w * h) return false;
+    grid = bytes; gridW = w; gridH = h;
+    return true;
+  }
+
   function ready() {
     if (grid) return Promise.resolve(true);
     if (pending) return pending;
@@ -138,8 +154,18 @@
   // ---- build ------------------------------------------------------------
   // Fill a world with the real Earth. The world can be any size; the height
   // field is resampled to it.
-  function build(w) {
+  // opts: { seaLevelM, tempOffsetC } — the whole of a date's physical record.
+  //
+  // THIS IS WHY THE ELEVATION IS STORED IN METRES rather than pre-classified.
+  // Every field below is derived from real height above PRESENT sea level, so
+  // moving the waterline is a subtraction and nothing else has to know. At
+  // -125 m Britain joins Europe, Beringia surfaces and the Persian Gulf is dry
+  // land — not because any of that is drawn anywhere, but because that is
+  // where the real seabed is.
+  function build(w, opts) {
     if (!grid) return false;
+    const seaM = (opts && opts.seaLevelM) || 0;
+    const dT = (opts && opts.tempOffsetC) || 0;
     const n = w.W * w.H;
     const metres = new Float32Array(n);
     const water = new Uint8Array(n);
@@ -148,7 +174,9 @@
       const lat = tileLat(w, y);
       for (let x = 0; x < w.W; x++) {
         const i = y * w.W + x;
-        const m = metresAt(lat, tileLon(w, x));
+        // height above the waterline OF THIS DATE, which is what every
+        // downstream field actually means
+        const m = metresAt(lat, tileLon(w, x)) - seaM;
         metres[i] = m;
         water[i] = m <= 0 ? 1 : 0;
         w.elev[i] = elev01(m);
@@ -165,7 +193,11 @@
 
         // temperature: real lapse rate with altitude on top of the latitude
         // gradient, which is what puts snow on the Andes at the equator
-        const seaLevelC = 30 - Math.pow(absLat / 90, 1.35) * 68;
+        // ...and the temperature of this date. assignBiome already turns
+        // t < 0.28 into SNOW, so a glacial offset grows the Laurentide and
+        // Fennoscandian ice sheets by itself, through the same classifier the
+        // generated worlds use. No ice sheet is drawn anywhere.
+        const seaLevelC = 30 - Math.pow(absLat / 90, 1.35) * 68 + dT;
         const c = seaLevelC - Math.max(0, m) * 0.0065;
         w.temp[i] = PD.clamp((c + 30) / 75, 0, 1);
 
@@ -236,7 +268,7 @@
   }
 
   global.PD.Earth = {
-    ready, loaded, supported, build, places, metresAt, elev01, baseRain,
+    ready, loaded, supported, build, useGrid, places, metresAt, elev01, baseRain,
     tileLat, tileLon, CITIES, SEA01
   };
 })(typeof window !== 'undefined' ? window : globalThis);
