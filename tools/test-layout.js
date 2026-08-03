@@ -558,6 +558,22 @@ const PROBE = `
         return 'toast: "' + t.textContent.slice(0, 40) + '…"';
       });
 
+      // The worst toast the game can actually produce. flashToast carries
+      // 'World seed: ' + whatever the player typed, so its width is bounded by
+      // nothing at all — and an unbroken token cannot be wrapped by ordinary
+      // means, so it sets the MIN-content width and no amount of fit-content
+      // sizing can shrink below it. This is the state that keeps
+      // overflow-wrap:anywhere honest.
+      await state('toast-unbroken', async function () {
+        $('#btn-save').click();
+        await settle(60);
+        var t = $('#toast');
+        t.textContent = 'World seed: ' +
+          'Xanthoparmeliaconspersaxanthoparmeliaconspersa0123456789';
+        await settle(20);
+        return 'a 55-character unbroken seed';
+      });
+
       // The imagery chip is the acknowledgement NASA asks for, so it has to be
       // legible rather than merely present — and it lands in the top HUD next
       // to the sabbath and omniscience chips, which is the row most likely to

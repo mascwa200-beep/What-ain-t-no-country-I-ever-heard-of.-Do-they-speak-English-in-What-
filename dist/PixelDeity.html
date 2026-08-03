@@ -752,7 +752,22 @@ body{
   position:absolute;bottom:16px;
   left:calc(var(--tool-w) + 20px + var(--sa-l));
   right:calc(var(--tab) + 20px + var(--sa-r));
-  width:max-content;max-width:100%;margin:0 auto;text-align:center;
+  /* fit-content, NOT max-content. max-content is defined as the intrinsic
+     preferred width with the available space IGNORED, so it never wraps
+     however tight left/right are — measured at 404px inside a 266px strip on
+     a 500px phone. fit-content is min(max-content, max(min-content,
+     available)), and for an absolutely positioned box "available" is exactly
+     the space left/right describe: short messages still hug, long ones wrap.
+     (max-width:100% did nothing — a percentage resolves against the CONTAINING
+     BLOCK, not against the strip.)
+
+     overflow-wrap must be `anywhere`, not `break-word`: only `anywhere`
+     reduces the MIN-CONTENT contribution, and fit-content can never go below
+     min-content. break-word would break the glyphs and leave the measurement
+     unchanged — a fix to the picture and not to the box. It matters because
+     flashToast carries unbounded text, including 'World seed: ' + whatever
+     the player typed. */
+  width:fit-content;margin:0 auto;text-align:center;overflow-wrap:anywhere;
   transform:translateY(30px);
   background:rgba(6,9,18,0.9);border:1px solid var(--gold-dim);
   border-top:1px solid var(--gold);color:var(--gold);
