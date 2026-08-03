@@ -1,9 +1,16 @@
 /* Pixel Deity service worker — cache-first so the god works with no signal. */
-const CACHE = 'pixeldeity-v19';
+const CACHE = 'pixeldeity-v20';
 const ASSETS = [
   './', './index.html', './styles.css', './manifest.webmanifest',
-  './js/util.js', './js/codec.js', './js/world.js', './js/sim.js',
-  './js/render.js', './js/render3d.js', './js/society.js', './js/afterlife.js',
+  './js/util.js', './js/codec.js', './js/world.js',
+  // earthdata.js and earth.js were added two releases ago and never listed
+  // here. Nothing broke loudly: the game simply booted a GENERATED world
+  // offline instead of Earth, and said nothing about it. Precaching an asset
+  // is not an optimisation when the app degrades silently without it.
+  './js/earthdata.js', './js/earth.js',
+  './js/sim.js',
+  './js/render.js', './js/lod.js', './js/render3d.js',
+  './js/society.js', './js/afterlife.js',
   './js/cosmos.js', './js/powers.js', './js/game.js'
 ];
 

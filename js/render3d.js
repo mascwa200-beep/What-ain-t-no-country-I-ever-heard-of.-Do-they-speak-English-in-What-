@@ -29,6 +29,18 @@
     return new Float32Array([xx, yx, zx, 0, xy, yy, zy, 0, xz, yz, zz, 0,
       -(xx * eye[0] + xy * eye[1] + xz * eye[2]), -(yx * eye[0] + yy * eye[1] + yz * eye[2]), -(zx * eye[0] + zy * eye[1] + zz * eye[2]), 1]);
   }
+  // The same basis, with the translation dropped. Patch vertices arrive
+  // already relative to the eye, so the view must not move them again — and
+  // that is the whole reason the precision holds: float32 near radius 1.0
+  // quantises to 0.38 m, which is a visible shudder once a metre matters.
+  function mat4LookAtOrigin(eye, at, up) {
+    let zx = eye[0] - at[0], zy = eye[1] - at[1], zz = eye[2] - at[2];
+    let zl = Math.hypot(zx, zy, zz); zx /= zl; zy /= zl; zz /= zl;
+    let xx = up[1] * zz - up[2] * zy, xy = up[2] * zx - up[0] * zz, xz = up[0] * zy - up[1] * zx;
+    let xl = Math.hypot(xx, xy, xz) || 1; xx /= xl; xy /= xl; xz /= xl;
+    const yx = zy * xz - zz * xy, yy = zz * xx - zx * xz, yz = zx * xy - zy * xx;
+    return new Float32Array([xx, yx, zx, 0, xy, yy, zy, 0, xz, yz, zz, 0, 0, 0, 0, 1]);
+  }
   function mat4Mul(a, b) {
     const o = new Float32Array(16);
     for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) {
@@ -61,19 +73,38 @@
   }
 
   // ---------- shaders ----------
+  // One quadtree patch, drawn eye-relative.
+  //
+  //   aBase — the vertex on the unit sphere, minus the patch centre
+  //   aUp   — the unit up vector times the TRUE height, in Earth radii
+  //   aNrm  — the tangent-space normal, precomputed on the CPU
+  //   aUV   — the patch-local grid coordinate, 0..1
+  //
+  // so the position is base + up*exaggeration + (patchCentre - eye), with the
+  // view matrix carrying no translation. Two things fall out of that: error
+  // scales with PATCH size rather than planet radius (millimetres at level 8,
+  // against 0.38 m for float32 near radius 1), and vertical exaggeration is a
+  // free uniform instead of a geometry rebuild.
+  //
+  // vUV is a GLOBAL equirect coordinate built from the patch's own lon/lat
+  // rect, which is what lets FS_PLANET, updateClim and updateDataTex carry on
+  // sampling exactly as they did.
   const VS_PLANET = `
-attribute vec3 aPos; attribute vec2 aUV; attribute float aH;
-uniform mat4 uMVP; uniform float uDisp; uniform float uSea;
-varying vec2 vUV; varying vec3 vN; varying float vLand;
+attribute vec3 aBase; attribute vec3 aUp; attribute vec3 aNrm; attribute vec2 aUV;
+uniform mat4 uMVP; uniform vec3 uCentreRel; uniform vec3 uCentre;
+uniform float uExag; uniform vec4 uUVRect;
+varying vec2 vUV; varying vec3 vN; varying vec3 vTN; varying float vLand;
 void main(){
-  float h = max(aH - uSea, 0.0);
-  vec3 p = aPos * (1.0 + h * uDisp);
-  vUV = aUV; vN = aPos; vLand = h;
-  gl_Position = uMVP * vec4(p, 1.0);
+  vec3 local = aBase + aUp * uExag;
+  vN = normalize(uCentre + aBase);
+  vTN = aNrm;
+  vLand = length(aUp);
+  vUV = uUVRect.xy + aUV * uUVRect.zw;
+  gl_Position = uMVP * vec4(local + uCentreRel, 1.0);
 }`;
   const FS_PLANET = `
 precision highp float;
-varying vec2 vUV; varying vec3 vN; varying float vLand;
+varying vec2 vUV; varying vec3 vN; varying vec3 vTN; varying float vLand;
 uniform sampler2D uTex; uniform sampler2D uData; uniform sampler2D uNorm;
 uniform sampler2D uClim;   // r=precip g=cloud b=snow a=wetness
 uniform vec3 uSun; uniform vec3 uEye; uniform vec3 uAtmo;
@@ -87,6 +118,12 @@ void main(){
   vec3 east = normalize(vec3(Ns.z, 0.0, -Ns.x) + vec3(0.0001));
   vec3 south = normalize(cross(east, Ns));
   vec3 Nt = texture2D(uNorm, vUV).xyz * 2.0 - 1.0;
+  // The baked map carries micro-detail at 1440x960; vTN carries the patch's
+  // own geometric slope, including the sub-tile relief the quadtree invents.
+  // Without the second one that relief displaces the surface but never
+  // catches the light, and reads as a rippled sheet rather than as ground.
+  // Whiteout blend: add the tangents, multiply the normals.
+  Nt = normalize(vec3(Nt.xy + vTN.xy, max(Nt.z * vTN.z, 0.02)));
   vec3 N = normalize(east * Nt.x + south * Nt.y + Ns * max(Nt.z, 0.2));
   // snow settles on the ground, so it goes in BEFORE the light is applied
   float snow = clim.b;
@@ -586,6 +623,7 @@ void main(){
 
     FX.bind(world);
     bakeTerrain(r);
+    makeLodTree(r);
 
     if (!headless) initGL(r);
     // the context-loss listeners above reach the renderer through the canvas,
@@ -611,6 +649,9 @@ void main(){
   // The sphere is radius 1, so one world unit is one Earth radius. Everything
   // that wants a real distance goes through this.
   const R_EARTH_M = 6371000;
+  // How close the eye may get to the ground beneath it. Not to radius 1 —
+  // to the terrain, which is what stepCam clamps against.
+  const MIN_ALT_M = 80;
 
   const HD_COLORS = {
     2:  [214, 196, 148], 3:  [92, 138, 62],  4:  [44, 94, 48],
@@ -873,7 +914,12 @@ void main(){
   }
 
   // ---------- GL init ----------
-  const SEG_LON = 256, SEG_LAT = 170;
+  // The cloud deck and the atmosphere shell still want a plain sphere, but
+  // neither is displaced — the cloud shader only scrolls a UV and the
+  // atmosphere is raymarched in the fragment shader. 256x170 was sized for a
+  // terrain mesh that no longer exists here; 128x84 is 21,504 triangles
+  // instead of 87,040 and is indistinguishable on a smooth shell.
+  const SEG_LON = 128, SEG_LAT = 84;
   function initGL(r) {
     const gl = r.gl;
     r.progPlanet = compile(gl, VS_PLANET, FS_PLANET);
@@ -890,7 +936,21 @@ void main(){
 
     initPost(r);
 
-    // sphere geometry
+    // ---- the quadtree's shared grid ----
+    // One (u,v) array and one index buffer for every patch that will ever
+    // exist. A patch owns nothing but its own base/up/normal buffers, which
+    // is what keeps 128 resident patches inside ~1.3 MB.
+    if (PD.LOD) {
+      const G = PD.LOD.GRID;
+      r.lodUV = glBuf(gl, G.uv);
+      r.lodIdx = gl.createBuffer();
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, r.lodIdx);
+      gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, G.idx, gl.STATIC_DRAW);
+      r.lodNIdx = G.nIdx;
+      r.lodBufs = new Map();      // patch object -> {base, up, nrm, version}
+    }
+
+    // sphere geometry (cloud + atmosphere shells only)
     const nv = (SEG_LON + 1) * (SEG_LAT + 1);
     const pos = new Float32Array(nv * 3), uv = new Float32Array(nv * 2);
     r.heights = new Float32Array(nv);
@@ -1311,6 +1371,25 @@ void main(){
     cam.sDist += (cam.dist - cam.sDist) * f;
     cam.fov += (cam.fovT - cam.fov) * f * 0.6;
 
+    // ---- the ground is solid ----
+    // cam.min is an altitude above radius 1, and land displaces well above
+    // radius 1, so lowering cam.min to 80 m did not give the camera the
+    // ground — it gave it the inside of the mountain. With the old fixed
+    // 0.13 displacement, land reached radius 1.0806 and the eye stopped at
+    // 1.0000126: half a million metres of rock.
+    //
+    // The clamp reads the terrain through the SAME function the vertex
+    // shader is about to displace with, at the same exaggeration, so the two
+    // cannot drift apart. Both the target and the smoothed value are pushed
+    // out: clamping only the smoothed one leaves cam.dist below the ground,
+    // and every frame afterwards eases back down into it.
+    if (PD.LOD && r.world && r.world.elev) {
+      const exag = PD.LOD.exagFor(cam.sDist);
+      const g = PD.LOD.groundRadius(r.world, cam.sLon, cam.sLat, exag) + MIN_ALT_M / R_EARTH_M;
+      if (cam.sDist < g) cam.sDist = g;
+      if (cam.dist < g) cam.dist = g;
+    }
+
     // the ear rides the camera: sounds are placed and attenuated against
     // wherever the god is currently looking
     if (PD.Audio8 && PD.Audio8.listen) PD.Audio8.listen(cam.sLon, cam.sLat, cam.sDist);
@@ -1369,19 +1448,40 @@ void main(){
     // ray-sphere (unit radius)
     const b = 2 * (eye[0] * dir[0] + eye[1] * dir[1] + eye[2] * dir[2]);
     const a = dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2];
-    // Picking intersects a sphere slightly larger than the planet so a click
-    // on a mountain still lands. 1.045 is a radius of 1.0222 — 141 km above
-    // the surface, which was invisible while the camera could not get closer
-    // than 1593 km and is a gross error once it can. Shrink the allowance
-    // toward the real surface as the camera descends.
-    const pickAlt = Math.max(0, (cam.sDist != null ? cam.sDist : cam.dist) - 1);
-    const bulge = 1 + Math.min(0.022, pickAlt * 0.09);
-    const c = eye[0] * eye[0] + eye[1] * eye[1] + eye[2] * eye[2] - bulge * bulge;
-    const disc = b * b - 4 * a * c;
-    if (disc < 0) return null; // clicked space
-    const t = (-b - Math.sqrt(disc)) / (2 * a);
-    if (t < 0) return null;
-    const hit = [eye[0] + dir[0] * t, eye[1] + dir[1] * t, eye[2] + dir[2] * t];
+    // Picking used to intersect one sphere of a guessed radius — 141 km above
+    // the surface originally, then an altitude-scaled fudge. Both are guesses
+    // about where the ground is, and the terrain now answers that question
+    // directly.
+    //
+    // Start at the highest the planet reaches so no summit is missed, then
+    // refine: re-read the terrain under the current hit and re-intersect at
+    // that radius. Three passes is plenty — the correction shrinks by roughly
+    // the surface slope each time. It uses groundRadius, the same function
+    // the camera clamp and the vertex displacement use, so a click lands
+    // where the geometry is rather than where a constant said it would be.
+    const ee = eye[0] * eye[0] + eye[1] * eye[1] + eye[2] * eye[2];
+    const hasLod = !!(PD.LOD && r.world && r.world.elev);
+    const exag = hasLod ? PD.LOD.exagFor(cam.sDist != null ? cam.sDist : cam.dist) : 1;
+    const ceil = hasLod ? 1 + PD.LOD.liftOf(1) * exag : 1.022;
+    const shoot = (rad) => {
+      const disc = b * b - 4 * a * (ee - rad * rad);
+      if (disc < 0) return null;
+      const t = (-b - Math.sqrt(disc)) / (2 * a);
+      if (t < 0) return null;
+      return [eye[0] + dir[0] * t, eye[1] + dir[1] * t, eye[2] + dir[2] * t];
+    };
+    let hit = shoot(ceil);
+    if (!hit) return null;                     // clicked space
+    if (hasLod) {
+      for (let i = 0; i < 3; i++) {
+        const tl = sphereToTile(r.world, hit);
+        const lon = (tl.x / r.world.W) * Math.PI * 2;
+        const lat = Math.PI / 2 - (tl.y / r.world.H) * Math.PI;
+        const next = shoot(PD.LOD.groundRadius(r.world, lon, lat, exag));
+        if (!next) break;                      // grazing the limb; keep the last good hit
+        hit = next;
+      }
+    }
     return sphereToTile(r.world, hit);
   }
   const screenToWorldRaw = screenToWorld;
@@ -1468,7 +1568,14 @@ void main(){
       r.subRects = null;
       r.texDirty = false;
     }
-    if (r.heightsDirty) updateHeights(r);
+    // The terrain changed. The single displaced sphere used to re-sample its
+    // per-vertex heights here; now the quadtree rebuilds the patches that
+    // need it, lazily, as they are walked — so an edit costs the patches you
+    // can see rather than the whole globe at the moment you make it.
+    if (r.heightsDirty) {
+      if (r.lod) PD.LOD.invalidate(r.lod);
+      r.heightsDirty = false;
+    }
 
     // These were both full-grid JS loops running EVERY frame for data that
     // changes on the order of once every few ticks. City lights and fire only
@@ -1492,6 +1599,24 @@ void main(){
     const view = mat4LookAt(eye, [cam.shakeX, cam.shakeY, 0], [0, 1, 0]);
     const vp = mat4Mul(proj, view);
     r._vp = vp;
+    // The same frustum with the eye at the origin. Patch vertices arrive
+    // pre-offset by (centre - eye), so this is what they are transformed by;
+    // everything else in the frame still uses the world-space vp.
+    const vpEye = mat4Mul(proj, mat4LookAtOrigin(eye, [cam.shakeX, cam.shakeY, 0], [0, 1, 0]));
+
+    // ---- the quadtree decides what the planet is made of this frame ----
+    let patches = null, exag = 1;
+    if (r.lod) {
+      PD.Prof.begin('lod.update');
+      exag = PD.LOD.exagFor(cam.sDist != null ? cam.sDist : cam.dist);
+      patches = PD.LOD.update(r.lod, {
+        eye, fov: cam.fov, screenH: r.h, vp: vpEye, exag
+      });
+      PD.Prof.end();
+      PD.Prof.n('lod.patches', patches.length);
+      PD.Prof.n('lod.culled', r.lod.stats.culled);
+      PD.Prof.n('lod.exag', exag);
+    }
 
     // sun sweeps with the day cycle; planes get fixed dramatic light
     const cyc = (sim.tick % 480) / 480 * Math.PI * 2;
@@ -1560,26 +1685,20 @@ void main(){
     gl.frontFace(gl.CCW);
     const pp = r.progPlanet;
     gl.useProgram(pp.p);
-    bindAttr(gl, pp.a.aPos, r.bufPos, 3);
-    bindAttr(gl, pp.a.aUV, r.bufUV, 2);
-    bindAttr(gl, pp.a.aH, r.bufH, 1);
-    gl.uniformMatrix4fv(pp.u.uMVP, false, vp);
-    gl.uniform1f(pp.u.uDisp, 0.13 * (1 - dissolve));
-    gl.uniform1f(pp.u.uSea, 0.38);
+    gl.uniformMatrix4fv(pp.u.uMVP, false, vpEye);
     gl.uniform3fv(pp.u.uSun, sun);
     gl.uniform3fv(pp.u.uEye, eye);
     gl.uniform3fv(pp.u.uAtmo, atmo);
     gl.uniform1f(pp.u.uBlood, sim.bloodMoonT > 0 ? 1 : 0);
     gl.uniform1f(pp.u.uDoom, doom);
     gl.uniform1f(pp.u.uTime, performance.now() * 0.001);
+    // dissolve flattens the world back to a sphere as it is un-created
+    gl.uniform1f(pp.u.uExag, exag * (1 - dissolve));
     gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, r.texTerra); gl.uniform1i(pp.u.uTex, 0);
     gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, r.texData); gl.uniform1i(pp.u.uData, 1);
     gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D, r.texNorm); gl.uniform1i(pp.u.uNorm, 2);
     gl.activeTexture(gl.TEXTURE3); gl.bindTexture(gl.TEXTURE_2D, r.texClim); gl.uniform1i(pp.u.uClim, 3);
-    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, r.bufIdx);
-    gl.drawElements(gl.TRIANGLES, r.nIdx, r.idxType, 0);
-    PD.Prof.add('gl.tris', r.nIdx / 3); PD.Prof.add('gl.draws', 1);
-    PD.Prof.n('gl.planetTris', r.nIdx / 3);
+    if (patches) drawPatches(r, pp, patches, eye);
 
     // units as living embers on the surface
     drawUnits(r, sim, vp);
@@ -1668,6 +1787,69 @@ void main(){
 
     // ---- 2D overlay: labels, cursor, weather, minimap ----
     drawOverlay2D(r, sim, ui);
+  }
+
+  // ---------- the quadtree, on the GPU ----------
+  // Each live patch gets three small buffers, uploaded once when it is built
+  // and reused every frame after. The shared grid UV and index buffer are
+  // bound once for the whole loop.
+  //
+  // The reclaim pass matters more than it looks: patches merge constantly
+  // during a descent, and a merged patch's buffers are referenced by nothing
+  // afterwards. WebGL buffers are not garbage collected — a renderer that
+  // only ever creates them leaks the entire descent's worth of VRAM, on the
+  // devices least able to spare it.
+  function drawPatches(r, pp, patches, eye) {
+    const gl = r.gl, tab = r.lodBufs;
+    PD.Prof.begin('lod.draw');
+    bindAttr(gl, pp.a.aUV, r.lodUV, 2);
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, r.lodIdx);
+    let tris = 0, draws = 0, uploads = 0;
+    for (let i = 0; i < patches.length; i++) {
+      const p = patches[i];
+      let b = tab.get(p);
+      if (!b) {
+        b = { base: gl.createBuffer(), up: gl.createBuffer(), nrm: gl.createBuffer(), version: -1 };
+        tab.set(p, b);
+      }
+      if (b.version !== p.version) {
+        gl.bindBuffer(gl.ARRAY_BUFFER, b.base); gl.bufferData(gl.ARRAY_BUFFER, p.base, gl.STATIC_DRAW);
+        gl.bindBuffer(gl.ARRAY_BUFFER, b.up); gl.bufferData(gl.ARRAY_BUFFER, p.up, gl.STATIC_DRAW);
+        gl.bindBuffer(gl.ARRAY_BUFFER, b.nrm); gl.bufferData(gl.ARRAY_BUFFER, p.nrm, gl.STATIC_DRAW);
+        b.version = p.version;
+        uploads++;
+      }
+      b.seen = r._lodFrame;
+      bindAttr(gl, pp.a.aBase, b.base, 3);
+      bindAttr(gl, pp.a.aUp, b.up, 3);
+      bindAttr(gl, pp.a.aNrm, b.nrm, 3);
+      const uv = PD.LOD.patchUV(p);
+      gl.uniform4f(pp.u.uUVRect, uv.u0, uv.v0, uv.du, uv.dv);
+      // the centre, and the centre relative to the eye. The subtraction is
+      // done here in JS doubles; doing it in the shader would form the
+      // difference of two near-equal float32s and throw away the precision
+      // this whole arrangement exists to keep.
+      gl.uniform3f(pp.u.uCentre, p.centre[0], p.centre[1], p.centre[2]);
+      gl.uniform3f(pp.u.uCentreRel,
+        p.centre[0] - eye[0], p.centre[1] - eye[1], p.centre[2] - eye[2]);
+      gl.drawElements(gl.TRIANGLES, r.lodNIdx, gl.UNSIGNED_SHORT, 0);
+      tris += r.lodNIdx / 3; draws++;
+    }
+    // reclaim: anything not drawn for 120 frames has been merged away
+    if ((r._lodFrame & 63) === 0) {
+      tab.forEach((b, p) => {
+        if (r._lodFrame - (b.seen || 0) > 120) {
+          gl.deleteBuffer(b.base); gl.deleteBuffer(b.up); gl.deleteBuffer(b.nrm);
+          tab.delete(p);
+        }
+      });
+    }
+    r._lodFrame = (r._lodFrame || 0) + 1;
+    PD.Prof.end();
+    PD.Prof.add('gl.tris', tris); PD.Prof.add('gl.draws', draws);
+    PD.Prof.n('gl.planetTris', tris);
+    PD.Prof.n('lod.uploads', uploads);
+    PD.Prof.n('lod.resident', tab.size);
   }
 
   function bindAttr(gl, loc, buf, size) {
@@ -2014,8 +2196,25 @@ void main(){
       if (!r.dataBuf || r.dataBuf.length !== world.n * 4) r.dataBuf = new Uint8Array(world.n * 4);
     }
     bakeTerrain(r);
+    // A new world is a new planet shape, so the tree starts over. Dropping
+    // the GL buffer table with it is what stops the old world's patches from
+    // sitting in VRAM forever — the keys are patch objects that no longer
+    // exist anywhere else.
+    makeLodTree(r);
     world.dirtyMini = true;
     r.cam.lon = 0.6; r.cam.lat = 0.45;
+  }
+
+  function makeLodTree(r) {
+    if (!PD.LOD) return;
+    if (r.lodBufs && r.gl) {
+      r.lodBufs.forEach((b) => {
+        r.gl.deleteBuffer(b.base); r.gl.deleteBuffer(b.up); r.gl.deleteBuffer(b.nrm);
+      });
+      r.lodBufs.clear();
+    }
+    r.lod = PD.LOD.createTree(r.world, r.world.seed);
+    r._lodFrame = 0;
   }
 
   function renderTerrain(r) { bakeTerrain(r); }

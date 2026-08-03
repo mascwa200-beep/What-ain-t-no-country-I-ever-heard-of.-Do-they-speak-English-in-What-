@@ -53,6 +53,17 @@ function run() {
     var r = G.r, R = 6371000;
     var out = { alts: [], errs: [], gl2: !!r.gl2 };
     var ALTS = __ALTS__;
+
+    // Aim at the highest ground on the planet. Over ocean the terrain clamp
+    // has nothing to clamp against and reports a pass it never earned, and
+    // the LOD never has any relief to resolve — both readings would be true
+    // and meaningless.
+    var w = G.world, peak = -1, px = 0, py = 0;
+    for (var t = 0; t < w.n; t++) if (w.elev[t] > peak) { peak = w.elev[t]; px = t % w.W; py = (t / w.W) | 0; }
+    var aimLon = (px / w.W) * Math.PI * 2;
+    var aimLat = Math.PI / 2 - (py / w.H) * Math.PI;
+    out.peak = { x: px, y: py, elev: peak };
+
     for (var i = 0; i < ALTS.length; i++) {
       var a = ALTS[i];
       var d = 1 + a.m / R;
@@ -60,9 +71,19 @@ function run() {
       // target, so a probe that only sets cam.dist measures wherever the
       // easing happened to be, not the altitude it asked for.
       r.cam.dist = r.cam.sDist = d;
-      r.cam.lon = r.cam.sLon = 1.5;      // over land, not mid-Pacific
-      r.cam.lat = r.cam.sLat = 0.5;
+      r.cam.lon = r.cam.sLon = aimLon;
+      r.cam.lat = r.cam.sLat = aimLat;
       r.cam.flyDur = 0;
+      // The tree splits at most 4 patches per frame on purpose, so a handful
+      // of frames measures a tree that has not finished growing. Settle
+      // first, then measure — and re-pin the camera each frame, because
+      // stepCam is easing it and the clamp may be pushing it out.
+      for (var s = 0; s < 200; s++) {
+        r.cam.dist = r.cam.sDist = Math.max(d, r.cam.dist);
+        r.cam.lon = r.cam.sLon = aimLon; r.cam.lat = r.cam.sLat = aimLat;
+        try { PD.Render.draw(r, G.sim, G.ui || {}); }
+        catch (e) { out.errs.push(a.name + ' settling: ' + (e && e.message ? e.message : String(e))); break; }
+      }
       PD.Prof.reset();
       var frames = 4;
       for (var f = 0; f < frames; f++) {
@@ -82,7 +103,11 @@ function run() {
         // where the camera ENDED UP, which is not where we put it if
         // anything clamps it — that is the terrain-collision signal
         endDist: r.cam.dist,
-        altAboveGroundM: (r.cam.dist - 1) * R
+        altAboveGroundM: (r.cam.dist - 1) * R,
+        // and the radius the terrain actually reaches under it, read through
+        // the same function the vertex shader displaces with
+        groundR: PD.LOD ? PD.LOD.groundRadius(w, aimLon, aimLat, PD.LOD.exagFor(r.cam.dist)) : 1,
+        exag: PD.LOD ? PD.LOD.exagFor(r.cam.dist) : 1
       });
     }
     finish(out);
@@ -125,6 +150,27 @@ function check(name, cond, detail) {
   if (!cond) fails++;
 }
 
+// ---- the offline cache must list what the page actually loads ------------
+// earthdata.js and earth.js shipped two releases before anyone noticed they
+// were missing from sw.js, because nothing failed loudly: offline, the game
+// just booted a generated world instead of Earth and said nothing. A list
+// maintained by memory drifts; this makes the drift a failure.
+console.log('\n--- the offline cache matches the page ---');
+{
+  const idxSrc = fs.readFileSync(path.join(base, 'index.html'), 'utf8');
+  const swSrc = fs.readFileSync(path.join(base, 'sw.js'), 'utf8');
+  const inPage = (idxSrc.match(/<script src="js\/([a-z0-9]+)\.js"><\/script>/g) || [])
+    .map(s => s.replace(/.*js\/([a-z0-9]+)\.js.*/, '$1'));
+  const cached = (swSrc.match(/'\.\/js\/([a-z0-9]+)\.js'/g) || [])
+    .map(s => s.replace(/.*js\/([a-z0-9]+)\.js.*/, '$1'));
+  const missing = inPage.filter(n => cached.indexOf(n) < 0);
+  const extra = cached.filter(n => inPage.indexOf(n) < 0);
+  check('every script the page loads is precached for offline', missing.length === 0,
+    missing.length ? 'missing: ' + missing.join(', ') : inPage.length + ' scripts');
+  check('and the cache lists nothing the page does not load', extra.length === 0,
+    extra.length ? 'stale: ' + extra.join(', ') : 'no stale entries');
+}
+
 const probeFile = buildProbe();
 let dom;
 try {
@@ -158,13 +204,19 @@ if (rep.fatal) {
   process.exit(1);
 }
 
+const R = 6371000;
 console.log('\n--- what the GPU is asked to draw (WebGL' + (rep.gl2 ? '2' : '1') + ') ---');
-console.log('  altitude     triangles   draws   patches   eye above r=1');
+if (rep.peak) {
+  console.log('  aimed at the highest ground on the planet: tile ' +
+    rep.peak.x + ',' + rep.peak.y + ' at elevation ' + rep.peak.elev.toFixed(3));
+}
+console.log('  altitude    triangles  draws  patches  eye above r=1  ground reaches');
 for (const a of rep.alts) {
-  console.log('  ' + a.name.padEnd(11) +
-    String(a.tris).padStart(9) + String(a.draws).padStart(8) +
-    String(a.patches).padStart(10) +
-    ('  ' + Math.round(a.altAboveGroundM).toLocaleString() + ' m').padStart(18));
+  console.log('  ' + a.name.padEnd(10) +
+    String(a.tris).padStart(10) + String(a.draws).padStart(7) +
+    String(a.patches).padStart(9) +
+    (Math.round(a.altAboveGroundM).toLocaleString() + ' m').padStart(15) +
+    (Math.round((a.groundR - 1) * R).toLocaleString() + ' m').padStart(16));
 }
 
 console.log('\n--- assertions ---');
@@ -172,6 +224,38 @@ check('every altitude rendered without throwing', rep.errs.length === 0, rep.err
 check('all three altitudes reported', rep.alts.length === ALTS.length, rep.alts.length + '/' + ALTS.length);
 for (const a of rep.alts) {
   check('the planet is drawn at ' + a.name, a.tris > 0, a.tris + ' tris');
+}
+
+// ---- the defect this stage exists to fix -------------------------------
+// Lowering cam.min to 80 m gave the camera the ability to descend. Nothing
+// gave it a floor: land displaces well above radius 1, so over any mountain
+// the eye ended up inside the rock. Measured before the fix, the eye sat at
+// 80 m above radius 1 while the terrain reached 513 km.
+console.log('\n--- the ground is solid ---');
+for (const a of rep.alts) {
+  check('the eye is above the terrain at ' + a.name, a.endDist > a.groundR,
+    Math.round((a.endDist - a.groundR) * R) + ' m of clearance');
+}
+{
+  const g = rep.alts[rep.alts.length - 1];
+  check('and asking to go below the ground is refused, not obeyed',
+    g.altAboveGroundM > 80.5,
+    'asked for 80 m above r=1, got ' + Math.round(g.altAboveGroundM) + ' m — the mountain');
+  // exaggeration must have eased off by the time you are standing on it
+  check('vertical exaggeration eases to near-true scale on the ground',
+    g.exag < 2.5, g.exag.toFixed(2) + 'x');
+  check('and is dramatic from orbit', rep.alts[0].exag > 5, rep.alts[0].exag.toFixed(1) + 'x');
+}
+
+console.log('\n--- detail follows the camera ---');
+{
+  const orbit = rep.alts[0], ground = rep.alts[rep.alts.length - 1];
+  check('the planet is made of many patches, not one mesh', orbit.patches > 20,
+    orbit.patches + ' at orbit');
+  check('draw calls stay bounded', rep.alts.every(a => a.draws < 200),
+    Math.max(...rep.alts.map(a => a.draws)) + ' worst');
+  console.log('    planet triangles: ' + orbit.planetTris + ' at orbit, ' +
+    ground.planetTris + ' on the ground (the shells are the rest)');
 }
 
 // This file exists to hold a ceiling, and the ceiling only means something if

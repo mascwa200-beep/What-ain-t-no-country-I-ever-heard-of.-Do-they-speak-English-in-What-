@@ -162,17 +162,33 @@ console.log('\n--- the camera reaches the ground ---');
   check('the idle spin scales with altitude and stops near the ground',
     /if \(altKm > 50\) cam\.lon \+= 0\.0006/.test(src));
 
-  // picking intersected a sphere 141 km above the surface
-  check('picking no longer uses a fixed 141 km bulge',
-    !/- 1\.045;/.test(src) && /bulge \* bulge/.test(src));
-  {
-    const bulge = (altM) => 1 + Math.min(0.022, (altM / R) * 0.09);
-    const errM = (altM) => (bulge(altM) - 1) * R;
-    check('the pick error shrinks to metres near the ground',
-      errM(80) < 20, errM(80).toFixed(1) + ' m at 80 m altitude (was 141000 m)');
-    check('and keeps a mountain allowance from orbit',
-      errM(2e6) > 100000, Math.round(errM(2e6)) + ' m');
-  }
+  // Picking intersected a sphere 141 km above the surface, then briefly an
+  // altitude-scaled fudge. Both were guesses about where the ground is.
+  // It now starts at the planet's highest point so no summit is missed and
+  // refines against groundRadius — the same function the camera clamp and the
+  // vertex displacement use, so a click cannot land somewhere the geometry
+  // is not.
+  check('picking no longer guesses a bulge radius',
+    !/- 1\.045;/.test(src) && !/const bulge = 1 \+ Math\.min/.test(src));
+  check('picking refines against the real terrain',
+    /PD\.LOD\.groundRadius\(r\.world, lon, lat, exag\)/.test(src) &&
+    /let hit = shoot\(ceil\);/.test(src));
+  check('and it starts above the highest ground so no summit is missed',
+    /const ceil = hasLod \? 1 \+ PD\.LOD\.liftOf\(1\) \* exag/.test(src));
+
+  // The camera was given the ability to descend to 80 m and no floor to
+  // stand on: cam.min is an altitude above RADIUS 1, and land displaces well
+  // above radius 1, so over any mountain the eye ended up inside the rock.
+  // Measured before the fix: eye at 80 m, terrain reaching 513,000 m.
+  check('the camera is clamped against the terrain, not against radius 1',
+    /if \(cam\.sDist < g\) cam\.sDist = g;/.test(src) &&
+    /if \(cam\.dist < g\) cam\.dist = g;/.test(src));
+  check('and the clamp reads the terrain through the same function the shader displaces with',
+    /PD\.LOD\.groundRadius\(r\.world, cam\.sLon, cam\.sLat, exag\)/.test(src));
+  // Clamping only the smoothed value leaves the target below ground, and
+  // stepCam eases back into it on every subsequent frame.
+  check('both the target and the smoothed distance are clamped',
+    (src.match(/if \(cam\.s?[Dd]ist < g\)/g) || []).length === 2);
 
   check('depth is 24-bit where the context allows', /DEPTH_COMPONENT24 : gl\.DEPTH_COMPONENT16/.test(src));
   check('a lost GL context is handled', /webglcontextlost/.test(src) && /webglcontextrestored/.test(src));
