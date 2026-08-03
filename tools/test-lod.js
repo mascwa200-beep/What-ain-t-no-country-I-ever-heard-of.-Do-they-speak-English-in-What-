@@ -59,7 +59,26 @@ console.log('\n--- the grid ---');
 {
   const G = LOD.GRID;
   const N = LOD.N;
-  check('17x17 interior grid', N === 17 && G.uv.length === N * N * 2, N + 'x' + N);
+  check('17x17 interior grid', N === 17, N + 'x' + N);
+  // This used to assert G.uv.length === N*N*2 — which is the DEFECT, written
+  // down as the specification. The draw indexes up to nVerts, so a UV buffer
+  // that stops at the interior grid leaves every skirt vertex reading past the
+  // end and getting (0,0). WebGL's robust access makes that silent, and against
+  // a 27 km/pixel bake it was invisible; against real imagery it is a
+  // mis-coloured band along every LOD boundary.
+  check('every vertex the draw touches has a UV, skirt included',
+    G.uv.length === G.nVerts * 2 && G.nVerts === Math.max(...G.idx) + 1,
+    G.uv.length / 2 + ' uvs for ' + G.nVerts + ' vertices, max index ' + Math.max(...G.idx));
+  {
+    // and a skirt vertex must sample the same texel as the edge vertex it
+    // hangs from, or the curtain is a different colour from the ground
+    let bad = 0;
+    for (let k = 0; k < G.ring.length; k++) {
+      const s = G.ring[k] * 2, d = (N * N + k) * 2;
+      if (G.uv[s] !== G.uv[d] || G.uv[s + 1] !== G.uv[d + 1]) bad++;
+    }
+    check('the skirt samples what it hangs from', bad === 0, bad + ' of ' + G.ring.length + ' wrong');
+  }
   check('the ring visits every border vertex exactly once',
     G.ring.length === 4 * N - 4 && new Set(G.ring).size === 4 * N - 4,
     G.ring.length + ' of ' + (4 * N - 4));

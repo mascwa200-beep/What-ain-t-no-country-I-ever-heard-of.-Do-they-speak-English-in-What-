@@ -283,11 +283,6 @@
   // no neighbour bookkeeping at all, which is why it comes before edge
   // stitching rather than after.
   function buildGrid() {
-    const uv = new Float32Array(N * N * 2);
-    for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
-      const k = (j * N + i) * 2;
-      uv[k] = i / NQ; uv[k + 1] = j / NQ;
-    }
     const idx = [];
     for (let j = 0; j < NQ; j++) for (let i = 0; i < NQ; i++) {
       const a = j * N + i, b = a + N;
@@ -305,7 +300,24 @@
       const as = skirtBase + k, bs = skirtBase + ((k + 1) % ring.length);
       idx.push(a, as, b, b, as, bs);
     }
-    return { uv, idx: new Uint16Array(idx), ring, nVerts: skirtBase + ring.length, nIdx: idx.length };
+    // The UV array has to cover the SKIRT vertices too, not just the N*N grid.
+    // It did not: the buffer was N*N*2 floats while the draw indexes up to
+    // nVerts, so every skirt vertex read past the end and got (0,0) — the
+    // patch's own south-west corner. Against a 27 km/pixel bake that curtain
+    // was the same colour as the ground it hangs from and nothing showed;
+    // against real imagery it is a mis-coloured band along every LOD boundary.
+    // A skirt vertex takes the UV of the edge vertex it hangs from.
+    const nVerts = skirtBase + ring.length;
+    const uv = new Float32Array(nVerts * 2);
+    for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
+      const k = (j * N + i) * 2;
+      uv[k] = i / NQ; uv[k + 1] = j / NQ;
+    }
+    for (let k = 0; k < ring.length; k++) {
+      const src = ring[k] * 2, dst = (skirtBase + k) * 2;
+      uv[dst] = uv[src]; uv[dst + 1] = uv[src + 1];
+    }
+    return { uv, idx: new Uint16Array(idx), ring, nVerts, nIdx: idx.length };
   }
 
   const GRID = buildGrid();
@@ -664,6 +676,9 @@
       if (!p.bounded) bound(tree, p);
 
       const size = projectedSize(p, eye, th, sh, exag);
+      // Kept on the patch: the renderer prioritises imagery requests by it, and
+      // it is exactly the number the split test already had to compute.
+      p.px = size;
 
       if (p.children) {
         // A parent whose children are all off-screen still wants merging, so

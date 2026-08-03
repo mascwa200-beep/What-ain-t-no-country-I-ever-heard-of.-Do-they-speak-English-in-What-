@@ -35,6 +35,30 @@ const ALTS = [
 
 const PROBE = `
 window.__report = null;
+// NOTHING HERE MAY TOUCH THE NETWORK. Streamed imagery is the first thing in
+// this project that wants one, and a suite that quietly depends on a live
+// public archive is a suite that fails on a train — for a reason that has
+// nothing to do with the code under test. The built-in tile loader goes
+// through new Image(), so counting constructions turns "no network" from an
+// assumption into a measurement. rAF never fires under --virtual-time-budget,
+// so the game's own loop has not drawn a frame yet and nothing has been
+// requested before the probe swaps the loader out.
+window.__imgBlocked = [];
+(function () {
+  // Not a counter — a BLOCK. The first version of this only counted, and
+  // recorded 13 real fetches: the game's own loop runs off setTimeout at boot
+  // and had already asked GIBS for tiles before the probe could swap the
+  // loader. Assigning .src is what starts a request, so the stub simply never
+  // has one, and no request can leave the page however early it is made.
+  window.Image = function () {
+    var o = { crossOrigin: '', onload: null, onerror: null, width: 0, height: 0 };
+    Object.defineProperty(o, 'src', {
+      set: function (v) { if (v) window.__imgBlocked.push(v); },
+      get: function () { return ''; }
+    });
+    return o;
+  };
+})();
 window.addEventListener('error', function (e) {
   window.__report = { fatal: String(e.message) + ' @ ' + e.filename + ':' + e.lineno };
 });
@@ -78,6 +102,30 @@ function run() {
       // the sim for a century to get the same effect.
       bigV.pop = 110; bigV.level = 7; bigV.temples = 3;
     }
+    // Swap the tile loader for a stub before ANY frame is drawn. This is both
+    // the no-network guarantee and the only way to control what arrives when.
+    function stubTile(css) {
+      var c = document.createElement('canvas');
+      c.width = c.height = 64;
+      var g = c.getContext('2d');
+      g.fillStyle = css; g.fillRect(0, 0, 64, 64);
+      return c;
+    }
+    function stubCache(mode, css) {
+      var served = 0;
+      var c = PD.Tiles.create({
+        maxInFlight: 999, maxLive: 200,
+        load: function (u, done) {
+          if (mode === 'fail') { done(null, 0); return null; }
+          served++; done(stubTile(css || '#ff00ff'), 200); return null;
+        }
+      });
+      c.__served = function () { return served; };
+      return c;
+    }
+    out.satAvail = !!(PD.Tiles && r.tiles);
+    if (PD.Tiles) r.tiles = stubCache('fail');
+
     var aimLon = (px / w.W) * Math.PI * 2;
     var aimLat = Math.PI / 2 - (py / w.H) * Math.PI;
     out.peak = { x: px, y: py, elev: peak, town: bigV ? (bigV.name + ' pop ' + bigV.pop) : null };
@@ -96,7 +144,9 @@ function run() {
       // of frames measures a tree that has not finished growing. Settle
       // first, then measure — and re-pin the camera each frame, because
       // stepCam is easing it and the clamp may be pushing it out.
-      for (var s = 0; s < 200; s++) {
+      // 130 frames is 4x what growing to MAX_PATCHES from nothing needs; it
+      // was 200, which cost a quarter of this suite's wall clock for nothing.
+      for (var s = 0; s < 130; s++) {
         r.cam.dist = r.cam.sDist = Math.max(d, r.cam.dist);
         r.cam.lon = r.cam.sLon = aimLon; r.cam.lat = r.cam.sLat = aimLat;
         try { PD.Render.draw(r, G.sim, G.ui || {}); }
@@ -130,6 +180,135 @@ function run() {
         exag: PD.LOD ? PD.LOD.exagFor(r.cam.dist) : 1
       });
     }
+
+    // ---- streamed imagery -------------------------------------------------
+    // TWO THINGS THIS HAS TO GET RIGHT, both of which it got wrong first time.
+    //
+    // 1. LOOK AT DAYLIGHT. The altitude loop aims at the largest settlement,
+    //    which is Tokyo, which at boot is at local 01:40 — every pixel read
+    //    back was night sky, and a magenta ground, a green ground and no
+    //    ground at all all measured identically. A pixel test that cannot see
+    //    the ground is not a weak test, it is a test of nothing.
+    //
+    // 2. COMPARE TWO IMAGES, NOT AN IMAGE AND A CONSTANT. Asserting a
+    //    particular colour bakes in the lighting, the atmosphere and the
+    //    tonemap. Asserting that a magenta ground and a green ground differ
+    //    from each other says exactly one thing — the tile reached the screen
+    //    — and says it under any lighting.
+    var sun = PD.Sim.subsolar(G.sim.epoch + G.sim.clock);
+    var sunLon = sun.lon < 0 ? sun.lon + Math.PI * 2 : sun.lon;
+    // ...and at daylit LAND. The subsolar point itself is usually ocean, which
+    // is dark and sits under a thick column of atmosphere, so the ground's
+    // share of each pixel is small. Sunlit land is the brightest ground there
+    // is and gives the measurement something to measure.
+    var sx = sunLon / (Math.PI * 2) * w.W, sy = (Math.PI / 2 - sun.dec) / Math.PI * w.H;
+    var bestT = -1, bestS = -1e9;
+    for (var ti = 0; ti < w.n; ti++) {
+      if (w.elev[ti] <= 0.42) continue;                 // land only
+      var tx2 = ti % w.W, ty2 = (ti / w.W) | 0;
+      var dxs = Math.abs(tx2 - sx); if (dxs > w.W / 2) dxs = w.W - dxs;
+      var sc = -(dxs * dxs + (ty2 - sy) * (ty2 - sy));
+      if (sc > bestS) { bestS = sc; bestT = ti; }
+    }
+    var sunLat = sun.dec;
+    if (bestT >= 0) {
+      sunLon = ((bestT % w.W) + 0.5) / w.W * Math.PI * 2;
+      sunLat = Math.PI / 2 - (((bestT / w.W) | 0) + 0.5) / w.H * Math.PI;
+    }
+    out.aimedAtSun = { lonDeg: sunLon * 180 / Math.PI, latDeg: sunLat * 180 / Math.PI,
+                       land: bestT >= 0 };
+
+    function screen() {
+      // The middle of the screen only. Under SwiftShader a full-buffer
+      // readPixels is a pipeline flush measured in seconds, and the corners are
+      // sky and HUD anyway — the ground is what is being asked about.
+      var gl = r.gl, W = gl.drawingBufferWidth, H = gl.drawingBufferHeight;
+      var w2 = Math.min(320, W), h2 = Math.min(240, H);
+      var px = new Uint8Array(w2 * h2 * 4);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      gl.readPixels(((W - w2) / 2) | 0, ((H - h2) / 2) | 0, w2, h2, gl.RGBA, gl.UNSIGNED_BYTE, px);
+      var rs = 0, gs = 0, bs = 0, lit = 0, n = px.length / 4;
+      for (var i = 0; i < px.length; i += 4) {
+        rs += px[i]; gs += px[i + 1]; bs += px[i + 2];
+        if (px[i] + px[i + 1] + px[i + 2] > 24) lit++;
+      }
+      return { r: rs / n, g: gs / n, b: bs / n, lit: lit / n, buf: px };
+    }
+    function differs(a, b) {
+      if (!a || !b || !a.buf || !b.buf || a.buf.length !== b.buf.length) return -1;
+      var n = 0;
+      for (var i = 0; i < a.buf.length; i += 4) {
+        if (Math.abs(a.buf[i] - b.buf[i]) > 8 || Math.abs(a.buf[i + 1] - b.buf[i + 1]) > 8 ||
+            Math.abs(a.buf[i + 2] - b.buf[i + 2]) > 8) n++;
+      }
+      return n / (a.buf.length / 4);
+    }
+    function runAt(altM, cache, settleFrames, ageOut) {
+      r.tiles = cache;
+      var d = 1 + altM / R;
+      for (var s = 0; s < settleFrames; s++) {
+        // NOT Math.max(d, cam.dist) — that is right in the altitude loop, where
+        // it preserves the terrain clamp pushing the eye up, and wrong here,
+        // where it would pin the camera at the highest altitude ever visited.
+        r.cam.dist = r.cam.sDist = d;
+        r.cam.lon = r.cam.sLon = sunLon; r.cam.lat = r.cam.sLat = sunLat;
+        r.cam.flyDur = 0;
+        PD.Render.draw(r, G.sim, G.ui || {});
+      }
+      // performance.now() does not advance inside a synchronous loop under
+      // virtual time, so the crossfade would sit at zero forever. Backdating
+      // the birth stamp exercises the real fade code rather than skipping it.
+      if (ageOut && r.satTex) r.satTex.forEach(function (e) { e.born = -100000; });
+      PD.Prof.reset();
+      PD.Render.draw(r, G.sim, G.ui || {});
+      var c = PD.Prof.count || {};
+      return {
+        patches: c['lod.patches'] || 0,
+        sat: c['sat.patches'] || 0,
+        mixSum: c['sat.mixSum'] || 0,
+        minSpan: c['sat.minSpan'],
+        textures: c['sat.textures'] || 0,
+        px: screen(),
+        altM: (r.cam.dist - 1) * R
+      };
+    }
+
+    if (PD.Tiles) {
+      var GROUND = 2000;
+      // 1. the loader fails every request — the offline / dead-network case
+      out.satOff = runAt(GROUND, stubCache('fail'), 70, false);
+      // 2. the same frame with imagery arriving, mid-fade
+      var okCache = stubCache('ok', '#ff00ff');
+      out.satFresh = runAt(GROUND, okCache, 3, false);
+      // 3. and once the fade has completed
+      out.satOn = runAt(GROUND, okCache, 3, true);
+      out.satServed = okCache.__served();
+      // 4. the SAME frame with a different ground. If the tile reaches the
+      //    screen at all these two cannot look alike.
+      var other = runAt(GROUND, stubCache('ok', '#00ff00'), 3, true);
+      out.satDiff = Math.round(differs(out.satOn.px, other.px) * 1000) / 10;
+      out.satOffDiff = Math.round(differs(out.satOn.px, out.satOff.px) * 1000) / 10;
+      // 5. from orbit the patch level is at or above the archive floor, so the
+      //    sub-rectangle is the whole tile; on the ground it must be a sliver.
+      out.satOrbit = runAt(1600000, stubCache('ok'), 70, true);
+      out.imagery = PD.Render.imageryState ? PD.Render.imageryState(r) : null;
+      out.satBad = r.satBad || 0;
+      out.satOther = { r: other.px.r, g: other.px.g, b: other.px.b };
+      // the toggle has to be a toggle
+      if (PD.Render.setImagery) {
+        PD.Render.setImagery(r, false);
+        out.satToggledOff = runAt(GROUND, okCache, 40, true);
+        PD.Render.setImagery(r, true);
+        out.satLayer = PD.Render.setImagery(r, true, 'daily');
+        PD.Render.setImagery(r, true, 'base');
+      }
+      // buffers are large; do not ship them out through the DOM
+      [out.satOff, out.satFresh, out.satOn, out.satOrbit, out.satToggledOff]
+        .forEach(function (o) { if (o && o.px) delete o.px.buf; });
+    }
+    out.imgBlocked = window.__imgBlocked.length;
+    out.planetUniforms = Object.keys(r.progPlanet.u).sort();
+
     finish(out);
   } catch (e) {
     finish({ fatal: (e && e.stack) ? e.stack : String(e) });
@@ -202,7 +381,7 @@ try {
       '--user-data-dir=' + profile,
       '--window-size=1280,800', '--virtual-time-budget=40000', '--dump-dom',
       'file://' + probeFile
-    ], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, timeout: 300000, stdio: ['ignore', 'pipe', 'ignore'] });
+    ], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, timeout: 600000, stdio: ['ignore', 'pipe', 'ignore'] });
   } finally {
     try { fs.rmSync(profile, { recursive: true, force: true }); } catch (e) {}
   }
@@ -307,6 +486,102 @@ console.log('\n  baseline (one sphere x3): ' + BASELINE_TRIS.toLocaleString() +
   '   worst measured: ' + worst.toLocaleString());
 check('the frame costs no more than the single-mesh globe it replaces',
   worst <= BASELINE_TRIS, worst.toLocaleString() + ' vs ' + BASELINE_TRIS.toLocaleString());
+
+// ---- streamed imagery ----------------------------------------------------
+console.log('\n--- real ground, streamed ---');
+if (!rep.satAvail) {
+  check('js/tiles.js is loaded and the renderer built a cache', false, 'no r.tiles');
+} else {
+  const off = rep.satOff, fresh = rep.satFresh, on = rep.satOn, orbit = rep.satOrbit;
+  const dump = (n, s) => s ? ('    ' + n.padEnd(9) + ' sat ' + String(s.sat).padStart(3) +
+    '/' + String(s.patches).padStart(3) + ' patches   mix ' +
+    (s.sat ? (s.mixSum / s.sat).toFixed(2) : '-') + '   span ' +
+    (s.minSpan == null ? '-' : Number(s.minSpan).toExponential(2)) +
+    '   screen rgb ' + s.px.r.toFixed(0) + ',' + s.px.g.toFixed(0) + ',' +
+    s.px.b.toFixed(0) + ' lit ' + (s.px.lit * 100).toFixed(0) + '%') : '';
+  [['dead net', off], ['arriving', fresh], ['loaded', on], ['orbit', orbit],
+   ['toggled', rep.satToggledOff]].forEach(([n, s]) => { if (s) console.log(dump(n, s)); });
+
+  // THE ONE THAT MATTERS MOST. Ending the offline guarantee was a deliberate
+  // choice, and it is only defensible if the no-imagery frame is a complete
+  // picture rather than an error state.
+  check('with every request failing, the frame is still drawn',
+    off.px.lit > 0.25 && off.patches > 20,
+    (off.px.lit * 100).toFixed(0) + '% of the screen lit, ' + off.patches + ' patches');
+  check('and no patch claims imagery it does not have', off.sat === 0,
+    off.sat + ' patches with imagery');
+
+  check('when tiles arrive, patches sample them', on.sat > 0,
+    on.sat + ' of ' + on.patches + ' patches');
+  check('the tiles came from the stub, not the network', rep.satServed > 0,
+    rep.satServed + ' stub tiles served');
+  // THE PIXELS HAVE TO CHANGE, or the uniform is being set and ignored —
+  // which is precisely what a counter cannot tell you. The test is
+  // DIRECTIONAL and differential: draw the same frame twice with a magenta
+  // ground and a green ground, and the red channel must go up for one while
+  // the green channel goes up for the other. That cannot happen by accident,
+  // and unlike an absolute colour it does not encode the lighting, the
+  // atmosphere or the tonemap into the assertion.
+  const o2 = rep.satOther || {};
+  console.log('    magenta ground rgb ' + on.px.r.toFixed(1) + ',' + on.px.g.toFixed(1) +
+    ',' + on.px.b.toFixed(1) + '   green ground rgb ' + (o2.r || 0).toFixed(1) + ',' +
+    (o2.g || 0).toFixed(1) + ',' + (o2.b || 0).toFixed(1) +
+    '   pixels differing: ' + rep.satDiff + '%');
+  check('a magenta ground and a green ground do not look alike',
+    (on.px.r - (o2.r || 0)) > 1.5 && ((o2.g || 0) - on.px.g) > 1.5,
+    'dR ' + (on.px.r - (o2.r || 0)).toFixed(2) + '  dG ' + ((o2.g || 0) - on.px.g).toFixed(2));
+  check('and the imagery frame is not the no-imagery frame', rep.satOffDiff > 0,
+    rep.satOffDiff + '% of pixels differ from the dead-network frame');
+  check('no tile failed to upload', (rep.satBad || 0) === 0, (rep.satBad || 0) + ' rejected');
+
+  // The crossfade. A tile that pops in reads as broken rather than as loading.
+  check('a tile that just arrived is still fading in',
+    fresh.sat > 0 && fresh.mixSum / fresh.sat < 0.9,
+    fresh.sat ? 'mix ' + (fresh.mixSum / fresh.sat).toFixed(2) : 'no imagery');
+  check('and once the fade is done it is fully opaque',
+    on.sat > 0 && on.mixSum / on.sat > 0.99, on.sat ? (on.mixSum / on.sat).toFixed(3) : '-');
+
+  // The sub-rectangle — the defect that shipped last round. On the ground the
+  // patch is far below the archive's deepest level, so it must be given a
+  // sliver of a tile; from orbit it is the whole tile. A renderer that ignores
+  // the rectangle draws BOTH at [0,0,1,1] and looks plausible at exactly one
+  // altitude.
+  check('on the ground a patch gets a sliver of a tile, not the whole one',
+    on.minSpan < 0.2, 'span ' + Number(on.minSpan).toExponential(2));
+  check('and from orbit it gets the whole tile', orbit.sat > 0 && orbit.minSpan === 1,
+    'span ' + orbit.minSpan + ' across ' + orbit.sat + ' patches');
+
+  check('imagery can be switched off, and then nothing samples a tile',
+    rep.satToggledOff && rep.satToggledOff.sat === 0 && rep.satToggledOff.px.lit > 0.25,
+    rep.satToggledOff ? rep.satToggledOff.sat + ' patches, ' +
+      (rep.satToggledOff.px.lit * 100).toFixed(0) + '% lit' : 'no run');
+  check('and the daily layer is reachable, so dateFor is live code',
+    rep.satLayer && rep.satLayer.layer === 'daily',
+    rep.satLayer ? rep.satLayer.layer + ' / ' + rep.satLayer.label : 'no toggle');
+  check('the acknowledgement NASA asks for is available to the UI',
+    !!(rep.imagery && rep.imagery.credit && rep.imagery.credit.indexOf('NASA') >= 0),
+    rep.imagery ? rep.imagery.credit : 'none');
+
+  // GL textures are not garbage collected, so the cap has to hold at every
+  // moment rather than on average. It is read from the renderer rather than
+  // written down here, because a number copied into a test is a number that
+  // stops tracking the thing it is supposed to bound.
+  const cap = (rep.imagery && rep.imagery.maxTextures) || 0;
+  check('the texture cache stays inside its VRAM budget',
+    cap > 0 && Math.max(on.textures, orbit.textures) <= cap,
+    Math.max(on.textures, orbit.textures) + ' textures resident of ' + cap +
+    ' (' + Math.round(cap * 512 * 512 * 4 / 1048576) + ' MB)');
+  // and the cap has to be above the working set, or it holds nothing at all
+  check('and the cap is above the largest working set on screen',
+    cap > Math.max(on.sat ? 1 : 0, orbit.sat), cap + ' vs ' + orbit.sat + ' patches at orbit');
+}
+
+console.log('\n--- and none of it touched the network ---');
+check('the built-in loader was blocked before it could reach the network',
+  typeof rep.imgBlocked === 'number',
+  rep.imgBlocked + ' request(s) blocked at the Image stub');
+check('and every tile measured came from the stub instead',
+  rep.satServed > 0, rep.satServed + ' served locally');
 
 console.log('\n=== render failures: ' + fails + ' ===');
 console.log(fails === 0 ? 'RENDER TEST PASSED' : 'RENDER TEST FAILED');

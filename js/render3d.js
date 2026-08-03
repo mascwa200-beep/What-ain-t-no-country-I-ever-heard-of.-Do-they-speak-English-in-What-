@@ -145,23 +145,42 @@ attribute vec3 aBase; attribute vec3 aUp; attribute vec3 aNrm; attribute vec2 aU
 uniform mat4 uMVP; uniform vec3 uCentreRel; uniform vec3 uCentre;
 uniform float uExag; uniform vec4 uUVRect;
 varying vec2 vUV; varying vec3 vN; varying vec3 vTN; varying float vLand;
+varying vec2 vLocal;
 void main(){
   vec3 local = aBase + aUp * uExag;
   vN = normalize(uCentre + aBase);
   vTN = aNrm;
   vLand = length(aUp);
   vUV = uUVRect.xy + aUV * uUVRect.zw;
+  // the PATCH-LOCAL grid coordinate, kept alongside the global one. Satellite
+  // imagery is addressed per patch — a sub-rectangle of one tile — and the
+  // global equirect UV cannot express that without a second rect anyway.
+  vLocal = aUV;
   gl_Position = uMVP * vec4(local + uCentreRel, 1.0);
 }`;
   const FS_PLANET = `
 precision highp float;
 varying vec2 vUV; varying vec3 vN; varying vec3 vTN; varying float vLand;
+varying vec2 vLocal;
 uniform sampler2D uTex; uniform sampler2D uData; uniform sampler2D uNorm;
 uniform sampler2D uClim;   // r=precip g=cloud b=snow a=wetness
+uniform sampler2D uSat;    // streamed imagery for THIS patch, or a blank
+uniform vec4 uSatRect;     // where in that tile this patch sits
+uniform float uSatMix;     // 0 = procedural bake, unchanged
 uniform vec3 uSun; uniform vec3 uEye; uniform vec3 uAtmo;
 uniform float uBlood; uniform float uDoom; uniform float uTime;
 void main(){
   vec3 base = texture2D(uTex, vUV).rgb;
+  // Real ground. uSatRect is [0,0,1,1] when the exact tile is resident and a
+  // sub-rectangle when only an ancestor is — so the parent fallback is the
+  // ordinary path here rather than a special case, and the same multiply
+  // covers a patch deeper than the archive goes.
+  //
+  // The patch grid runs south-to-north in y and the tile image runs
+  // north-to-south, so the v flip is not cosmetic: without it the ground is
+  // mirrored about its own latitude and reads as a wrong-projection bug.
+  vec2 sUV = uSatRect.xy + vec2(vLocal.x, 1.0 - vLocal.y) * uSatRect.zw;
+  base = mix(base, texture2D(uSat, sUV).rgb, uSatMix);
   vec4 data = texture2D(uData, vUV); // r=city light g=water b=fire a=crackmask
   vec4 clim = texture2D(uClim, vUV);
   vec3 Ns = normalize(vN);
@@ -1096,6 +1115,38 @@ void main(){
       r.lodBufs = new Map();      // patch object -> {base, up, nrm, version}
     }
 
+    // ---- streamed imagery ----
+    // A patch with no tile yet still has to draw something, and what it draws
+    // is the procedural bake at uSatMix = 0. The sampler still needs a bound
+    // texture though: sampling an incomplete unit is undefined behaviour that
+    // renders black on some drivers and fine on others, which is the worst of
+    // both. One opaque white texel costs nothing and makes the no-imagery path
+    // identical everywhere.
+    r.texBlank = glTex(gl, false);
+    gl.bindTexture(gl.TEXTURE_2D, r.texBlank);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE,
+      new Uint8Array([255, 255, 255, 255]));
+    r.satTex = new Map();         // Image -> { tex, born, seen }
+    if (PD.Tiles && !r.tiles) {
+      // The persistent store opens asynchronously and may never open at all
+      // (private browsing, an old WebView, a full disk). The cache is built
+      // now regardless, against a shim that simply misses until the real store
+      // arrives — so streaming never waits on storage.
+      r.tileStore = {
+        inner: null,
+        get: (k) => (r.tileStore.inner ? r.tileStore.inner.get(k) : null),
+        put: (k, v) => { if (r.tileStore.inner) r.tileStore.inner.put(k, v); }
+      };
+      // Sized to the ON-SCREEN WORKING SET, not to a download budget — see
+      // SAT_MAX_TILES. A cache shorter than the number of distinct tiles in a
+      // frame does not merely hold less, it holds nothing: the scan evicts
+      // every entry before it is asked for again.
+      r.tiles = PD.Tiles.create({ store: r.tileStore, maxLive: SAT_MAX_TILES });
+      try {
+        PD.Tiles.openStore('pd-tiles', (s) => { r.tileStore.inner = s; });
+      } catch (e) { /* no IndexedDB: stream every time, which is fine */ }
+    }
+
     // sphere geometry (cloud + atmosphere shells only)
     const nv = (SEG_LON + 1) * (SEG_LAT + 1);
     const pos = new Float32Array(nv * 3), uv = new Float32Array(nv * 2);
@@ -1849,7 +1900,7 @@ void main(){
     gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, r.texData); gl.uniform1i(pp.u.uData, 1);
     gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D, r.texNorm); gl.uniform1i(pp.u.uNorm, 2);
     gl.activeTexture(gl.TEXTURE3); gl.bindTexture(gl.TEXTURE_2D, r.texClim); gl.uniform1i(pp.u.uClim, 3);
-    if (patches) drawPatches(r, pp, patches, eye);
+    if (patches) drawPatches(r, pp, patches, eye, sim);
 
     // Settlements, as buildings. Opaque and depth-tested, so it goes with the
     // terrain rather than with the transparent passes below. Returns straight
@@ -1955,12 +2006,128 @@ void main(){
   // afterwards. WebGL buffers are not garbage collected — a renderer that
   // only ever creates them leaks the entire descent's worth of VRAM, on the
   // devices least able to spare it.
-  function drawPatches(r, pp, patches, eye) {
+  // ---------- streamed imagery, per patch ----------
+  // THE CAP IS SET BY THE WORKING SET, NOT BY TASTE. At orbit the quadtree
+  // holds ~100 patches at levels 0..6 and every one of them is a DIFFERENT
+  // tile, so the tiles needed in a single frame is bounded by MAX_PATCHES
+  // (128) rather than by anything smaller. A cap below that is not "a smaller
+  // cache" — it is a sequential scan through an LRU shorter than the scan,
+  // which is the classic zero-hit-rate case: measured at 64, orbit sampled
+  // imagery on 0 of 106 patches while the loader answered every request.
+  //
+  // 160 tiles of 512x512 RGBA is ~168 MB unpacked, and that is the honest
+  // dominant cost of this feature. The cap exists so a long flight does not
+  // grow without bound, not to make the number small.
+  const SAT_MAX_TILES = 160;
+  const SAT_FADE_MS = 320;
+
+  // An Image becomes a GL texture exactly once. WebGL textures are not
+  // garbage collected, so this map is also the thing that has to be swept.
+  function satTexture(r, img) {
+    const gl = r.gl;
+    let e = r.satTex.get(img);
+    if (!e) {
+      if (r.satBad && r.satBad > 20) return null;   // this device cannot upload
+      const tex = glTex(gl, true);
+      gl.bindTexture(gl.TEXTURE_2D, tex);
+      // The tile image runs north-to-south and the shader flips v itself, so
+      // flipping again here would cancel out and put the ground upside down.
+      gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+      try {
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img);
+      } catch (err) {
+        // A cross-origin image without usable CORS taints the canvas and
+        // throws HERE rather than at fetch. Drop it and keep the bake.
+        gl.deleteTexture(tex);
+        r.satBad = (r.satBad || 0) + 1;
+        return null;
+      }
+      e = { tex, born: nowMs() };
+      r.satTex.set(img, e);
+      trimSatTextures(r);
+    }
+    e.seen = r._lodFrame || 0;
+    return e;
+  }
+
+  // The cap is a CAP, enforced the moment it is exceeded. Enforcing it only in
+  // the periodic sweep let the map reach 135 between sweeps — a VRAM budget
+  // that is true once every 64 frames is not a budget.
+  //
+  // Nothing seen in the current frame is ever a candidate: SAT_MAX_TILES is
+  // above MAX_PATCHES precisely so a single frame's working set always fits,
+  // and evicting inside the frame that needs it is the same zero-hit-rate
+  // thrash the tile cache itself was measured doing at 64.
+  function trimSatTextures(r) {
+    const tab = r.satTex;
+    if (!tab || tab.size <= SAT_MAX_TILES) return;
+    const frame = r._lodFrame || 0;
+    const cand = [];
+    tab.forEach((e, img) => { if ((e.seen == null ? -1 : e.seen) !== frame) cand.push([e.seen || 0, img]); });
+    cand.sort((a, b) => a[0] - b[0]);
+    for (let i = 0; i < cand.length && tab.size > SAT_MAX_TILES; i++) {
+      const img = cand[i][1];
+      r.gl.deleteTexture(tab.get(img).tex);
+      tab.delete(img);
+    }
+  }
+  function nowMs() {
+    return (typeof performance !== 'undefined' && performance.now)
+      ? performance.now() : Date.now();
+  }
+
+  // What imagery this patch should draw, and how much of it. Returns null when
+  // there is none, and the caller then draws the procedural bake — which is a
+  // complete picture, not an error state.
+  function satFor(r, p, date, pri) {
+    if (!r.tiles) return null;
+    // The renderer's longitude runs 0..2pi from the antimeridian (tile x = 0 is
+    // -180), and the tile grid is indexed from -pi. Getting this wrong offsets
+    // the whole planet by half a world and looks like a projection bug.
+    const lon = p.lon0 + p.lonSpan * 0.5 - Math.PI;
+    const lat = p.lat0 + p.latSpan * 0.5;
+    // The patch CENTRE, not a corner: patch and tile grids are the same grid at
+    // the same level, so a corner sits exactly on a boundary and one ulp
+    // decides which tile it names. The centre is strictly interior.
+    const hit = r.tiles.get(p.level, lon, lat, date, { pri: pri || 0 });
+    if (!hit) return null;
+    const e = satTexture(r, hit.img);
+    if (!e) return null;
+    // Arrival is a fade. Without it, flying produces a shower of rectangles
+    // snapping into place, which reads as broken rather than as loading.
+    const mix = PD.clamp((nowMs() - e.born) / SAT_FADE_MS, 0, 1);
+    return { tex: e.tex, rect: hit.uv, mix };
+  }
+
+  function sweepSatTextures(r) {
+    const gl = r.gl, tab = r.satTex;
+    if (!tab) return;
+    const frame = r._lodFrame || 0;
+    tab.forEach((e, img) => {
+      if (frame - (e.seen || 0) > 120) { gl.deleteTexture(e.tex); tab.delete(img); }
+    });
+    trimSatTextures(r);
+  }
+
+  function drawPatches(r, pp, patches, eye, sim) {
     const gl = r.gl, tab = r.lodBufs;
     PD.Prof.begin('lod.draw');
     bindAttr(gl, pp.a.aUV, r.lodUV, 2);
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, r.lodIdx);
-    let tris = 0, draws = 0, uploads = 0;
+
+    // Imagery is of the Earth, so it is only ever drawn on the Earth. On a
+    // generated world it would be a photograph of somewhere else.
+    const satOn = !!(r.tiles && r.world && r.world.isEarth && r.satOn !== false);
+    const date = satOn
+      ? r.tiles.dateFn(sim && sim.clock != null ? sim.epoch + sim.clock : null)
+      : null;
+    const wanted = satOn ? new Set() : null;
+    gl.activeTexture(gl.TEXTURE4);
+    gl.bindTexture(gl.TEXTURE_2D, r.texBlank);
+    gl.uniform1i(pp.u.uSat, 4);
+
+    let tris = 0, draws = 0, uploads = 0, satDrawn = 0;
+    let satMixSum = 0, satMinSpan = 1;
     for (let i = 0; i < patches.length; i++) {
       const p = patches[i];
       let b = tab.get(p);
@@ -1981,6 +2148,29 @@ void main(){
       bindAttr(gl, pp.a.aNrm, b.nrm, 3);
       const uv = PD.LOD.patchUV(p);
       gl.uniform4f(pp.u.uUVRect, uv.u0, uv.v0, uv.du, uv.dv);
+      // real ground, if there is any for this patch yet
+      let sat = null;
+      if (satOn && date) {
+        // priority is the patch's own projected size — the thing you are
+        // looking at outranks the thing at the edge of the screen
+        sat = satFor(r, p, date, p.px || 0);
+        const t = r.tiles.tileFor(p.level,
+          p.lon0 + p.lonSpan * 0.5 - Math.PI, p.lat0 + p.latSpan * 0.5);
+        wanted.add(t.z + '/' + t.x + '/' + t.y);
+      }
+      if (sat) {
+        gl.activeTexture(gl.TEXTURE4);
+        gl.bindTexture(gl.TEXTURE_2D, sat.tex);
+        gl.uniform4f(pp.u.uSatRect, sat.rect[0], sat.rect[1], sat.rect[2], sat.rect[3]);
+        gl.uniform1f(pp.u.uSatMix, sat.mix);
+        satDrawn++;
+        satMixSum += sat.mix;
+        if (sat.rect[2] < satMinSpan) satMinSpan = sat.rect[2];
+      } else {
+        gl.activeTexture(gl.TEXTURE4);
+        gl.bindTexture(gl.TEXTURE_2D, r.texBlank);
+        gl.uniform1f(pp.u.uSatMix, 0);
+      }
       // the centre, and the centre relative to the eye. The subtraction is
       // done here in JS doubles; doing it in the shader would form the
       // difference of two near-equal float32s and throw away the precision
@@ -1991,6 +2181,19 @@ void main(){
       gl.drawElements(gl.TRIANGLES, r.lodNIdx, gl.UNSIGNED_SHORT, 0);
       tris += r.lodNIdx / 3; draws++;
     }
+    // Leave the active unit where the rest of the renderer expects it. The
+    // active texture unit is global state, and glTex() binds on whatever it
+    // happens to be — so a texture created later would silently land on unit 4
+    // and replace this frame's imagery.
+    gl.activeTexture(gl.TEXTURE0);
+
+    // The camera moved: a queued tile for a patch that is no longer on screen
+    // is work that crowds out the patch that is. In-flight requests are left
+    // alone — those bytes are already paid for.
+    if (satOn && wanted) {
+      r.tiles.dropQueued((job) => wanted.has(job.z + '/' + job.x + '/' + job.y));
+    }
+
     // reclaim: anything not drawn for 120 frames has been merged away
     if ((r._lodFrame & 63) === 0) {
       tab.forEach((b, p) => {
@@ -1999,6 +2202,7 @@ void main(){
           tab.delete(p);
         }
       });
+      sweepSatTextures(r);
     }
     r._lodFrame = (r._lodFrame || 0) + 1;
     PD.Prof.end();
@@ -2006,6 +2210,17 @@ void main(){
     PD.Prof.n('gl.planetTris', tris);
     PD.Prof.n('lod.uploads', uploads);
     PD.Prof.n('lod.resident', tab.size);
+    PD.Prof.n('sat.patches', satDrawn);
+    PD.Prof.n('sat.textures', r.satTex ? r.satTex.size : 0);
+    // the crossfade, and the sub-rectangle. Both are invisible in a counter
+    // that only says "imagery drew", and both are how it drew WRONG last time.
+    PD.Prof.n('sat.mixSum', satMixSum);
+    PD.Prof.n('sat.minSpan', satDrawn ? satMinSpan : 1);
+    if (r.tiles) {
+      PD.Prof.n('sat.live', r.tiles.size());
+      PD.Prof.n('sat.queued', r.tiles.queued());
+      PD.Prof.n('sat.inflight', r.tiles.inFlight());
+    }
   }
 
   // ---------- settlements, as buildings ----------
@@ -2506,16 +2721,50 @@ void main(){
       });
       r.lodBufs.clear();
     }
+    // The imagery textures go with them. _lodFrame restarts at zero here, so
+    // every surviving texture's `seen` would be in the future and the sweep
+    // would never fire again — a leak that only appears when you change world,
+    // which is exactly the case nobody watches the memory graph through.
+    if (r.satTex && r.gl) {
+      r.satTex.forEach((e) => r.gl.deleteTexture(e.tex));
+      r.satTex.clear();
+    }
+    if (r.tiles) r.tiles.dropQueued(null);
     r.lod = PD.LOD.createTree(r.world, r.world.seed);
     r._lodFrame = 0;
   }
 
   function renderTerrain(r) { bakeTerrain(r); }
 
+  // ---------- the imagery switch ----------
+  // Off is a supported mode, not a failure: at uSatMix 0 the procedural bake is
+  // a complete picture. And the daily mosaic is reachable rather than dead
+  // code — it is the only way to see the real weather of a real date, which is
+  // the one thing the cloud-free default cannot show.
+  function setImagery(r, on, layer) {
+    if (on != null) r.satOn = !!on;
+    if (layer && r.tiles) r.tiles.setLayer(layer);
+    return imageryState(r);
+  }
+  function imageryState(r) {
+    const L = r.tiles ? r.tiles.layerInfo() : null;
+    return {
+      on: r.satOn !== false,
+      available: !!(r.tiles && r.world && r.world.isEarth),
+      layer: L ? L.key : null,
+      label: L ? L.label : null,
+      credit: L ? L.credit : (PD.Tiles ? PD.Tiles.CREDIT : ''),
+      tiles: r.tiles ? r.tiles.size() : 0,
+      textures: r.satTex ? r.satTex.size : 0,
+      maxTextures: SAT_MAX_TILES
+    };
+  }
+
   PD.FX = FX;
   PD.Render = {
     createRenderer, draw, renderTerrain, setWorld, flyTo, ribbonQuad,
     worldToScreen, screenToWorld, screenToWorldRaw, centerTile,
+    setImagery, imageryState,
     TILE, FX, hexToRgb: R2.hexToRgb
   };
 })(window);

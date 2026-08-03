@@ -89,7 +89,8 @@
     weather: 'clear', weatherT: 0,
     flash: 0, shake: 0,
     floodT: 0, storm: null, tornado: null,
-    ui: { showLabels: true, overUI: false, mouseW: null, brushRadius: 1, brushColor: '#fff' },
+    ui: { showLabels: true, overUI: false, mouseW: null, brushRadius: 1, brushColor: '#fff',
+          imagery: 'base' },
     running: false,
     saveTimer: 0, snapTimer: 0,
     timeline: [],                            // time-travel snapshots
@@ -1754,6 +1755,7 @@
         else { G.selected = null; refreshPanelSel(); setPower('pan'); }
       }
       else if (k === 'l') toggleLabels();
+      else if (k === 'i') cycleImagery();
       else if (k === 'm') toggleMenu();
       else if (k === 'c') togglePanel('cosmos');
       else if (k === 'p') togglePanel('prayers');
@@ -1944,8 +1946,46 @@
     const chips = [];
     if (G.sabbath) chips.push('<span class="tgl-chip">⏸️ SABBATH</span>');
     if (G.omniscient) chips.push('<span class="tgl-chip">👁 ' + (G.omniAll ? 'UNBLINKING' : 'OMNISCIENT') + '</span>');
+    // NASA GIBS imagery is public domain, but acknowledgement is expected and
+    // this is where it lives — visible whenever the ground is theirs rather
+    // than ours, and gone the moment it is not.
+    const im = G.r && Render.imageryState ? Render.imageryState(G.r) : null;
+    if (im && im.available && im.on) {
+      // both strings are fixed literals from js/tiles.js, not anything a
+      // player can type, so they go in as they are
+      chips.push('<span class="tgl-chip" title="' + im.credit + '">🛰 ' +
+        im.label + ' · NASA</span>');
+    }
     el.innerHTML = chips.join('');
     el.style.display = chips.length ? '' : 'none';
+  }
+
+  // Ground imagery cycles rather than toggles, because there are three honest
+  // states and only one of them is "off": the cloud-free base map, the daily
+  // mosaic (real weather on a real date, and the only thing that keeps the
+  // date machinery live), and the procedural bake on its own — which is a
+  // complete picture, not a failure, and is what you get on a train.
+  const IMAGERY_CYCLE = ['base', 'daily', 'off'];
+  function cycleImagery() {
+    if (!G.r || !Render.setImagery) return;
+    const i = IMAGERY_CYCLE.indexOf(G.ui.imagery || 'base');
+    const next = IMAGERY_CYCLE[(i + 1) % IMAGERY_CYCLE.length];
+    G.ui.imagery = next;
+    applyImagery();
+    const st = Render.imageryState(G.r);
+    flashToast(next === 'off' ? 'Ground: the world as imagined'
+      : 'Ground: ' + st.label + (st.available ? '' : ' (this world is not the Earth)'));
+  }
+  function applyImagery() {
+    if (!G.r || !Render.setImagery) return;
+    const m = G.ui.imagery || 'base';
+    Render.setImagery(G.r, m !== 'off', m === 'off' ? null : m);
+    const b = $('#btn-imagery');
+    if (b) {
+      b.classList.toggle('off', m === 'off');
+      b.textContent = m === 'daily' ? '🌦' : '🛰';
+    }
+    refreshToggleState();
   }
   function updatePowerInfo(p) {
     if (!p) return;
@@ -2715,6 +2755,8 @@
     bindPanels();
 
     buildTimeDial();
+    // the ground the world boots with, and the chip that credits it
+    applyImagery();
     // delegated: the dial is re-rendered, so per-button listeners would go stale
     $('#time-dial').addEventListener('click', (e) => {
       const b = e.target.closest('.speed-btn');
@@ -2751,6 +2793,7 @@
       });
     }
     $('#btn-labels').addEventListener('click', toggleLabels);
+    $('#btn-imagery') && $('#btn-imagery').addEventListener('click', cycleImagery);
     $('#btn-sound').addEventListener('click', () => {
       const on = !Audio8.isEnabled(); Audio8.setEnabled(on); Audio8.setMusic(on);
       $('#btn-sound').textContent = on ? '🔊' : '🔇';

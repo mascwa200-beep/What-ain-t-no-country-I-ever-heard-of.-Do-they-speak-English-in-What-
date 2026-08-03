@@ -353,6 +353,15 @@ const PROBE = `
     if (to && to.classList.contains('show')) { cleared.push('toast'); to.classList.remove('show'); }
     var s = $('#tool-search');
     if (s && s.value) { cleared.push('search'); s.value = ''; s.dispatchEvent(new Event('input')); }
+    // the top-HUD chips. A state that turns one on must not silently make the
+    // NEXT state a different measurement than the one it claims to be.
+    if (window.G && (G.sabbath || G.omniscient || (G.ui && G.ui.imagery !== 'base'))) {
+      cleared.push('chips');
+      G.sabbath = false; G.omniscient = false; G.omniAll = false;
+      if (G.ui) G.ui.imagery = 'base';
+      if (window.PD && PD.Render && PD.Render.setImagery && G.r) PD.Render.setImagery(G.r, true, 'base');
+      var rt = $('#toggle-chips'); if (rt) { rt.innerHTML = ''; rt.style.display = 'none'; }
+    }
     return cleared;
   }
 
@@ -541,6 +550,20 @@ const PROBE = `
         var t = $('#toast');
         if (!t.textContent.length) throw new Error('toast has no text');
         return 'toast: "' + t.textContent.slice(0, 40) + '"';
+      });
+
+      // The imagery chip is the acknowledgement NASA asks for, so it has to be
+      // legible rather than merely present — and it lands in the top HUD next
+      // to the sabbath and omniscience chips, which is the row most likely to
+      // run out of width on a landscape phone. Force all three at once.
+      await state('imagery-chip', async function () {
+        var b = $('#btn-imagery');
+        if (!b) throw new Error('no imagery toggle');
+        G.sabbath = true; G.omniscient = true; G.omniAll = true;
+        b.click();                       // base -> daily, the longest label
+        var el = $('#toggle-chips');
+        if (el.textContent.indexOf('NASA') < 0) throw new Error('no acknowledgement: ' + el.textContent);
+        return 'chips: ' + el.textContent;
       });
 
       // deliberately trips the ellipsis exemption: if that exemption ever
