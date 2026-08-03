@@ -386,9 +386,18 @@ try {
     try { fs.rmSync(profile, { recursive: true, force: true }); } catch (e) {}
   }
 } catch (e) {
+  // A SKIP IS NOT A PASS. Exiting 0 here means "the browser would not start"
+  // is indistinguishable from "every assertion held" — and this is the only
+  // suite in the project that can count a draw call at all, so a silent skip
+  // takes the whole renderer out of CI without saying so. Locally a missing
+  // browser is ordinary; on the runner one is located in an earlier step that
+  // fails loudly if absent, so a skip there is a real failure.
   console.log('SKIP — browser unavailable (' + e.code + ')');
+  console.log(process.env.CI
+    ? 'RENDER TEST FAILED — the browser never started under CI. Nothing was measured.'
+    : 'RENDER TEST INCONCLUSIVE — nothing was measured. This is not a pass.');
   try { fs.unlinkSync(probeFile); } catch (e2) {}
-  process.exit(0);
+  process.exit(process.env.CI ? 1 : 0);
 } finally {
   try { fs.unlinkSync(probeFile); } catch (e2) {}
 }

@@ -616,6 +616,7 @@ fs.writeFileSync(probeFile, fs.readFileSync(path.join(base, 'index.html'), 'utf8
   .replace('</body>', PROBE));
 
 let failures = 0;
+let measured = 0, skipped = 0;
 // The chrome the browser reserves is a property of the BUILD, not of the
 // window — so measure it once and reuse it. Without this the convergence
 // below doubles every launch, which took the CI layout step from ~4 minutes
@@ -690,9 +691,11 @@ try {
       }
     } catch (e) {
       console.log('  SKIP ' + s.name + ' — browser unavailable (' + e.code + ')');
+      skipped++;
       continue;
     }
 
+    measured++;
     const vp = readVp(dom);
     const rep = readReport(dom);
     if (!vp) { console.log('\nFAIL ' + s.name + ' — the page never loaded'); failures++; continue; }
@@ -765,6 +768,24 @@ try {
   try { fs.unlinkSync(probeFile); } catch (e) {}
 }
 
-console.log('\n=== layout failures: ' + failures + ' ===');
-console.log('LAYOUT TEST ' + (failures ? 'FAILED' : 'PASSED'));
-if (failures) process.exitCode = 1;
+// A SKIP IS NOT A PASS. When the browser could not be started this printed
+// "layout failures: 0 / LAYOUT TEST PASSED" and exited 0 — a green result that
+// measured nothing at all, which is worse than a red one because it is
+// believed. Seen for real: a slow container timed out on every viewport and
+// the suite reported success.
+console.log('\n=== layout: ' + measured + ' of ' + (measured + skipped) +
+  ' viewports measured, ' + failures + ' failures ===');
+if (!measured) {
+  console.log('LAYOUT TEST INCONCLUSIVE — no viewport was measured. This is not a pass.');
+  process.exitCode = 1;
+} else if (skipped && process.env.CI) {
+  // Locally a missing browser is ordinary. On the runner one is located in an
+  // earlier step that fails loudly if absent, so a skip there means something
+  // is wrong and must not be swallowed.
+  console.log('LAYOUT TEST FAILED — ' + skipped + ' viewport(s) skipped under CI.');
+  process.exitCode = 1;
+} else {
+  console.log('LAYOUT TEST ' + (failures ? 'FAILED' : 'PASSED') +
+    (skipped ? '  (' + skipped + ' skipped — no browser)' : ''));
+  if (failures) process.exitCode = 1;
+}
