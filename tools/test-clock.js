@@ -218,8 +218,8 @@ console.log('\n--- the same century, whatever the step size ---');
     check(label + ' lands in the same place at every step size', spread <= tol,
       vals.join(' / ') + '  spread ' + (spread * 100).toFixed(0) + '% (allowed ' + (tol * 100) + '%)');
   };
-  agree('pop', 0.45, 'the population');
-  agree('adults', 0.60, 'how many have come of age');
+  agree('pop', 0.15, 'the population');
+  agree('adults', 0.40, 'how many have come of age');
 
   // SETTLEMENT COUNT IS THE ONE THAT DOES NOT YET HOLD, and the bound below
   // is deliberately weak so that the number stays visible rather than being
@@ -227,19 +227,26 @@ console.log('\n--- the same century, whatever the step size ---');
   // six-month steps over the same century: coarse steps found more, smaller
   // towns while the total population lands within 9%.
   //
-  // Four cadence bugs have been found and fixed chasing it — colonisation's
-  // cooldown, the building cycle, the grace period before an emptied village
-  // is razed, and the two ambient cadences below — taking the spread from
-  // 131% to 96%. What remains is not a fifth rate bug but a FEEDBACK LOOP:
-  // coarse steps end up with smaller settlements, small settlements meet the
-  // colonisation conditions more readily than large ones, and so they split
-  // instead of growing. Breaking that needs a change to how carrying capacity
-  // and colonisation relate, which is a design question and not a units one.
+  // Seven cadence bugs were found and fixed chasing this, and the last two
+  // mattered more than the first five put together.
+  //
+  // `if (rng() < hazard(p, dt)) doIt()` can fire at most ONCE PER STEP.
+  // Village births run at 28.5 a year; three-day steps delivered 25.3 and
+  // SIX-MONTH STEPS DELIVERED 2.0. That starved the population and left the
+  // food unspent — and unspent food is what pays for colonisation, so the
+  // world grew more, smaller settlements the faster you ran it. Animal
+  // breeding had the identical cap, which thinned the wildlife out exactly
+  // when the dial was moved.
+  //
+  // Drawing a COUNT rather than a coin flip took the spread from 96% to 32%
+  // and the population from 20% to ONE PER CENT. What is left is ordinary
+  // sampling noise on a chaotic system, not a systematic bias — the sign of
+  // the difference no longer even points the same way at every step size.
   //
   // It is asserted at the level it actually achieves so a REGRESSION still
   // fails, and it is named here so nobody reads the suite as claiming more
   // than it proves.
-  agree('the number of settlements', 1.00, 'the number of settlements');
+  agree('the number of settlements', 0.55, 'the number of settlements');
 
   // A world that is merely EMPTY would satisfy every tolerance above, so the
   // runs have to have actually done something first.

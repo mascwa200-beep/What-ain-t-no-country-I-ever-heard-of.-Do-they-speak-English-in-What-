@@ -2703,6 +2703,33 @@ body{
   function hazard(p, dt) { return rateOver(p, TICK_SLOW, dt); }      // world events
   function hazardFast(p, dt) { return rateOver(p, TICK_FAST, dt); }  // bodily ones
 
+  // HOW MANY TIMES it happened, not merely whether it happened at all.
+  //
+  // `if (rng() < hazard(p, dt)) doIt()` can fire at most ONCE PER STEP. Below
+  // dt = the event's own interval that is indistinguishable from the truth,
+  // and above it the event silently stops tracking the calendar and starts
+  // tracking the frame rate.
+  //
+  // Measured on village births, which should run at 28.5 a year: three-day
+  // steps delivered 25.3 and SIX-MONTH STEPS DELIVERED 2.0. A thirteen-fold
+  // under-count, which starved the population and left the food unspent —
+  // and unspent food is what funds colonisation, so the world quietly grew
+  // more, smaller settlements the faster you ran it. That was the last big
+  // divergence in the cross-rate invariant and nothing else would have found
+  // it.
+  //
+  // The expected count over dt is lambda*dt; the fractional remainder is
+  // taken as a coin flip so the long-run average is exact.
+  function countOver(p, period, dt, cap, rng) {
+    if (p <= 0 || dt <= 0) return 0;
+    if (p >= 1) return Math.min(cap, Math.max(1, Math.floor(dt / period)));
+    const lambda = -Math.log(1 - p) / period;
+    const expected = lambda * dt;
+    let n = Math.floor(expected);
+    if (rng() < expected - n) n++;
+    return Math.min(cap, n);
+  }
+
   // Exact solution of x' = k(target - x) over dt: an exponential approach that
   // cannot overshoot however large the step. The per-tick form `x += (target -
   // x) * k` is the same curve sampled, and diverges as soon as k*dt > 1.
@@ -3291,15 +3318,19 @@ body{
             // biome preference is a CHOICE made at this moment, not a rate —
             // it must not be converted
             if (R.likes.indexOf(b) >= 0 || sim.rng() < 0.3) {
-              // At most one birth per step, at the chance the elapsed time
-              // warrants. At Real Time that is a vanishing fraction and the
-              // pacing is the old one; at a year a second it is a certainty
-              // whenever a pair is ready, and the species caps above are what
-              // stop that from becoming a plague of rabbits.
-              if (sim.rng() < Math.min(1, dt / interval)) {
+              // A COUNT over the elapsed span, for the same reason village
+              // births are: one flip per step caps a rabbit at one litter
+              // however long the step, so wildlife thinned out exactly when
+              // the dial was moved. The species caps above are what stop this
+              // from becoming a plague of rabbits; the cap here only bounds
+              // the cost of a single step.
+              const litters = countOver(1, interval, dt, 6, sim.rng);
+              for (let k = 0; k < litters; k++) {
+                if (sim.counts[u.race] + k >= cap || sim.units.length >= sim.UNIT_CAP) break;
                 spawnUnit(sim, u.race, u.x + sim.rng() - 0.5, u.y + sim.rng() - 0.5);
-                u.breedCd = interval; u.food -= 0.3;
+                u.food -= 0.3;
               }
+              if (litters > 0) u.breedCd = interval;
             }
           }
         });
@@ -3477,12 +3508,17 @@ body{
     // ---- growth: birth a citizen (logistic toward capacity) ----
     if (v.pop < v.cap && v.food > 8 + v.pop * 0.6 && sim.units.length < sim.UNIT_CAP) {
       const room = 1 - v.pop / Math.max(1, v.cap);
-      // A birth is the archetypal hazard: a chance per unit time, saturating
-      // at one. Multiplying the old per-tick chance by dt would make every
-      // settlement give birth on every step the moment the dial moved, and
-      // the world would be at the population cap within a second of leaving
-      // Real Time.
-      if (sim.rng() < hazard(0.22 * R.breed * (0.3 + room), dt)) {
+      // Births are a COUNT over the elapsed span, not a coin flip. A single
+      // flip per step caps a village at one birth however long the step is,
+      // which at six months a step is two births a year against the 28.5 the
+      // rate actually describes.
+      //
+      // The cap bounds the cost of one step; at DT_MAX (a year) a village
+      // wants about thirty, so thirty-two never binds in practice and exists
+      // only so that a pathological dt cannot spawn without limit.
+      const births = countOver(0.22 * R.breed * (0.3 + room), TICK_SLOW, dt, 32, sim.rng);
+      for (let b = 0; b < births; b++) {
+        if (v.pop + b >= v.cap || sim.units.length >= sim.UNIT_CAP || v.food <= 8) break;
         spawnUnit(sim, v.race, v.x + (sim.rng() * 2 - 1), v.y + (sim.rng() * 2 - 1), { village: v.id });
         v.food -= 5;
       }
@@ -3916,7 +3952,7 @@ body{
     chooseProfession, walkable, shielded,
     // the clock, and the arithmetic everything else has to agree with
     MINUTE, HOUR, DAY, MONTH, YEAR, DT_MAX, OLD_TICK, GESTATION, ATTACK_CD,
-    hazard, hazardFast, rateOver, approach, now, years, subsolar, seasonAt, isNightAt,
+    hazard, hazardFast, rateOver, countOver, approach, now, years, subsolar, seasonAt, isNightAt,
     TICK_SLOW, TICK_FAST,
     adultAgeFor, breedIntervalFor
   };
