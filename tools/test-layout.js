@@ -544,12 +544,18 @@ const PROBE = `
 
       await state('menu-modal', async function () { $('#btn-menu').click(); return 'menu'; });
 
+      // The toast is centred, so its LENGTH decides whether it clears the
+      // toolbar. This used to fire "Multiverse saved" and pass — 16 characters,
+      // short enough that the left edge never reached the toolbar. The longest
+      // message the game actually sends is what has to fit.
       await state('toast', async function () {
         $('#btn-save').click();
         await settle(60);
         var t = $('#toast');
         if (!t.textContent.length) throw new Error('toast has no text');
-        return 'toast: "' + t.textContent.slice(0, 40) + '"';
+        t.textContent = 'Ground: Daily true colour — the world as it was photographed';
+        await settle(20);
+        return 'toast: "' + t.textContent.slice(0, 40) + '…"';
       });
 
       // The imagery chip is the acknowledgement NASA asks for, so it has to be

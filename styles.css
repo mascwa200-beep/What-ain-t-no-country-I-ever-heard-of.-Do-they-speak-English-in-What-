@@ -730,8 +730,18 @@ body{
 .log-fall{color:var(--bad);}
 
 /* ---------- Toast ---------- */
+/* The toast is centred in the FREE STRIP between the toolbar and the tab rail,
+   not on the viewport. Centred on the viewport it grows symmetrically, so a
+   long message slides its left edge under the toolbar — which is what
+   "Ground: Daily true colour" did on a 500px phone while "Multiverse saved"
+   was short enough to hide it. Pinning both edges makes the message length
+   irrelevant instead of making short messages lucky. */
 #toast{
-  position:absolute;bottom:16px;left:50%;transform:translateX(-50%) translateY(30px);
+  position:absolute;bottom:16px;
+  left:calc(var(--tool-w) + 20px + var(--sa-l));
+  right:calc(var(--tab) + 20px + var(--sa-r));
+  width:max-content;max-width:100%;margin:0 auto;text-align:center;
+  transform:translateY(30px);
   background:rgba(6,9,18,0.9);border:1px solid var(--gold-dim);
   border-top:1px solid var(--gold);color:var(--gold);
   backdrop-filter:var(--glass);-webkit-backdrop-filter:var(--glass);
@@ -740,7 +750,7 @@ body{
   clip-path:polygon(8px 0,100% 0,100% calc(100% - 8px),calc(100% - 8px) 100%,0 100%,0 8px);
   transition:opacity .2s,transform .2s;box-shadow:var(--shadow),0 0 24px rgba(240,200,110,0.18);
 }
-#toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
+#toast.show{opacity:1;transform:translateY(0);}
 
 /* ---------- Modals ---------- */
 /* A centred flex child taller than its container clips at BOTH ends and
