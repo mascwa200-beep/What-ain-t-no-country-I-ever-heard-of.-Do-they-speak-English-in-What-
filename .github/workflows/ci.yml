@@ -80,6 +80,13 @@ jobs:
       - name: perf
         run: node tools/test-perf.js .
 
+      # the quadtree, exercised directly — coverage, hysteresis, horizon
+      # culling and bounding-sphere containment are all invisible in a moving
+      # picture and trivial to assert here. js/lod.js makes no GL calls
+      # precisely so this can run under Node.
+      - name: lod
+        run: node tools/test-lod.js .
+
       # the planet is Earth: real places at the right altitude, orientation
       # traps, real cities on real land. This one guards a BAKED ASSET, so it
       # is the only thing standing between a bad rebuild of js/earthdata.js
