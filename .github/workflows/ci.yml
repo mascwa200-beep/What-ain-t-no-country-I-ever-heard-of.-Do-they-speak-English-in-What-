@@ -94,6 +94,14 @@ jobs:
       - name: lod
         run: node tools/test-lod.js .
 
+      # streaming imagery, and every way a network can fail. This is the
+      # first thing in the project that depends on one, so offline, 404ing,
+      # slow and out-of-order are the ordinary condition rather than edge
+      # cases. js/tiles.js takes its loader, store and clock as arguments so
+      # all of it runs here with no network at all.
+      - name: tiles
+        run: node tools/test-tiles.js .
+
       # settlements as buildings, and the rule that NOTHING FLOATS. Six fixed
       # lifts used to put every person, label, ring and bolt 77 km above the
       # summit of Everest, and no test in this project would have noticed.
