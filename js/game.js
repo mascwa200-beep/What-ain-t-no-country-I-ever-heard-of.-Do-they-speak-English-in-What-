@@ -22,29 +22,58 @@
   // ================= The time dial =================
   // One scale spanning reverse -> forward. Reverse speeds play recorded
   // history backwards; past the record they un-create the world itself.
+  // The dial in real units. `v` is how many CALENDAR seconds pass per real
+  // second — so Real Time is 1, and the notch names are promises the clock
+  // now keeps rather than vague comparatives.
+  //
+  // "1000x" meant nothing once the calendar became real. It also could not
+  // reach: a human life is 2.52 billion seconds, so at a thousand times
+  // ordinary speed watching one would take twenty-nine days.
+  const SEC = 1, MIN_S = 60, HOUR_S = 3600, DAY_S = 86400;
+  const YEAR_S = 31556952;
   const TIME_SCALES = [
-    { v: -1000, label: '⧏⧏⧏', name: 'Unmaking' },
-    { v: -100,  label: '⧏⧏',  name: 'Ages Reversed' },
-    { v: -10,   label: '⧏',   name: 'Rewind' },
-    { v: -1,    label: '◀',   name: 'Backwards' },
-    { v: 0,     label: '❚❚', name: 'Paused' },
-    { v: 0.1,   label: '▷',   name: 'Bullet Time' },
-    { v: 0.25,  label: '▷',   name: 'Slow' },
-    { v: 1,     label: '▶',   name: 'Normal' },
-    { v: 5,     label: '▶▶', name: 'Fast' },
-    { v: 25,    label: '▶▶', name: 'Very Fast' },
-    { v: 100,   label: '▶▶▶', name: 'Centuries' },
-    { v: 1000,  label: '▶▶▶', name: 'Millennia' }
+    { v: -YEAR_S * 100, label: '⧏⧏⧏', name: 'Unmaking' },
+    { v: -YEAR_S * 10,  label: '⧏⧏',  name: 'Ages Reversed' },
+    { v: -YEAR_S,       label: '⧏',   name: 'Rewind' },
+    { v: -DAY_S,        label: '◀',   name: 'Backwards' },
+    { v: 0,             label: '❚❚',  name: 'Paused' },
+    { v: SEC,           label: '▶',   name: 'Real Time' },
+    { v: MIN_S,         label: '▶',   name: '1 min/sec' },
+    { v: HOUR_S,        label: '▶▶',  name: '1 hour/sec' },
+    { v: DAY_S,         label: '▶▶',  name: '1 day/sec' },
+    { v: DAY_S * 30,    label: '▶▶',  name: '1 month/sec' },
+    { v: YEAR_S,        label: '▶▶▶', name: '1 year/sec' },
+    { v: YEAR_S * 10,   label: '▶▶▶', name: '1 decade/sec' },
+    { v: YEAR_S * 100,  label: '▶▶▶', name: '1 century/sec' }
   ];
-  const IDX_PAUSE = 4, IDX_NORMAL = 7;
+  const IDX_PAUSE = 4;
+  // The game boots HERE: one real second to one simulated second, anchored to
+  // the actual date and time. Nothing ages until the dial moves — which is
+  // the point, and which the HUD says out loud so it does not read as broken.
+  const IDX_NORMAL = 5;
   const IDX_UNMAKING = 0;   // only this notch may un-create the world
-  // ticks per displayed year (the HUD has always divided by 120)
-  const TICKS_PER_YEAR = 120;
 
   // A world remembers how un-created it is; the god's own progress through
   // creation does not survive a reload on its own. This maps one back to the
   // other so a save can always be resumed at the right word.
   const CREATION_STAGE_BY_MODE = { nothing: 0, deep: 1, firmament: 2 };
+
+  // The date the world is at. Earth begins at the actual present moment, so
+  // for the first world this reads as today — which is the whole point of the
+  // stage. A world that has run for centuries reads as the year it reached.
+  const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+                  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  function worldDateLabel(sim) {
+    if (!sim || sim.clock == null) return '—';
+    const d = new Date((sim.epoch + sim.clock) * 1000);
+    const y = d.getUTCFullYear();
+    // past a few thousand years the day and month stop being interesting and
+    // the year is the only thing anyone reads
+    if (Math.abs(sim.clock) > Sim.YEAR * 2000) return 'Year ' + y.toLocaleString();
+    return d.getUTCDate() + ' ' + MONTHS[d.getUTCMonth()] + ' ' + y +
+      ' · ' + String(d.getUTCHours()).padStart(2, '0') + ':' +
+      String(d.getUTCMinutes()).padStart(2, '0');
+  }
   const $ = (s) => document.querySelector(s);
 
   const BIOME_NAMES = ['Deep Ocean', 'Water', 'Sand', 'Grassland', 'Forest', 'Dirt', 'Mountain', 'Snow', 'Desert', 'Jungle', 'Swamp', 'Ash', 'Hellrock', 'Lava', 'Cloudfield', 'Golden Meadow', 'Primordial Ooze', 'Voidstone'];
@@ -305,9 +334,9 @@
   }
 
   // ================= Sim stepping =================
-  function simStep() {
+  function simStep(dtSec) {
     PD.Prof.begin('sim.step');
-    Sim.step(G.sim, 1);
+    Sim.step(G.sim, dtSec == null ? Sim.OLD_TICK : dtSec);
     if (G.view.kind === 'planet' && G.speed > 0) {
       const ap = Cosmos.active();
       if (ap) recordRewind(ap);
@@ -446,7 +475,8 @@
       fert: Codec.packF01(w.fert), tree: Codec.packU8(w.tree),
       owner: Codec.packI16(w.owner), struct: Codec.packU8(w.struct),
       fire: Codec.packU8(w.fire), structHp: Codec.packU8(w.structHp),
-      tick: s.tick, nextUnitId: s.nextUnitId, nextVillageId: s.nextVillageId,
+      tick: s.tick, clock: s.clock, epoch: s.epoch,
+      nextUnitId: s.nextUnitId, nextVillageId: s.nextVillageId,
       villages: s.villages, soc: s.soc || null, starchild: s._starchild || null,
       bloodMoon: s.bloodMoonT || 0,
       // the pre-flood heightmap: lose this mid-flood and the drowning is permanent
@@ -476,6 +506,16 @@
     world.dirty = true; world.dirtyMini = true;
     const sim = Sim.createSim(world, PD.makeRNG(PD.hashSeed(d.seed) ^ 0x9e3779b9));
     sim.tick = d.tick || 0;
+    // Migration. A save written before the calendar existed has only a tick
+    // count, and the HUD read it at 120 ticks to the year. Deriving the clock
+    // from that keeps a world that has run for centuries AT those centuries —
+    // resetting it to the present would quietly erase its whole history and
+    // there would be nothing on screen to say so.
+    if (d.clock != null) { sim.clock = d.clock; sim.epoch = d.epoch; }
+    else {
+      sim.clock = (d.tick || 0) / 120 * Sim.YEAR;
+      sim.epoch = Math.floor(Date.now() / 1000) - sim.clock;
+    }
     sim.nextUnitId = d.nextUnitId || 1; sim.nextVillageId = d.nextVillageId || 1;
     sim.villages = d.villages || [];
     sim.soc = d.soc || null;
@@ -630,7 +670,8 @@
     if (G.view.kind !== 'planet') return;
     const p = Cosmos.active(); if (!p) return;
     G.timeline.push({
-      when: Date.now(), tick: p.sim.tick, year: Math.floor(p.sim.tick / 120),
+      when: Date.now(), tick: p.sim.tick, clock: p.sim.clock, epoch: p.sim.epoch,
+      year: Math.floor(p.sim.clock / Sim.YEAR),
       planetId: p.id, planetName: p.name, data: JSON.stringify(packPlanet(p))
     });
     if (G.timeline.length > 10) G.timeline.shift();
@@ -748,7 +789,9 @@
       xy[i * 2] = live[i].x; xy[i * 2 + 1] = live[i].y;
       hp[i] = live[i].hp;
     }
-    return { tick: sim.tick, ids, xy, hp, faith: G.faith };
+    // the clock rides along: rewinding motion without rewinding the
+    // calendar would walk people backwards while the date kept going forward
+    return { tick: sim.tick, clock: sim.clock, ids, xy, hp, faith: G.faith };
   }
 
   // Full restore point. Extends packPlanet with the state it drops, so a
@@ -827,9 +870,10 @@
       u.x = f.xy[i * 2]; u.y = f.xy[i * 2 + 1]; u.hp = f.hp[i];
     }
     sim.tick = f.tick;
+    if (f.clock != null) sim.clock = f.clock;
     G.faith = f.faith;
-    sim.season = Math.floor((sim.tick % 480) / 120);
-    sim.isNight = Math.cos(((sim.tick % 480) / 480) * 6.283) * 0.5 + 0.15 > 0.3;
+    sim.season = Sim.seasonAt(sim.epoch + sim.clock);
+    sim.isNight = Sim.isNightAt(sim.epoch + sim.clock, 0);
   }
 
   // Driven from loop() whenever G.speed < 0.
@@ -982,7 +1026,7 @@
   function rewindBannerText() {
     const rw = G.rewind;
     if (!rw) return null;
-    const year = Math.floor(G.sim.tick / TICKS_PER_YEAR);
+    const year = Math.floor(G.sim.clock / Sim.YEAR);
     if (rw.fine.length) return { t: '⟲ REWINDING', s: 'Year ' + year };
     if (rw.inArchive) {
       // whole ages at a time, back toward the world's first morning
@@ -1256,17 +1300,30 @@
     if (typeof G._chargeTick === 'function') G._chargeTick(dt);
 
     if (!G.paused && G.speed > 0) {
-      G.acc += dt * G.speed;
-      // step against a wall-clock budget rather than a fixed count, so
-      // 1000x self-tunes to the device instead of pegging at 40/frame
+      // G.speed is now CALENDAR SECONDS PER REAL SECOND, so the amount of
+      // world-time this frame owes is simply that times the frame length.
+      G.acc += (dt / 1000) * G.speed;
+      // Spend it in steps of at most a year. The cap is what keeps a step
+      // meaningful: beyond it every hazard saturates and every integration
+      // stops resembling the curve it is sampling.
       const budgetStart = performance.now();
       let steps = 0;
-      while (G.acc >= STEP_MS) {
-        simStep(); G.acc -= STEP_MS; steps++;
+      const MIN_DT = Sim.OLD_TICK;         // never step less than the old tick
+      while (G.acc >= MIN_DT) {
+        const chunk = Math.min(G.acc, Sim.DT_MAX);
+        simStep(chunk); G.acc -= chunk; steps++;
         if ((steps & 7) === 0 && performance.now() - budgetStart > 12) break;
       }
-      // never let the accumulator run away: unspent time is dropped, not banked
-      if (G.acc > STEP_MS * 4) G.acc = STEP_MS * 4;
+      // Unspent world-time is DROPPED, not banked. The alternative is a
+      // spiral: a frame that runs out of budget hands its debt to the next
+      // one, which is already behind. What it costs is honesty about the
+      // rate, so the HUD reports what was actually achieved rather than what
+      // was asked for.
+      G.simRate = (steps > 0) ? (G.speed) : 0;
+      if (G.acc > Sim.DT_MAX * 2) {
+        G.rateShort = true;                // the dial is asking for more than
+        G.acc = Sim.DT_MAX * 2;            // this device can deliver
+      } else G.rateShort = false;
     } else if (G.speed < 0) {
       stepRewind(dt);
     } else if (G.sabbath) {
@@ -1924,11 +1981,21 @@
     const ts = $('#time-scale');
     if (ts) {
       const sc = TIME_SCALES[G.speedIdx] || TIME_SCALES[IDX_NORMAL];
-      // 6 sim steps per real second at 1x, TICKS_PER_YEAR ticks per year
-      const yps = Math.abs(sc.v) * 6 / TICKS_PER_YEAR;
-      const rate = sc.v === 0 ? 'held' :
-        (yps >= 1 ? yps.toFixed(0) + ' yr/s' : (1 / yps).toFixed(0) + ' s/yr');
-      ts.textContent = sc.name + ' · ' + rate;
+      // The dial's value IS the rate now — calendar seconds per real second —
+      // so this stops being a conversion and starts being a readout.
+      const a = Math.abs(sc.v);
+      const rate = sc.v === 0 ? 'held'
+        : a >= YEAR_S ? (a / YEAR_S).toFixed(0) + ' yr/s'
+        : a >= DAY_S ? (a / DAY_S).toFixed(0) + ' d/s'
+        : a >= HOUR_S ? (a / HOUR_S).toFixed(0) + ' h/s'
+        : a >= MIN_S ? (a / MIN_S).toFixed(0) + ' min/s'
+        : '1 sec/s';
+      // At Real Time nothing ages, and that is the design rather than a
+      // fault — but a player who is not told will read a still world as a
+      // broken one. So the dial says so, once, where they are already looking.
+      const note = (sc.v === SEC) ? ' · the present moment'
+        : (G.rateShort ? ' · as fast as this device can' : '');
+      ts.textContent = sc.name + ' · ' + rate + note;
       ts.classList.toggle('reversing', sc.v < 0);
       // mark the container too, so the border can be styled without :has()
       // (unsupported on the older WebViews this ships down to)
@@ -1945,7 +2012,7 @@
       el.title = R.name;
       rc.appendChild(el);
     }
-    $('#year-val').textContent = 'Year ' + Math.floor(G.sim.tick / 120);
+    $('#year-val').textContent = worldDateLabel(G.sim);
     $('#vill-val').textContent = '🏙 ' + G.sim.villages.length;
     $('#season-val').textContent = ['🌱 Spring', '☀ Summer', '🍂 Autumn', '❄ Winter'][G.sim.season];
     const pname = $('#planet-name');
@@ -1984,7 +2051,7 @@
         <div class="ins-row"><span>Karma</span><b style="color:${u.karma >= 0 ? '#5ad06a' : '#e0503a'}">${u.karma >= 0 ? '+' : ''}${Math.round(u.karma)}</b></div>
         <div class="ins-bar"><span>HP</span>${bar(u.hp / u.maxHp, R.col2)}</div>
         <div class="ins-bar"><span>Food</span>${bar(u.food, '#7ac043')}</div>
-        <div class="ins-row"><span>Age</span><b>${(u.age / 120).toFixed(1)} yr</b></div>
+        <div class="ins-row"><span>Age</span><b>${(u.age / Sim.YEAR).toFixed(1)} yr</b></div>
         <div class="ins-row"><span>Home</span><b>${u.village >= 0 ? (villName(u.village) || '—') : 'wild'}</b></div>
         <div class="ins-actions">
           <button data-act="blessone">✨ Bless</button>
@@ -2207,7 +2274,7 @@
     const soc = G.sim.soc;
     if (!soc || !soc.history.length) { el.innerHTML = '<div class="empty">History is still unwritten.</div>'; return; }
     el.innerHTML = soc.history.slice(0, 60).map(h =>
-      `<div class="hist-line hist-${h.kind}"><span class="hist-year">Y${Math.floor(h.t / 120)}</span> ${h.text}</div>`).join('');
+      `<div class="hist-line hist-${h.kind}"><span class="hist-year">Y${Math.floor(h.t / Sim.YEAR)}</span> ${h.text}</div>`).join('');
     // nations summary
     const ns = $('#nations-list');
     if (soc.nations.length) {
@@ -2273,7 +2340,7 @@
     if (!soc.feed.length) { el.innerHTML = '<div class="empty">PixelNet is live, but nobody has posted yet.</div>'; return; }
     el.innerHTML = soc.feed.map(f =>
       `<div class="post">
-        <div class="post-head"><b>${f.author}</b> <span>· Y${Math.floor(f.t / 120)}</span></div>
+        <div class="post-head"><b>${f.author}</b> <span>· Y${Math.floor(f.t / Sim.YEAR)}</span></div>
         <div class="post-body">${f.text}</div>
         <div class="post-foot">♥ ${f.likes} · 💬 ${(f.likes / 7) | 0} · ⟳ ${(f.likes / 11) | 0}</div>
       </div>`).join('');

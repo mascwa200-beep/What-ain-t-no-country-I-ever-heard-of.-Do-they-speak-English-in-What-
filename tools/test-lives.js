@@ -23,6 +23,32 @@ for (const f of ['util.js', 'world.js', 'sim.js', 'society.js']) {
 }
 const PD = ctx.PD, Sim = PD.Sim;
 
+// A step used to be one tick of a fixed clock. It now carries a span of
+// CALENDAR time, so a suite has to say what span it means — and `1` would
+// mean one second, in which nothing social has ever happened.
+//
+// Six hours is the resolution these tests are actually about: long enough
+// that people fall ill, feud, pray and die within a few hundred steps, short
+// enough that nothing saturates. It is stated once here rather than sprinkled
+// through the file so that changing the timescale of the suite is one edit
+// and is visible in the diff.
+// One old tick was three days by the HUD's own reckoning (120 of them to the
+// year), so stepping by TICK_SLOW gives these tests exactly the span of world
+// time they were written against — 400 steps is still four years.
+const STEP = PD.Sim.TICK_SLOW;
+// Combat and motion were tuned at a sixth of a second, not three days. A
+// six-hour step resolves any fight inside itself, so nobody is ever observed
+// wounded — the test would read a world at peace when it is really a world
+// where the war is over before it is looked at.
+const STEP_FINE = PD.Sim.TICK_FAST;
+// And a step for the tests that need GENERATIONS. 1200 old ticks bought ten
+// HUD years, which under the old clock was five human lifetimes; a human is
+// now an adult at sixteen and dies at eighty, so ten years does not even
+// finish one childhood — no one comes of age, so no one musters, raids,
+// takes a trade or has a child. A month a step gives the same 1200 steps a
+// century, which is what these tests were always really asking for.
+const STEP_GEN = PD.Sim.MONTH;
+
 let fails = 0;
 function check(name, cond, detail) {
   console.log('  ' + (cond ? 'PASS' : 'FAIL') + ' — ' + name + (detail ? '  [' + detail + ']' : ''));
@@ -199,7 +225,7 @@ console.log('\n--- grain does not keep forever ---');
   }
   Sim.recount(sim);
   v.food = 50000;                       // absurd hoard
-  for (let i = 0; i < 400; i++) Sim.step(sim, 1);
+  for (let i = 0; i < 400; i++) Sim.step(sim, STEP);
   check('an absurd hoard spoils back to what the town can store',
     v.food < 3000, 'food ' + v.food.toFixed(0));
   check('but the town does not starve itself doing it',
@@ -234,7 +260,7 @@ console.log('\n--- a town with healers treats its people ---');
     const pin = Sim.PROFESSIONS.indexOf(profName);
     for (let i = 0; i < 150; i++) {
       for (const u of sim.units) if (!u.dead && u.village === v.id) u.prof = pin;
-      Sim.step(sim, 1);
+      Sim.step(sim, STEP);
     }
     const byId = new Map(sim.units.map(u => [u.id, u]));
     let cured = 0, died = 0, hp = 0;
@@ -251,12 +277,22 @@ console.log('\n--- a town with healers treats its people ---');
     withHealers.cured > withBards.cured,
     withHealers.cured + '/' + withHealers.cohort + ' cured vs ' +
     withBards.cured + '/' + withBards.cohort);
-  // Nobody dies of plague inside 150 ticks — sickness drains slower than a
-  // fed citizen regenerates — so death count is not the observable here.
-  // The proximate effect of care is that the afflicted stay healthier.
-  check('and the afflicted are healthier where there are healers',
-    withHealers.hp > withBards.hp * 1.05,
-    withHealers.hp.toFixed(1) + ' vs ' + withBards.hp.toFixed(1) + ' total health');
+  // This used to compare the average health of the SURVIVORS, which is
+  // survivorship bias wearing a lab coat: where nobody is treated the sickest
+  // die, and the ones left standing are the ones who were never in danger. It
+  // read 18.0 for the untreated town against 17.5 for the treated one — the
+  // untreated town scoring better precisely because it had buried its worst
+  // cases. Counting the dead as the zero health they have measures the claim
+  // instead of its shadow.
+  const totalHealth = (r) => r.hp;                   // dead contribute nothing
+  const survived = (r) => r.cohort - r.died;
+  check('and fewer of the afflicted die where there are healers',
+    withHealers.died <= withBards.died,
+    withHealers.died + ' dead vs ' + withBards.died);
+  check('and the cohort as a whole is healthier, counting the dead as dead',
+    totalHealth(withHealers) >= totalHealth(withBards),
+    totalHealth(withHealers).toFixed(1) + ' vs ' + totalHealth(withBards).toFixed(1) +
+    ' (' + survived(withHealers) + ' vs ' + survived(withBards) + ' alive)');
   check('the care labour is what makes the difference',
     withHealers.v.labour.care > withBards.v.labour.care);
 }
@@ -281,7 +317,7 @@ console.log('\n--- discovery is the work of scholars ---');
       for (const u of sim.units) {
         if (!u.dead && u.village === v.id) u.prof = Sim.PROFESSIONS.indexOf(profName);
       }
-      Sim.step(sim, 1);
+      Sim.step(sim, STEP);
     }
     const n = PD.Society.nationOf(sim, v.id);
     return { era: n ? n.era : 0, science: n ? n.science : 0, scholars: n ? n.scholars : 0 };
@@ -309,7 +345,7 @@ console.log('\n--- the new state survives a round trip ---');
     if (u) { u.age = u.adultAt + 10; u.food = 1; }
   }
   Sim.recount(sim);
-  for (let i = 0; i < 60; i++) Sim.step(sim, 1);
+  for (let i = 0; i < 60; i++) Sim.step(sim, STEP);
   const clone = JSON.parse(JSON.stringify(sim.villages));
   check('villages serialize with their labour and trades',
     !!clone[0].jobs && !!clone[0].labour && clone[0].order != null);
@@ -318,7 +354,7 @@ console.log('\n--- the new state survives a round trip ---');
   sim.villages = clone;
   sim.vmap = null;
   let threw = null;
-  try { Sim.recount(sim); Sim.step(sim, 1); } catch (e) { threw = e; }
+  try { Sim.recount(sim); Sim.step(sim, STEP); } catch (e) { threw = e; }
   check('an old save with no census fields rebuilds instead of throwing',
     !threw, threw ? threw.message : '');
   check('and the census is repopulated after the rebuild',
@@ -347,7 +383,7 @@ console.log('\n--- war still finds those it should ---');
   // so the population climbs even in a war. Track the cohort that was there
   // when the fighting started, and whether it took wounds.
   const cohort = sim.units.filter(u => !u.dead).map(u => u.id);
-  for (let i = 0; i < 400; i++) Sim.step(sim, 1);
+  for (let i = 0; i < 400; i++) Sim.step(sim, STEP);
   const byId = new Map(sim.units.map(u => [u.id, u]));
   let fell = 0, wounded = 0;
   for (const id of cohort) {
@@ -391,7 +427,7 @@ console.log('\n--- war still finds those it should ---');
   const feudBefore = feud.units.filter(u => !u.dead).length;
   let hurt = 0;
   for (let i = 0; i < 300; i++) {
-    Sim.step(feud, 1);
+    Sim.step(feud, STEP_FINE);
     vA.rival = vB.id; vB.rival = vA.id;   // hold the feud open
   }
   for (const u of feud.units) if (!u.dead && u.hp < u.maxHp) hurt++;
@@ -445,7 +481,7 @@ console.log('\n--- every mechanic fires in a world nobody touches ---');
   let siege = 0, crime = 0, peakDev = 0, plague = 0;
   const orders = new Set();
   for (let i = 0; i < 1200; i++) {
-    Sim.step(sim, 1);
+    Sim.step(sim, STEP_GEN);
     for (const v of sim.villages) {
       if ((v.underAttack || 0) > 0) siege++;
       if ((v.crimeT || 0) > 0) crime++;
@@ -492,7 +528,7 @@ console.log('\n--- the closed loop, and the bite that needs it opened ---');
   for (let i = 0; i < 20; i++) Sim.spawnUnit(sim, 'orc', 44 + (i % 5), 44 + ((i / 5) | 0));
   let everSaw = 0;
   for (let t = 0; t < 4000; t++) {
-    Sim.step(sim, 1);
+    Sim.step(sim, STEP);
     if (sim.tick % 100 === 0) PD.Society.step(sim);
     everSaw += (sim.counts.vampire || 0);
   }
@@ -506,16 +542,16 @@ console.log('\n--- the closed loop, and the bite that needs it opened ---');
   // and confirm the existing bite carries it with no further help.
   const sim2 = freshSim(9161);
   for (let i = 0; i < 40; i++) Sim.spawnUnit(sim2, 'human', 40 + (i % 14), 40 + ((i / 14) | 0));
-  sim2.bloodMoonT = 480;
+  sim2.bloodMoonT = PD.Sim.TICK_SLOW * 480;   // was 480 ticks
   const zero = Sim.spawnUnit(sim2, 'vampire', 60, 44);
   if (zero) {
     zero.paragon = 2;
     zero.maxHp = Sim.RACES.vampire.hp * 5;
     zero.hp = zero.maxHp;
-    zero.lifespan = zero.age + 9000;
+    zero.lifespan = zero.age + PD.Sim.YEAR * 500;  // a progenitor, not a mayfly
   }
   let peak = 0;
-  for (let t = 0; t < 4000; t++) { Sim.step(sim2, 1); peak = Math.max(peak, sim2.counts.vampire || 0); }
+  for (let t = 0; t < 4000; t++) { Sim.step(sim2, STEP); peak = Math.max(peak, sim2.counts.vampire || 0); }
   check('patient zero can be made at all (spawnUnit accepts the race)', !!zero);
   // Measured across ten seeds: 7,2,2,2,2,5,20,4,2,9 — never below 2. The line
   // usually burns out afterwards, which is fine; a vampire is meant to be a

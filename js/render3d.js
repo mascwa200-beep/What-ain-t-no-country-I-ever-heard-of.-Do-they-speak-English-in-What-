@@ -49,6 +49,19 @@
     return o;
   }
 
+  // The unit vector toward the sun, in the same frame tileToSphere builds:
+  // +Y is north, and longitude runs from +Z through +X. Sim.subsolar gives
+  // the point on the globe the sun is directly over, which is the same thing
+  // expressed as a latitude and longitude.
+  function sunDir(sim) {
+    if (!PD.Sim || !PD.Sim.subsolar || !sim || sim.clock == null) {
+      return [0.6, 0.25, 0.76];        // no clock yet: a fixed, pleasant angle
+    }
+    const s = PD.Sim.subsolar(sim.epoch + sim.clock);
+    const cl = Math.cos(s.dec);
+    return [cl * Math.sin(s.lon), Math.sin(s.dec), cl * Math.cos(s.lon)];
+  }
+
   // ---------- world <-> sphere mapping ----------
   // tile (x,y) -> unit sphere point. y=0 is the north pole row.
   function tileToSphere(world, x, y, out, lift) {
@@ -1618,9 +1631,13 @@ void main(){
       PD.Prof.n('lod.exag', exag);
     }
 
-    // sun sweeps with the day cycle; planes get fixed dramatic light
-    const cyc = (sim.tick % 480) / 480 * Math.PI * 2;
-    let sun = [Math.sin(cyc), 0.25, Math.cos(cyc)];
+    // The sun is where the sun is. This used to be `(sim.tick % 480) / 480`
+    // — one revolution every 480 steps, which was four of the years the HUD
+    // was counting — with the declination pinned at a constant 0.25 so no
+    // pole ever had a winter. Now it comes off the calendar, so at Real Time
+    // the terminator falls across the real Earth exactly where the real one
+    // does, and the poles get their six months of darkness.
+    let sun = sunDir(sim);
     if (world.mode === 'hell') sun = [0.2, -0.6, 0.5];
     if (world.mode === 'heaven') sun = [0.3, 0.9, 0.3];
     // before the first word there is no sun at all
@@ -2117,8 +2134,8 @@ void main(){
     // the sun itself, with a soft flare when it swings into view
     const noSun = r.world.mode === 'deep' || r.world.mode === 'nothing';
     if (r._vp && !noSun) {
-      const cyc = (sim.tick % 480) / 480 * Math.PI * 2;
-      const sp = [Math.sin(cyc) * 30, 7, Math.cos(cyc) * 30];
+      const sd = sunDir(sim);
+      const sp = [sd[0] * 30, sd[1] * 30, sd[2] * 30];
       const m = r._vp;
       const cw2 = m[3] * sp[0] + m[7] * sp[1] + m[11] * sp[2] + m[15];
       if (cw2 > 0) {

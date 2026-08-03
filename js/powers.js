@@ -604,7 +604,7 @@
         let n = 0;
         for (let k = 0; k < 6; k++) {
           const u = Sim.spawnUnit(G.sim, 'angel', wx + (Math.random() - 0.5) * 4, wy + (Math.random() - 0.5) * 4);
-          if (u) { u.lifespan = u.age + 1800; n++; FX.puff(u.x, u.y, '#f8f0d0'); }
+          if (u) { u.lifespan = u.age + Sim.YEAR * 15; n++; FX.puff(u.x, u.y, '#f8f0d0'); }
         }
         if (!n) { snd('error'); return 0; }
         FX.shock(wx, wy, 5, '#fff8d0');
@@ -619,7 +619,7 @@
         let n = 0;
         for (let k = 0; k < 6; k++) {
           const u = Sim.spawnUnit(G.sim, 'demon', wx + (Math.random() - 0.5) * 4, wy + (Math.random() - 0.5) * 4);
-          if (u) { u.lifespan = u.age + 1800; n++; FX.puff(u.x, u.y, '#c05030'); }
+          if (u) { u.lifespan = u.age + Sim.YEAR * 15; n++; FX.puff(u.x, u.y, '#c05030'); }
         }
         if (!n) { snd('error'); return 0; }
         W.ignite(G.world, Math.floor(wx), Math.floor(wy), 2);
@@ -922,7 +922,8 @@
     u.maxHp = PD.Sim.RACES.vampire.hp * 5;
     u.hp = u.maxHp;
     u.village = -1;                       // it does not go home
-    u.lifespan = Math.max(u.lifespan || 0, (u.age || 0) + 9000);
+    // a hero is given another century, which is what 9000 ticks meant to say
+    u.lifespan = Math.max(u.lifespan || 0, (u.age || 0) + Sim.YEAR * 100);
     PD.Sim.recount(sim);                  // so counts.vampire is true immediately
     if (FX) { FX.shock(u.x, u.y, 5, '#5a1030'); FX.blood && FX.blood(u.x, u.y); }
     if (PD.Society) PD.Society.hist(sim, 'One of them did not come back the same.', 'legend');
