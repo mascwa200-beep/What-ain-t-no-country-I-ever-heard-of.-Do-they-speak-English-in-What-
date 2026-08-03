@@ -1578,6 +1578,8 @@ void main(){
     gl.activeTexture(gl.TEXTURE3); gl.bindTexture(gl.TEXTURE_2D, r.texClim); gl.uniform1i(pp.u.uClim, 3);
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, r.bufIdx);
     gl.drawElements(gl.TRIANGLES, r.nIdx, r.idxType, 0);
+    PD.Prof.add('gl.tris', r.nIdx / 3); PD.Prof.add('gl.draws', 1);
+    PD.Prof.n('gl.planetTris', r.nIdx / 3);
 
     // units as living embers on the surface
     drawUnits(r, sim, vp);
@@ -1611,6 +1613,8 @@ void main(){
       gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, r.texClim); gl.uniform1i(pc.u.uClim, 1);
       gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, r.bufIdx);
       gl.drawElements(gl.TRIANGLES, r.nIdx, r.idxType, 0);
+      PD.Prof.add('gl.tris', r.nIdx / 3); PD.Prof.add('gl.draws', 1);
+      PD.Prof.n('gl.cloudTris', r.nIdx / 3);
     }
 
     // particles / rings / bolts. Culling MUST be off here: ribbon quads are
@@ -1652,6 +1656,8 @@ void main(){
     gl.uniform1f(pa.u.uDensity, unlit ? 0.15 : 1.0);
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, r.bufIdx);
     gl.drawElements(gl.TRIANGLES, r.nIdx, r.idxType, 0);
+    PD.Prof.add('gl.tris', r.nIdx / 3); PD.Prof.add('gl.draws', 1);
+    PD.Prof.n('gl.atmoTris', r.nIdx / 3);
 
     gl.cullFace(gl.BACK);              // restore for everything after this
     gl.depthMask(true);

@@ -95,6 +95,12 @@ jobs:
       - name: layout
         run: node tools/test-layout.js . "$CHROME_PATH"
 
+      # what the GPU is actually asked to draw, in a real WebGL context at
+      # three altitudes. drawInner returns early when headless, so this is the
+      # only place a draw call can be counted at all.
+      - name: render
+        run: node tools/test-render.js . "$CHROME_PATH"
+
       # the slow one (~2 min): boot, loop, powers, save/load, rewind,
       # un-creation, genesis, story
       - name: integration
