@@ -300,6 +300,50 @@
     { year: 1991, name: 'The World Wide Web opens', lat: 46.23, lon: 6.05 }
   ];
 
+  // -------------------------------------------------------------------------
+  // WHAT THE RECORD IS ALLOWED TO DO ON ITS OWN
+  //
+  // An allowlist, not "everything that names a power". The seven days are the
+  // reason: gen_light .. gen_rest belong to the creationStage flow that
+  // un-creation gates, and firing one at a running world would fight machinery
+  // that already has its own sequence. They are announced and never enacted.
+  //
+  // Everything here is a power that already exists, already tested, and takes
+  // a place — so enacting the record is a call, not a new system.
+  const ENACTABLE = new Set([
+    'flood', 'plagues', 'babel', 'commandments', 'prophet', 'judgment',
+    'fire', 'quake', 'lightning', 'voice', 'raise_dead', 'miracle',
+    'bless', 'crown'
+  ]);
+  function enactable(e) {
+    return !!(e && e.power && ENACTABLE.has(e.power) && (e.world || e.lat != null));
+  }
+
+  // Did this act FULFIL the record rather than break it?
+  //
+  // Same power, near enough the right moment, near enough the right place. The
+  // windows are named rather than felt: too tight and nobody ever hits one,
+  // too loose and every act is a fulfilment.
+  const FULFIL_YEARS = 30;      // the clock runs in centuries per second
+  const FULFIL_DEG = 8;         // ~900 km — the record's places are regions
+  function matchAct(power, year, lat, lon) {
+    if (!power) return null;
+    let best = null, bestD = Infinity;
+    for (const list of [SCRIPTURE, RECORD]) {
+      for (const e of list) {
+        if (e.power !== power) continue;
+        if (Math.abs(e.year - year) > FULFIL_YEARS) continue;
+        if (e.lat == null) { if (!best) best = e; continue; }   // world-wide
+        if (lat == null || lon == null) continue;
+        let dLon = Math.abs(e.lon - lon); if (dLon > 180) dLon = 360 - dLon;
+        const d = Math.hypot(e.lat - lat, dLon);
+        if (d > FULFIL_DEG) continue;
+        if (d < bestD) { bestD = d; best = e; }
+      }
+    }
+    return best;
+  }
+
   // Tag every entry with its source ONCE, here, so nothing downstream has to
   // remember which list it came from — and so the two can never be quietly
   // concatenated into an undifferentiated "history".
@@ -333,7 +377,8 @@
   }
 
   global.PD.History = {
-    stateAt, eventsBetween, eventsAt, label,
+    stateAt, eventsBetween, eventsAt, label, enactable, matchAct, ENACTABLE,
+    FULFIL_YEARS, FULFIL_DEG,
     seaLevelAt, tempAt, populationAt, eraAt, sample,
     SCRIPTURE, RECORD, SEA_PALAEO, TEMP_PALAEO, SEA_FUTURE, TEMP_FUTURE, PRESENT,
     FIRST_YEAR, LAST_YEAR

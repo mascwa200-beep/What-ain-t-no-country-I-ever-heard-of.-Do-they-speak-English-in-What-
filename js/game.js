@@ -94,7 +94,7 @@
     flash: 0, shake: 0,
     floodT: 0, storm: null, tornado: null,
     ui: { showLabels: true, overUI: false, mouseW: null, brushRadius: 1, brushColor: '#fff',
-          imagery: 'base' },
+          imagery: 'base', scripture: true },
     running: false,
     saveTimer: 0, snapTimer: 0,
     timeline: [],                            // time-travel snapshots
@@ -353,6 +353,7 @@
 
   // ---- Achievements ----
   const ACHIEVEMENTS = [
+    { id: 'fulfilments', name: 'As It Was Written', desc: 'Fulfil 3 recorded events by your own hand', need: 3 },
     { id: 'smites', name: 'Thunderer', desc: 'Cast 25 lightning bolts', need: 25 },
     { id: 'meteors', name: 'Sky-Breaker', desc: 'Call down 10 meteors', need: 10 },
     { id: 'blessings', name: 'The Gentle Hand', desc: 'Bless 50 times', need: 50 },
@@ -764,6 +765,11 @@
     ach('timetravels');
     return p;
   }
+
+  // Reachable from outside for the same reason G.startFlood and G.genesisStep
+  // are: tools/test-integration.js drives the real game, and a mechanic that
+  // can only be triggered by a click is a mechanic no suite can check.
+  G.travelToYear = travelToYear;
 
   function timeTravel(idx, branch) {
     const snap = G.timeline[idx]; if (!snap) return;
@@ -1340,6 +1346,28 @@
     // permanently, rather than pretending the record still describes it.
     const pl = Cosmos.active();
     if (pl && pl.histYear != null && !pl.forked) {
+      // DOING WHAT WAS WRITTEN, WHERE AND WHEN IT WAS WRITTEN, IS NOT BREAKING
+      // HISTORY. Same power, near enough the moment, near enough the place —
+      // and the timeline holds. Anything else forks it.
+      const H = PD.History;
+      const at = G._lastActAt;
+      if (H && at) {
+        const y = new Date((G.sim.epoch + G.sim.clock) * 1000).getUTCFullYear();
+        const lat = 90 - (at.y / G.world.H) * 180;
+        const lon = (at.x / G.world.W) * 360 - 180;
+        const m = H.matchAct(p.id, y, lat, lon);
+        if (m && !m.done) {
+          m.done = true;
+          G.faith += 120;
+          G._fulfilled = (G._fulfilled || 0) + 1;
+          ach('fulfilments');
+          flashToast('It came to pass, as it was written \u00b7 ' +
+            m.name + (m.ref ? ' \u00b7 ' + m.ref : '') + ' \u00b7 +120 \u2726');
+          if (PD.Society) PD.Society.hist(G.sim, m.name + ' \u2014 fulfilled by your hand.', 'legend');
+          refreshHUD();
+          return;                      // the world stays on the true timeline
+        }
+      }
       pl.forked = true;
       const lbl = PD.History ? PD.History.label(pl.histYear) : ('year ' + pl.histYear);
       flashToast('History forks. This is no longer ' + lbl + ' as it was.');
@@ -1353,6 +1381,8 @@
     if (p.ach) ach(p.ach);
     if (p.react && PD.Society) PD.Society.reactToMiracle(G.sim, p.react);
   }
+
+  G.onPowerUsed = onPowerUsed;
 
   // The ring that closes while a god gathers their will. Drawn on the
   // overlay canvas so it costs nothing in the WebGL pass.
@@ -1667,6 +1697,10 @@
       }
 
       if (Powers.soundAt) Powers.soundAt(wc.x, wc.y, G.world.W, G.world.H);
+      // WHERE the act happened. onPowerUsed decides whether it fulfils the
+      // record or forks it, and that question cannot be answered without a
+      // place — it only had the power.
+      G._lastActAt = { x: wc.x, y: wc.y };
       const spent = p.apply(G, wc.x, wc.y);
       if (Powers.soundAt) Powers.soundAt(null);
 
@@ -1856,6 +1890,7 @@
       }
       else if (k === 'l') toggleLabels();
       else if (k === 'i') cycleImagery();
+      else if (k === 'j') toggleScripture();
       else if (k === 'm') toggleMenu();
       else if (k === 'c') togglePanel('cosmos');
       else if (k === 'p') togglePanel('prayers');
@@ -2056,6 +2091,12 @@
       chips.push('<span class="tgl-chip" title="' + im.credit + '">🛰 ' +
         im.label + ' · NASA</span>');
     }
+    const pl = Cosmos.active();
+    if (pl && pl.histYear != null && PD.History) {
+      chips.push('<span class="tgl-chip">' + (pl.forked ? '\u2442 forked from ' : '\u23f3 ')
+        + PD.History.label(pl.histYear) + '</span>');
+    }
+    if (!G.ui.scripture) chips.push('<span class="tgl-chip">\u271d told, not enacted</span>');
     el.innerHTML = chips.join('');
     el.style.display = chips.length ? '' : 'none';
   }
@@ -2065,6 +2106,20 @@
   // mosaic (real weather on a real date, and the only thing that keeps the
   // date machinery live), and the procedural bake on its own — which is a
   // complete picture, not a failure, and is what you get on a train.
+  // Scripture enacts itself by default — that is the whole point of dating it.
+  // The toggle exists because the Flood really floods, and a world-drowning
+  // event that arrives while you are watching time pass should be something
+  // you chose to leave switched on.
+  function toggleScripture() {
+    G.ui.scripture = !G.ui.scripture;
+    const b = $('#btn-scripture');
+    if (b) b.classList.toggle('off', !G.ui.scripture);
+    refreshToggleState();
+    flashToast(G.ui.scripture
+      ? 'What is written will come to pass'
+      : 'The record will be told, not enacted');
+  }
+
   const IMAGERY_CYCLE = ['base', 'daily', 'off'];
   function cycleImagery() {
     if (!G.r || !Render.setImagery) return;
@@ -2630,11 +2685,42 @@
     if (evts.length > 6) {
       Sim.logEvent(G.sim, '\u2026and ' + (evts.length - 6) + ' more pass unremarked.', 'event');
     }
-    // The events that NAME A POWER do not invoke it yet — see the note on
-    // travelToYear. Collecting them into an array nothing reads would be the
-    // seventh fully-implemented mechanic in this project that never fires, so
-    // they are simply announced until the hand that calls them is written.
+    // ...AND IT COMES TO PASS. The events that name a power invoke it, at the
+    // place the record names.
+    if (G.ui.scripture !== false) for (const e of evts) enactRecord(e);
   }
+
+  // The record acting is NOT the god acting: it goes straight to the power and
+  // never through onPowerUsed, so it cannot fork the world it is describing.
+  function enactRecord(e) {
+    const H = PD.History;
+    if (!H || !H.enactable(e) || e.done) return false;
+    const pw = PD.Powers.BY_ID[e.power];
+    if (!pw) return false;
+    const world = G.world;
+    let x = world.W >> 1, y = world.H >> 1;
+    if (e.lat != null) {
+      x = Math.floor(((e.lon + 180) / 360) * world.W);
+      y = Math.floor(((90 - e.lat) / 180) * world.H);
+    }
+    // What was written cost the world, not you. Every power opens with
+    // `if (G.faith < this.cost) return 0`, so the faith is lent for the call
+    // and taken straight back — the world changes and your ledger does not.
+    const held = G.faith;
+    G.faith = Math.max(G.faith, (pw.cost || 0) + 1);
+    let spent = 0;
+    try { spent = pw.apply(G, x, y) || 0; }
+    catch (err) { if (window.console) console.warn('record could not enact', e.name, err); }
+    G.faith = held;
+    if (spent) {
+      e.done = true;
+      G.announce('\u271d ' + e.name + ' \u2014 it came to pass.', 'legend');
+    }
+    return !!spent;
+  }
+
+  G.fireHistory = fireHistory;
+  G.enactRecord = enactRecord;
 
   // ---- Testament panel ----
   function renderTestament() {
@@ -2963,6 +3049,7 @@
     }
     $('#btn-labels').addEventListener('click', toggleLabels);
     $('#btn-imagery') && $('#btn-imagery').addEventListener('click', cycleImagery);
+    $('#btn-scripture') && $('#btn-scripture').addEventListener('click', toggleScripture);
     $('#btn-sound').addEventListener('click', () => {
       const on = !Audio8.isEnabled(); Audio8.setEnabled(on); Audio8.setMusic(on);
       $('#btn-sound').textContent = on ? '🔊' : '🔇';
