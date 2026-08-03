@@ -292,6 +292,9 @@ function run() {
       //    sub-rectangle is the whole tile; on the ground it must be a sliver.
       out.satOrbit = runAt(1600000, stubCache('ok'), 70, true);
       out.imagery = PD.Render.imageryState ? PD.Render.imageryState(r) : null;
+      // what the cap is supposed to have been derived FROM
+      out.deviceMemory = (typeof navigator !== 'undefined' &&
+        typeof navigator.deviceMemory === 'number') ? navigator.deviceMemory : 0;
       out.satBad = r.satBad || 0;
       out.satOther = { r: other.px.r, g: other.px.g, b: other.px.b };
       // the toggle has to be a toggle
@@ -580,9 +583,35 @@ if (!rep.satAvail) {
     cap > 0 && Math.max(on.textures, orbit.textures) <= cap,
     Math.max(on.textures, orbit.textures) + ' textures resident of ' + cap +
     ' (' + Math.round(cap * 512 * 512 * 4 / 1048576) + ' MB)');
-  // and the cap has to be above the working set, or it holds nothing at all
-  check('and the cap is above the largest working set on screen',
-    cap > Math.max(on.sat ? 1 : 0, orbit.sat), cap + ' vs ' + orbit.sat + ' patches at orbit');
+  // The cap has to clear the working set, or it holds nothing at all — but the
+  // working set is the number of DISTINCT TEXTURES a frame needs, which is not
+  // the same as the number of patches and must not be asserted as though it
+  // were. That used to read `cap > orbit.sat`, i.e. "more slots than patches",
+  // which is only true while every patch happens to own a private tile. The
+  // whole point of the level-2 floor is that when the cap is small the patches
+  // that miss SHARE one coarse ancestor, so patch count stays at 127 while the
+  // distinct-texture count falls to single figures. Asserting the patch count
+  // would have failed on a low-memory phone that was behaving exactly right.
+  check('and the cap clears the distinct textures a frame actually needs',
+    cap > Math.max(on.textures, orbit.textures),
+    cap + ' slots vs ' + orbit.textures + ' textures for ' + orbit.sat +
+    ' patches at orbit');
+  // The invariant that survives any cap: patches never go without ground.
+  check('every patch on screen has imagery, whatever the cap is',
+    orbit.sat === orbit.patches && on.sat === on.patches,
+    orbit.sat + '/' + orbit.patches + ' at orbit, ' + on.sat + '/' + on.patches + ' on the ground');
+
+  // The cap now scales to the device, and the guard on that is worth asserting
+  // rather than reading: get `deviceMemory` backwards, or treat "the browser
+  // did not tell me" as "assume the worst", and every desktop quietly runs at
+  // the phone cap — a third of the ground resolution at orbit, with nothing
+  // anywhere reporting an error. The browser this runs in knows its own
+  // answer, so ask it for the expected value rather than writing one down.
+  const gb = rep.deviceMemory;
+  const wantCap = !gb ? 160 : (gb <= 2 ? 48 : (gb <= 4 ? 96 : 160));
+  check('the cap is the one this device should get',
+    cap === wantCap,
+    'deviceMemory ' + (gb || 'unreported') + ' -> ' + cap + ', expected ' + wantCap);
 }
 
 console.log('\n--- and none of it touched the network ---');

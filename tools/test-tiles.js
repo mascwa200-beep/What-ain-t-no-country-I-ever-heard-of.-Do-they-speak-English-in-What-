@@ -245,7 +245,15 @@ console.log('\n--- an ancestor is a usable answer ---');
   // ask for something deep, and answer only the root
   const first = c.get(6, 0.1, 0.1, D);
   check('nothing yet means nothing yet, not a blank tile', first === null);
-  check('and asking put exactly one fetch in flight', load.calls.length === 1,
+  // Two requests, and exactly two: the tile the patch actually wants, and the
+  // level-2 floor that guarantees it will have SOMETHING to draw before that
+  // arrives. (This asserted "exactly one" until the floor was added — and it
+  // is worth keeping tight rather than loosening to `>= 1`, because the whole
+  // risk of a floor is that it quietly becomes a second full request per
+  // patch instead of a shared one.)
+  check('asking fetches the tile itself and one coarse floor',
+    load.calls.length === 2 &&
+    load.calls.filter(cc => cc.url.indexOf('/500m/2/') > 0).length === 1,
     load.calls.length + ' requests');
 
   // Hand it ONLY the level-0 tile the deep patch descends from. Settling
@@ -420,6 +428,112 @@ console.log('\n--- priority, and memory ---');
   check('the cache is bounded however far you fly', c2.size() <= 16,
     c2.size() + ' tiles held of 100 fetched');
   check('and the evictions were counted', c2.stats.evicted >= 80, c2.stats.evicted + ' evicted');
+}
+
+// ---------------------------------------------------------------------------
+console.log('\n--- a small cache degrades to coarser ground, not to none ---');
+{
+  // THE FAULT THIS REPLACES, measured rather than described: at a 64-tile cap
+  // the renderer sampled imagery on 0 of 106 patches while the loader answered
+  // every single request. Plain LRU plus a frame that walks its patches in a
+  // cycle is the textbook thrash — the cache is shorter than the walk, so by
+  // the time the walk comes round again every entry it wants has gone.
+  //
+  // What turns that from "slightly stale" into "nothing at all" is that a plain
+  // LRU evicts the COARSE tiles alongside the deep ones. A level-0 tile is the
+  // ancestor of an entire hemisphere: it costs one slot and it is the last
+  // thing standing between a deep patch and a blank fallback. So the shallow
+  // levels get a reserved pool that a scan through the deep ones cannot touch.
+  //
+  // The scenario is the descent the game actually performs: look at the planet
+  // from high up (coarse tiles land), then fly down and walk a band of deep
+  // patches, twice — because a renderer draws more than one frame.
+  const sync = (u, done) => { done(IMG(u), 200); return null; };
+  const D = T.STATIC_DATE;
+  const LAT = 0.3, DEEP = T.LAYERS.base.maxZ, N = 32;
+  const lonOf = (i) => -Math.PI + ((i + 0.5) / (2 << DEEP)) * Math.PI * 2;
+
+  const c = T.create({ load: sync, maxLive: 24, maxInFlight: 999 });
+  for (let z = 0; z <= 4; z++) for (let i = 0; i < N; i++) c.get(z, lonOf(i), LAT, D);
+  const afterOrbit = c.size();
+  check('the view from high up left the coarse tiles resident',
+    afterOrbit === 9, afterOrbit + ' held');
+
+  for (let i = 0; i < N; i++) c.get(DEEP, lonOf(i), LAT, D);   // the flight down
+  let nothing = 0, viaAncestor = 0;
+  for (let i = 0; i < N; i++) {                                 // and the next frame
+    const g = c.get(DEEP, lonOf(i), LAT, D);
+    if (!g) nothing++; else if (g.z < DEEP) viaAncestor++;
+  }
+  // 32 deep patches through a 12-slot deep pool: not one of them finds its own
+  // tile still resident, which is exactly the thrash. Every one of them must
+  // nonetheless have SOMETHING to draw.
+  check('a deep scan longer than the cache still draws imagery everywhere',
+    nothing === 0, nothing + ' of ' + N + ' patches with nothing');
+  check('and it draws it from the ancestors the scan could not evict',
+    viaAncestor === N, viaAncestor + ' of ' + N + ' served by an ancestor');
+  check('the coarse tiles are still there afterwards', c.size() >= 9,
+    c.size() + ' held, cap 24');
+  check('and the cache is still bounded by its cap', c.size() <= 24, c.size() + ' held');
+
+  // The reserve must not become the cache. A coarse pool that grew without
+  // limit would evict the deep tiles instead, which is the same defect wearing
+  // the other hat — sharp ground nowhere, at any cache size.
+  const big = T.create({ load: sync, maxLive: 320, maxInFlight: 999 });
+  for (let i = 0; i < 600; i++) big.get(DEEP, -Math.PI + (i / 600) * Math.PI * 2, LAT, D);
+  check('a large cache is still mostly deep tiles, not reserve',
+    big.size() > 200 && big.size() <= 320, big.size() + ' held of 320');
+
+  // ---------------------------------------------------------------------
+  // AND THE HALF OF THIS THAT THE RESERVED POOL DID NOT FIX.
+  //
+  // The section above passes with a descent — high up first, then down —
+  // because the view from orbit is what put the coarse tiles in the cache. A
+  // SETTLED frame never does that: the quadtree keeps leaves, and a leaf asks
+  // only for its own level, so the ancestors the fallback walk looks for were
+  // never fetched by anybody. Measured with the reserved pool already in
+  // place, in a settled orbital frame: the ancestor path fired on 0 patches of
+  // 127, and at a 64-tile cap the whole frame had nothing to draw.
+  //
+  // A reserved pool preserves ancestors. It does not create them. So `get`
+  // also asks for the level-2 tile under each patch, and that is the
+  // assertion — no descent, no priming, a cold cache walking one band of deep
+  // patches twice, which is all a settled frame ever is.
+  const cold = T.create({ load: sync, maxLive: 24, maxInFlight: 999 });
+  for (let pass = 0; pass < 2; pass++)
+    for (let i = 0; i < N; i++) cold.get(DEEP, lonOf(i), LAT, D);
+  let coldNothing = 0;
+  for (let i = 0; i < N; i++) if (!cold.get(DEEP, lonOf(i), LAT, D)) coldNothing++;
+  check('a cold cache with no descent behind it still draws ground everywhere',
+    coldNothing === 0, coldNothing + ' of ' + N + ' patches with nothing');
+
+  // The floor has to be CHEAP, or it is a bandwidth defect wearing the costume
+  // of a fix: level 2 is 32 tiles for the whole planet, so a band of 32 deep
+  // patches must pull in a handful of them rather than one each.
+  {
+    const urls = new Set();
+    const counting = (u, done) => { urls.add(u); return sync(u, done); };
+    const c3 = T.create({ load: counting, maxLive: 320, maxInFlight: 999 });
+    for (let i = 0; i < N; i++) c3.get(DEEP, lonOf(i), LAT, D);
+    let floors = 0;
+    urls.forEach(u => { if (u.indexOf('/500m/2/') > 0) floors++; });
+    check('the floor is a handful of shared tiles, not one per patch',
+      floors > 0 && floors <= 4, floors + ' floor tiles for ' + N + ' patches');
+    check('and it did not stop the sharp tiles being asked for',
+      urls.size >= N, urls.size + ' distinct requests');
+  }
+
+  // The floor is what makes the ground appear at all, so on a slow link it
+  // must not queue behind every sharp tile that will arrive minutes later.
+  {
+    const slow = makeLoader();
+    const c4 = T.create({ load: slow, maxInFlight: 1 });
+    for (let i = 0; i < N; i++) c4.get(DEEP, lonOf(i), LAT, D);
+    slow.settle(0, IMG('first'), 200);
+    const next = slow.calls[1] ? slow.calls[1].url : '';
+    check('the coarse floor is fetched before the sharp detail',
+      next.indexOf('/500m/2/') > 0, next.slice(next.indexOf('/500m/')) || 'nothing queued');
+  }
 }
 
 // ---------------------------------------------------------------------------

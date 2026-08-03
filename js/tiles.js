@@ -195,13 +195,48 @@
 
     function touch(k, rec) { rec.at = ++seq; return rec; }
 
-    function evict() {
-      while (live.size > o.maxLive) {
-        let oldestK = null, oldestAt = Infinity;
-        for (const [k, rec] of live) if (rec.at < oldestAt) { oldestAt = rec.at; oldestK = k; }
-        if (oldestK == null) break;
+    // TWO POOLS, BECAUSE A COARSE TILE IS WORTH FAR MORE THAN A DEEP ONE.
+    //
+    // Plain LRU is what made a small cache useless rather than merely small:
+    // measured at 64 tiles, orbit sampled imagery on 0 of 106 patches while the
+    // loader answered every request. A frame walks its patches in order, so a
+    // cache shorter than the walk has evicted every entry before it comes round
+    // again — and crucially it evicts the COARSE tiles too, which is what turns
+    // "slightly stale imagery" into "no imagery at all".
+    //
+    // A level-0 tile is the ancestor of an entire hemisphere. Keeping it costs
+    // one slot and saves every descendant from having nothing to draw. So the
+    // shallow tiles get their own reserved pool and can never be pushed out by
+    // a scan through the deep ones, and `get`'s walk up the pyramid always
+    // finds SOMETHING. A small cache then degrades to coarser ground instead of
+    // falling off a cliff.
+    const COARSE_Z = 4;
+    // ...and FLOOR_Z is the level `get` actively fetches under every patch, so
+    // that the pool above has something to protect. It is 2 rather than 4, and
+    // that is a measurement rather than a preference: with the floor at level 4
+    // a settled orbital frame still left 37 of 127 patches blank, because level
+    // 4 is 512 tiles for the planet and the reserve THRASHED ON ITSELF. Level 2
+    // is 32 tiles for the whole world, so the working set always fits — and it
+    // is still 9.8 km/px, roughly three times sharper than the procedural bake
+    // that would otherwise be showing.
+    const FLOOR_Z = 2;
+    const FLOOR_PRI = 1e6;
+    const coarseCap = Math.max(8, Math.min(o.maxLive >> 1, 48));
+    function evictFrom(isCoarse, cap) {
+      for (;;) {
+        let n = 0, oldestK = null, oldestAt = Infinity;
+        for (const [k, rec] of live) {
+          if ((rec.z <= COARSE_Z) !== isCoarse) continue;
+          n++;
+          if (rec.at < oldestAt) { oldestAt = rec.at; oldestK = k; }
+        }
+        if (n <= cap || oldestK == null) return;
         live.delete(oldestK); stats.evicted++;
       }
+    }
+    function evict() {
+      evictFrom(true, coarseCap);
+      evictFrom(false, Math.max(1, o.maxLive - coarseCap));
     }
 
     // What to draw for this patch, right now, without waiting for anything.
@@ -225,7 +260,38 @@
       const rec = live.get(want);
       if (rec) { stats.hit++; touch(want, rec); return { img: rec.img, uv: [u0, v0, span, span], z: t.z, layer: L.key }; }
       stats.miss++;
-      if (!(opt && opt.noFetch)) request(t.z, x, y, d, (opt && opt.pri) || 0, L);
+      if (!(opt && opt.noFetch)) {
+        request(t.z, x, y, d, (opt && opt.pri) || 0, L);
+        // AND THE FLOOR OF THE PYRAMID, because a reserved pool preserves
+        // ancestors, it does not create them.
+        //
+        // Measured, after the two-pool eviction was already written: in a
+        // SETTLED frame the ancestor path fired on 0 patches of 127, and at a
+        // 64-tile cap the whole orbital frame had nothing to draw. Every patch
+        // the quadtree keeps is a leaf, and a leaf only ever asks for its own
+        // level — so the tiles the fallback walk looks for were never fetched
+        // by anybody. Protecting them from eviction protects an empty set.
+        //
+        // One extra request per patch at FLOOR_Z fixes that, and it is far
+        // cheaper than it sounds because coarse tiles are massively shared:
+        // measured, a band of 32 deep patches pulls in ONE floor tile, and a
+        // 127-patch orbital frame pulls in eight. They land in the reserved
+        // pool, so from then on every patch has SOMETHING under it however
+        // small the cache is.
+        //
+        // The floor goes FIRST, not last. Priority is projected patch size, so
+        // FLOOR_PRI simply outranks every detail request while still ordering
+        // the floors among themselves by the patch that wanted them. That is
+        // coarse-then-sharp, which is what every mapping client does and what
+        // the arrival crossfade was written for: ground everywhere within one
+        // round trip, sharpening as the rest lands. Fetching the floor last
+        // would mean that on a slow link it never arrives at all, which is the
+        // exact condition it exists to cover.
+        if (t.z > FLOOR_Z) {
+          const g = t.z - FLOOR_Z;
+          request(FLOOR_Z, x >> g, y >> g, d, FLOOR_PRI + ((opt && opt.pri) || 0), L);
+        }
+      }
 
       // Walk up. Each level up halves the sub-rectangle and doubles the scale.
       for (let z = t.z - 1; z >= 0; z--) {
@@ -267,7 +333,7 @@
       const done = (img, status) => {
         inFlight--; pending.delete(k);
         if (img) {
-          live.set(k, { img, at: ++seq }); evict();
+          live.set(k, { img, at: ++seq, z: job.z }); evict();
           stats.fetched++;
           if (o.store && !job.fromStore) { try { o.store.put(k, img); } catch (e) {} }
         } else if (status === 404) {

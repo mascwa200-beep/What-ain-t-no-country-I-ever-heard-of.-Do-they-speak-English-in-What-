@@ -2008,17 +2008,50 @@ void main(){
   // devices least able to spare it.
   // ---------- streamed imagery, per patch ----------
   // THE CAP IS SET BY THE WORKING SET, NOT BY TASTE. At orbit the quadtree
-  // holds ~100 patches at levels 0..6 and every one of them is a DIFFERENT
-  // tile, so the tiles needed in a single frame is bounded by MAX_PATCHES
-  // (128) rather than by anything smaller. A cap below that is not "a smaller
-  // cache" — it is a sequential scan through an LRU shorter than the scan,
-  // which is the classic zero-hit-rate case: measured at 64, orbit sampled
-  // imagery on 0 of 106 patches while the loader answered every request.
+  // holds ~127 patches at levels 0..6 and every one of them is a DIFFERENT
+  // tile, so a full-detail frame needs MAX_PATCHES (128) distinct tiles and
+  // the cap has to clear that. 160 tiles of 512x512 RGBA is ~168 MB unpacked,
+  // and that is the honest dominant cost of this whole feature.
   //
-  // 160 tiles of 512x512 RGBA is ~168 MB unpacked, and that is the honest
-  // dominant cost of this feature. The cap exists so a long flight does not
-  // grow without bound, not to make the number small.
-  const SAT_MAX_TILES = 160;
+  // WHAT A SMALLER CAP NOW MEANS, measured rather than feared. It used to mean
+  // nothing at all: at 64, orbit sampled imagery on 0 of 106 patches while the
+  // loader answered every request — a cyclic walk through an LRU shorter than
+  // the walk, which is the textbook zero-hit-rate case. js/tiles.js now keeps a
+  // reserved pool for the shallow levels AND fetches a level-2 floor under
+  // every patch, so the fallback walk always finds ground. Measured over real
+  // quadtree patch sets at four altitudes — blank patches, and the mean ground
+  // resolution actually served:
+  //
+  //   cap      orbit        100 km       2 km        ground
+  //   160   0x  1.3 km/px  0x 405 m/px  0x 312 m/px  0x 311 m/px
+  //    96   0x  6.5 km/px  0x 2.8 km/px  0x 312 m/px  0x 311 m/px
+  //    64   0x  9.8 km/px  0x 2.8 km/px  0x 312 m/px  0x 311 m/px
+  //    48   0x  9.8 km/px  0x 2.8 km/px  0x 312 m/px  0x 311 m/px
+  //
+  // Two things fall out of that, and they are why the cap can now scale to the
+  // device instead of being fixed at whatever the largest frame needs:
+  //
+  //   - NOT ONE PATCH IS EVER BLANK, at any cap. The cliff is gone.
+  //   - CLOSE UP, A SMALL CACHE COSTS NOTHING. At 2 km and on the ground a
+  //     48-tile cache serves 311 m/px — the same as 160 — because a close
+  //     frame only needs ~19 distinct tiles however deep it is. The whole cost
+  //     of a small cap lands on the ORBITAL view, and even there 9.8 km/px is
+  //     still three times sharper than the 27 km/px procedural bake this
+  //     feature replaced.
+  //
+  // A 2 GB phone cannot spare 168 MB of VRAM for imagery. Before the floor
+  // existed the only two options were "spend it" or "show nothing"; now the
+  // third one is real, and it is barely a compromise at the altitudes where
+  // anyone is looking at detail.
+  const SAT_TILES_FULL = 160;
+  function satCapFor(nav) {
+    const gb = nav && typeof nav.deviceMemory === 'number' ? nav.deviceMemory : 0;
+    if (!gb) return SAT_TILES_FULL;          // unknown: assume it can cope
+    if (gb <= 2) return 48;                  // ~50 MB — coarse, complete, cheap
+    if (gb <= 4) return 96;                  // ~101 MB
+    return SAT_TILES_FULL;
+  }
+  const SAT_MAX_TILES = satCapFor(typeof navigator !== 'undefined' ? navigator : null);
   const SAT_FADE_MS = 320;
 
   // An Image becomes a GL texture exactly once. WebGL textures are not
@@ -2054,10 +2087,15 @@ void main(){
   // the periodic sweep let the map reach 135 between sweeps — a VRAM budget
   // that is true once every 64 frames is not a budget.
   //
-  // Nothing seen in the current frame is ever a candidate: SAT_MAX_TILES is
-  // above MAX_PATCHES precisely so a single frame's working set always fits,
-  // and evicting inside the frame that needs it is the same zero-hit-rate
-  // thrash the tile cache itself was measured doing at 64.
+  // Nothing seen in the current frame is ever a candidate, and that is what
+  // makes a reduced cap safe rather than merely small. The GL cache and the
+  // image cache share SAT_MAX_TILES, so the number of DISTINCT images a frame
+  // can ask for is bounded by the same number — when the image cache is small
+  // the patches that miss share one coarse ancestor, and the frame's distinct
+  // count falls with it (measured at a 64-tile cap: 8 distinct images at orbit,
+  // 19 on the ground, against 127 patches). A frame therefore always fits, and
+  // evicting inside the frame that needs it — the same zero-hit-rate thrash
+  // measured at 64 before the floor existed — cannot arise.
   function trimSatTextures(r) {
     const tab = r.satTex;
     if (!tab || tab.size <= SAT_MAX_TILES) return;
