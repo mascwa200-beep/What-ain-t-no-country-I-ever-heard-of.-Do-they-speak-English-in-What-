@@ -1107,9 +1107,21 @@
     }
 
     // ---- colonization: send out settlers to found a new village ----
-    v.colonizeCd -= dt;
-    if (v.colonizeCd <= 0 && v.pop >= 8 && v.food > 25 && sim.villages.length < 80) {
-      v.colonizeCd = TICK_SLOW * (500 + (sim.rng() * 400 | 0));  // settlers leave every few years
+    // Colonisation as a HAZARD rather than a cooldown.
+    //
+    // `if (cd <= 0) { found(); cd = T; }` can only fire once per step, so the
+    // rate it produces depends on the step size: at dt below T it is one per
+    // T as intended, and at dt above T it is one per STEP, which is faster.
+    // Measured, that put 67 settlements on the map at six-month steps against
+    // 14 at three-day steps over the same century — the single worst
+    // divergence the cross-rate invariant found, and invisible to every other
+    // test because each run is perfectly self-consistent.
+    //
+    // A hazard has no such dependence: the expected number of foundings over
+    // a span is the same however the span is chopped up.
+    const colonizeEvery = TICK_SLOW * 700;
+    if (v.pop >= 8 && v.food > 25 && sim.villages.length < 80 &&
+        sim.rng() < rateOver(0.5, colonizeEvery, dt)) {
       // find a spot away from home
       const ang = sim.rng() * 6.283, dr = 18 + sim.rng() * 22;
       const tx = Math.round(v.x + Math.cos(ang) * dr);

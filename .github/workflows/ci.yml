@@ -80,6 +80,13 @@ jobs:
       - name: perf
         run: node tools/test-perf.js .
 
+      # the clock. The headline assertion runs the same seed for the same span
+      # of CALENDAR time at three very different step sizes and demands the
+      # worlds agree — nothing else in the suite would notice if a single rate
+      # conversion were wrong, because each run stays self-consistent.
+      - name: clock
+        run: node tools/test-clock.js .
+
       # the quadtree, exercised directly — coverage, hysteresis, horizon
       # culling and bounding-sphere containment are all invisible in a moving
       # picture and trivial to assert here. js/lod.js makes no GL calls
