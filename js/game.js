@@ -516,6 +516,21 @@
     return {
       id: p.id, name: p.name, type: p.type, seed: p.seed, meta: p.meta,
       orbit: p.orbit, rot: p.rot, mode: w.mode,
+      // THREE FLAGS THAT USED TO DIE ON RELOAD, TAKING TWO FEATURES WITH THEM.
+      //
+      // `isEarth` is set once, inside `PD.Earth.build` (js/earth.js:219) and on
+      // the planet in `createPlanet` (js/cosmos.js:68). A reload restores the
+      // tile arrays directly and never calls `build`, so both were simply gone
+      // — and nothing announced it, because both consumers fail by doing
+      // nothing: `fireHistory` returns at `if (!p.isEarth) return`, so the
+      // scriptural record stopped firing forever, and `drawPatches` computes
+      // `satOn` from `r.world.isEarth`, so satellite imagery silently switched
+      // itself off and the planet quietly fell back to the procedural bake.
+      // `histYear`/`forked` are what make a travelled world know when it is
+      // and whether you have already changed it.
+      isEarth: !!(p.isEarth || w.isEarth),
+      histYear: p.histYear == null ? null : p.histYear,
+      forked: !!p.forked,
       seaShift: w.seaShift, tempShift: w.tempShift, moistShift: w.moistShift,
       biome: Codec.packU8(w.biome), elev: Codec.packF01(w.elev),
       moist: Codec.packF01(w.moist), temp: Codec.packF01(w.temp),
@@ -586,9 +601,18 @@
       };
     });
     Sim.recount(sim);
+    // isEarth lives on BOTH the planet and the world, because both are asked:
+    // fireHistory reads the planet, drawPatches reads the world. An old save
+    // has neither field, so fall back to the name it was given at creation
+    // rather than silently demoting a restored Earth to a generated rock.
+    const earth = d.isEarth != null ? !!d.isEarth : /^Earth\b/.test(d.name || '');
+    world.isEarth = earth;
     return {
       id: d.id, name: d.name, type: d.type, seed: d.seed, meta: d.meta || {},
-      orbit: d.orbit, rot: d.rot || 0, world, sim
+      orbit: d.orbit, rot: d.rot || 0, world, sim,
+      isEarth: earth,
+      histYear: d.histYear == null ? null : d.histYear,
+      forked: !!d.forked
     };
   }
 
@@ -752,7 +776,15 @@
         histYear: st.year
       });
     if (!p) { flashToast('The void is full'); return null; }
-    Cosmos.C.planets.push(p);
+    // NO push here. `Cosmos.createPlanet` already did it (js/cosmos.js:75), the
+    // way `newMultiverse` relies on. Pushing again put the SAME object at two
+    // indices, and every consequence of that was silent: capacity halved so the
+    // void reported itself full after five jumps, `destroyPlanet` spliced one
+    // copy and left the other as an unreachable zombie holding a slot,
+    // `tickAll` ran each duplicated world's doom counter twice per step, and
+    // `serialize` wrote it out twice so the next load produced two genuinely
+    // distinct worlds sharing one id — corruption that survives the session
+    // that caused it.
     seedEarthLife(p.sim, p.world, st);
     gotoPlanet(p.id);
     G._histSeen = st.year;
@@ -2660,8 +2692,33 @@
   // ---- Time travel panel ----
   function renderTime(force) {
     const el = $('#time-list');
+    // THE YEAR JUMPER COMES FIRST, AND UNCONDITIONALLY.
+    //
+    // It used to be prepended on the last line of this function, AFTER an early
+    // return taken whenever `G.timeline` was empty — and `G.timeline` only
+    // fills from `takeSnapshot`, which the loop calls once every 90 seconds of
+    // FORWARD play. So the entire time-travel feature — the year input, the go
+    // button and all thirteen presets — did not exist in the DOM until the
+    // player had let the clock run for a minute and a half. Open the panel
+    // while paused, which is the natural thing to do before travelling
+    // anywhere, and the game said "No moments recorded yet" and offered
+    // nothing. That is the seventh fully-implemented mechanic in this project
+    // to be unreachable in play, and the first one whose cause was a return
+    // statement in the wrong place.
+    // ...and it is not rebuilt four times a second. `refreshOpenPanel` calls
+    // this on the 250 ms HUD tick with force=false, and every call replaced
+    // innerHTML wholesale — which destroys the `#jump-year` input and the
+    // caret inside it, so typing a four-digit year was a race against the
+    // clock that the player loses. `force` was accepted and then ignored; it
+    // means something now. Nothing here changes unless the snapshot list does.
+    const sig = G.timeline.length + ':' + G.timeline.map(s => s.when).join(',');
+    if (!force && el.dataset.sig === sig) return;
+    el.dataset.sig = sig;
+
+    const jumper = dateJumpHTML();
     if (!G.timeline.length) {
-      el.innerHTML = '<div class="empty">No moments recorded yet.<br><small>The chronicle takes a snapshot of the watched world every ~90 seconds. Come back soon, time traveler.</small></div>';
+      el.innerHTML = jumper +
+        '<div class="empty">No moments recorded yet.<br><small>The chronicle takes a snapshot of the watched world every ~90 seconds. Come back soon, time traveler.</small></div>';
       return;
     }
     el.innerHTML = G.timeline.map((s, i) =>
@@ -2673,7 +2730,7 @@
         </div>
       </div>`).join('') +
       '<div class="panel-note">Rewind replaces the world with its past. Branch forks a parallel universe from that moment.</div>';
-    el.innerHTML = dateJumpHTML() + el.innerHTML;
+    el.innerHTML = jumper + el.innerHTML;
   }
 
   // The dates worth offering, drawn from the two records so the list cannot

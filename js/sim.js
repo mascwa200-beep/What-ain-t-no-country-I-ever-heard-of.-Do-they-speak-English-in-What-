@@ -317,6 +317,19 @@
 
   // ---- Simulation container -------------------------------------------
   function createSim(world, rng, opts) {
+    // THE SEASON IS A PROPERTY OF THE DATE, NOT OF HAVING RUN.
+    //
+    // These two used to be hardcoded `season: 0` (spring) and `isNight: false`,
+    // and the only things that ever updated them were `Sim.step` — which needs
+    // the dial off Paused — and `applyFine`, on the rewind path. So a world
+    // that had not been stepped yet reported Spring and daylight whatever its
+    // date: the boot world before you start it, and every world you travel to,
+    // which is the whole point of the feature. Worse, the renderer takes the
+    // sun straight from `subsolar(epoch + clock)` every frame, so the HUD said
+    // "Spring, day" while the globe drew the correct season and terminator
+    // beside it. Derive them here and the two agree from the first frame.
+    const t0 = ((opts && opts.epoch != null) ? opts.epoch : Math.floor(Date.now() / 1000)) +
+               ((opts && opts.clock != null) ? opts.clock : 0);
     return {
       world, rng,
       units: [],
@@ -330,8 +343,8 @@
       clock: (opts && opts.clock != null) ? opts.clock : 0,
       // aggregate stats (covers every race incl. runtime-created ones)
       counts: {},
-      season: 0, // 0 spring 1 summer 2 autumn 3 winter
-      isNight: false,
+      season: seasonAt(t0), // 0 spring 1 summer 2 autumn 3 winter
+      isNight: isNightAt(t0, 0),
       log: [],
       grid: null,
       UNIT_CAP: 1400
