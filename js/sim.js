@@ -504,7 +504,41 @@
     return u;
   }
 
-  function foundVillage(sim, race, x, y) {
+  // A settlement's name, on a world that has real ones.
+  //
+  // `villageName` invents Riverton and Stoneford, which is right for a
+  // generated world and wrong for this one: an Earth seeded with Tokyo and
+  // Cairo was founding "Dunwick" the moment it grew, and nations inherited it,
+  // so the planet turned fictional as you watched. Nothing in the naming path
+  // had ever asked whether the world was Earth, although `sim.world` is
+  // dereferenced on the first line of the caller.
+  //
+  // The data needs no new source: PD.Earth.CITIES carries 60 real places and
+  // `seedEarthLife` plants at most 28 of them, so roughly half the list is
+  // already in memory and unused. Take the nearest unclaimed one — nearest, so
+  // a town founded in Iberia is named for Iberia — and fall back to invention
+  // once the list is spent, which is honest rather than repeating a name.
+  function earthName(sim, x, y) {
+    const w = sim.world;
+    if (!w || !w.isEarth || !PD.Earth || !PD.Earth.places) return null;
+    if (!sim._earthNames) {
+      try { sim._earthNames = PD.Earth.places(w) || []; }
+      catch (e) { sim._earthNames = []; }
+    }
+    const taken = new Set();
+    for (const v of sim.villages) taken.add(v.name);
+    let best = null, bestD = Infinity;
+    for (const c of sim._earthNames) {
+      if (taken.has(c.name)) continue;
+      // shortest way round the globe, not across the map
+      let dx = Math.abs(c.x - x); if (dx > w.W / 2) dx = w.W - dx;
+      const dy = c.y - y, d = dx * dx + dy * dy;
+      if (d < bestD) { bestD = d; best = c.name; }
+    }
+    return best;
+  }
+
+  function foundVillage(sim, race, x, y, opts) {
     const world = sim.world;
     // hard cap on settlements (all callers respect a null return), and no
     // ghost villages: founding needs room for at least one starter settler
@@ -515,8 +549,8 @@
     const R = RACES[race];
     const v = {
       id: sim.nextVillageId++, race, x: spot.x, y: spot.y,
-      name: villageName(race, sim.rng),
-      food: 70, pop: 0, level: 1, radius: 4,
+      name: (opts && opts.name) || earthName(sim, spot.x, spot.y) || villageName(race, sim.rng),
+      food: 70, pop: 0, level: (opts && opts.level) || 1, radius: 4,
       col: R.col2, prosperity: 0.6, aggro: R.aggr,
       buildTimer: 0, colonizeCd: TICK_SLOW * (400 + (sim.rng() * 300 | 0)),
       temples: 0, houses: 0, age: 0, rival: -1,
@@ -540,8 +574,12 @@
       }
     }
     world.dirtyMini = true;
-    // starter settlers
-    for (let k = 0; k < 4; k++) {
+    // Starter settlers. Four was hardcoded, which is why every city on the
+    // seeded Earth read "4" on its label — Tokyo and Nuuk were born the same
+    // size, and `v.pop` was faithfully reporting it.
+    const settlers = Math.max(1, Math.round((opts && opts.settlers) || 4));
+    for (let k = 0; k < settlers; k++) {
+      if (sim.units.length >= sim.UNIT_CAP) break;
       spawnUnit(sim, race, spot.x + (sim.rng() * 2 - 1), spot.y + (sim.rng() * 2 - 1), { village: v.id });
     }
     logEvent(sim, `${v.name} founded by the ${R.name}.`, 'found');

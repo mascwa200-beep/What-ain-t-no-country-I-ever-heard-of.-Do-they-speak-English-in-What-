@@ -207,9 +207,34 @@
       if (placed >= cap) break;
       if (!W.inBounds(world, c.x, c.y)) continue;
       if (world.owner[W.idx(world, c.x, c.y)] >= 0) continue;   // already a town here
-      const v = Sim.foundVillage(sim, 'human', c.x, c.y);
+      // SIZED BY HOW LARGE THE CITY ACTUALLY IS — which the comment above this
+      // function has promised since it was written, and which the code did not
+      // do. `c.pop` (real population, in millions) was used ONLY as the sort
+      // key three lines up, and never reached the settlement: every city was
+      // founded with the hardcoded four settlers at level 1, so Tokyo at 37
+      // million and Nuuk at twenty thousand were indistinguishable. That is the
+      // whole of "every label reads 4" in the report.
+      //
+      // Sub-linear, because a tile is 222 km and the sim's unit budget is 1400
+      // for the entire planet — this is a legible ordering of real cities, not
+      // a population model. Level feeds `v.cap` (+3 each) so the big ones also
+      // keep the room to grow.
+      // Square root, not log. Log10 was the first attempt and it compresses far
+      // too hard: the world's 28 largest cities are all within about 4x of each
+      // other, which log flattened to a 1.4:1 spread in settlers — better than
+      // the 1:1 it replaced, but not a legible ordering. sqrt gives ~1.8:1
+      // across those 28 and ~5:1 against Nuuk, while keeping the seeded total
+      // near 420 of the planet's 1400-unit budget so there is room to grow.
+      //
+      // Level matters as much as the head count: it feeds `v.cap` at +3 each
+      // (js/sim.js), so a real metropolis also gets the carrying capacity to
+      // become one rather than merely starting slightly larger.
+      const mil = Math.max(0, c.pop || 0);
+      const settlers = PD.clamp(Math.round(2 + 3.2 * Math.sqrt(mil)), 4, 30);
+      const level = PD.clamp(1 + Math.floor(Math.log2(1 + mil)), 1, 5);
+      const v = Sim.foundVillage(sim, 'human', c.x, c.y,
+        { settlers, level, name: c.name });   // it is called what it is called
       if (!v) continue;
-      v.name = c.name;                       // it is called what it is called
       placed++;
     }
     if (PD.Society) {

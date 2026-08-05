@@ -1,5 +1,5 @@
 /* Pixel Deity service worker — cache-first so the god works with no signal. */
-const CACHE = 'pixeldeity-v30';
+const CACHE = 'pixeldeity-v31';
 const ASSETS = [
   './', './index.html', './styles.css', './manifest.webmanifest',
   './js/util.js', './js/codec.js', './js/world.js',

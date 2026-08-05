@@ -286,7 +286,24 @@
     const idx = [];
     for (let j = 0; j < NQ; j++) for (let i = 0; i < NQ; i++) {
       const a = j * N + i, b = a + N;
-      idx.push(a, b, a + 1, a + 1, b, b + 1);
+      // COUNTER-CLOCKWISE SEEN FROM SPACE, which is what `frontFace(CCW)` and
+      // `cullFace(BACK)` in the renderer require.
+      //
+      // This was `(a, b, a+1, a+1, b, b+1)` — the opposite winding — so EVERY
+      // INTERIOR TRIANGLE OF EVERY PATCH WAS BACK-FACING AND CULLED. What
+      // survived was the skirt ring, which is wound the other way by
+      // construction, so the planet rendered as a lattice of bright bands on
+      // the clear colour: the "flat dark navy with bright blue arcs" in the
+      // bug report was the sky showing through the holes, and the arcs were
+      // the skirts. The ground was never drawn at all.
+      //
+      // It hid for so long because every symptom pointed elsewhere. The LOD
+      // was healthy, the albedo bake was correct, the imagery was correct,
+      // and `PD.Prof` counted the draw calls and triangles happily — they
+      // were all issued, and all discarded after the vertex stage. Only a
+      // pixel readback could see it, and the render suite never took one of
+      // the ground.
+      idx.push(a, a + 1, b, a + 1, b + 1, b);
     }
     // skirt: vertices N*N .. N*N + 4*N-4, one per border vertex, in ring order
     const ring = [];

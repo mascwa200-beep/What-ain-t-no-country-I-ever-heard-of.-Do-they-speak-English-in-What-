@@ -3589,7 +3589,41 @@ body{
     return u;
   }
 
-  function foundVillage(sim, race, x, y) {
+  // A settlement's name, on a world that has real ones.
+  //
+  // `villageName` invents Riverton and Stoneford, which is right for a
+  // generated world and wrong for this one: an Earth seeded with Tokyo and
+  // Cairo was founding "Dunwick" the moment it grew, and nations inherited it,
+  // so the planet turned fictional as you watched. Nothing in the naming path
+  // had ever asked whether the world was Earth, although `sim.world` is
+  // dereferenced on the first line of the caller.
+  //
+  // The data needs no new source: PD.Earth.CITIES carries 60 real places and
+  // `seedEarthLife` plants at most 28 of them, so roughly half the list is
+  // already in memory and unused. Take the nearest unclaimed one — nearest, so
+  // a town founded in Iberia is named for Iberia — and fall back to invention
+  // once the list is spent, which is honest rather than repeating a name.
+  function earthName(sim, x, y) {
+    const w = sim.world;
+    if (!w || !w.isEarth || !PD.Earth || !PD.Earth.places) return null;
+    if (!sim._earthNames) {
+      try { sim._earthNames = PD.Earth.places(w) || []; }
+      catch (e) { sim._earthNames = []; }
+    }
+    const taken = new Set();
+    for (const v of sim.villages) taken.add(v.name);
+    let best = null, bestD = Infinity;
+    for (const c of sim._earthNames) {
+      if (taken.has(c.name)) continue;
+      // shortest way round the globe, not across the map
+      let dx = Math.abs(c.x - x); if (dx > w.W / 2) dx = w.W - dx;
+      const dy = c.y - y, d = dx * dx + dy * dy;
+      if (d < bestD) { bestD = d; best = c.name; }
+    }
+    return best;
+  }
+
+  function foundVillage(sim, race, x, y, opts) {
     const world = sim.world;
     // hard cap on settlements (all callers respect a null return), and no
     // ghost villages: founding needs room for at least one starter settler
@@ -3600,8 +3634,8 @@ body{
     const R = RACES[race];
     const v = {
       id: sim.nextVillageId++, race, x: spot.x, y: spot.y,
-      name: villageName(race, sim.rng),
-      food: 70, pop: 0, level: 1, radius: 4,
+      name: (opts && opts.name) || earthName(sim, spot.x, spot.y) || villageName(race, sim.rng),
+      food: 70, pop: 0, level: (opts && opts.level) || 1, radius: 4,
       col: R.col2, prosperity: 0.6, aggro: R.aggr,
       buildTimer: 0, colonizeCd: TICK_SLOW * (400 + (sim.rng() * 300 | 0)),
       temples: 0, houses: 0, age: 0, rival: -1,
@@ -3625,8 +3659,12 @@ body{
       }
     }
     world.dirtyMini = true;
-    // starter settlers
-    for (let k = 0; k < 4; k++) {
+    // Starter settlers. Four was hardcoded, which is why every city on the
+    // seeded Earth read "4" on its label — Tokyo and Nuuk were born the same
+    // size, and `v.pop` was faithfully reporting it.
+    const settlers = Math.max(1, Math.round((opts && opts.settlers) || 4));
+    for (let k = 0; k < settlers; k++) {
+      if (sim.units.length >= sim.UNIT_CAP) break;
       spawnUnit(sim, race, spot.x + (sim.rng() * 2 - 1), spot.y + (sim.rng() * 2 - 1), { village: v.id });
     }
     logEvent(sim, `${v.name} founded by the ${R.name}.`, 'found');
@@ -6041,7 +6079,24 @@ body{
     const idx = [];
     for (let j = 0; j < NQ; j++) for (let i = 0; i < NQ; i++) {
       const a = j * N + i, b = a + N;
-      idx.push(a, b, a + 1, a + 1, b, b + 1);
+      // COUNTER-CLOCKWISE SEEN FROM SPACE, which is what `frontFace(CCW)` and
+      // `cullFace(BACK)` in the renderer require.
+      //
+      // This was `(a, b, a+1, a+1, b, b+1)` — the opposite winding — so EVERY
+      // INTERIOR TRIANGLE OF EVERY PATCH WAS BACK-FACING AND CULLED. What
+      // survived was the skirt ring, which is wound the other way by
+      // construction, so the planet rendered as a lattice of bright bands on
+      // the clear colour: the "flat dark navy with bright blue arcs" in the
+      // bug report was the sky showing through the holes, and the arcs were
+      // the skirts. The ground was never drawn at all.
+      //
+      // It hid for so long because every symptom pointed elsewhere. The LOD
+      // was healthy, the albedo bake was correct, the imagery was correct,
+      // and `PD.Prof` counted the draw calls and triangles happily — they
+      // were all issued, and all discarded after the vertex stage. Only a
+      // pixel readback could see it, and the render suite never took one of
+      // the ground.
+      idx.push(a, a + 1, b, a + 1, b + 1, b);
     }
     // skirt: vertices N*N .. N*N + 4*N-4, one per border vertex, in ring order
     const ring = [];
@@ -8619,10 +8674,25 @@ void main(){
     }
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
-    // stars — they go out as the last of creation is unmade
+    // Stars — they go out as the last of creation is unmade.
+    //
+    // THEY HAVE NEVER BEEN VISIBLE. The starfield sits at radius 40, and the
+    // frustum's far plane is `max(4, alt * 12 + 3)` — 6.0 at orbit and 22.2 at
+    // the boot distance, so every star has always been clipped away. Seeing
+    // one needs alt >= 3.08, i.e. dist >= 4.08, about 19,600 km, which is past
+    // anywhere the camera goes. Nine hundred stars, a seeded RNG, per-star
+    // colours and sizes, a draw call every frame — and a black sky.
+    //
+    // They are conceptually at infinity, so they get their own projection with
+    // a far plane that actually contains them rather than being dragged in and
+    // out with the ground. Depth test is already off for this pass, so a
+    // second matrix is the whole fix.
     const dissolve = (global.G && global.G.dissolve) || 0;
     gl.disable(gl.DEPTH_TEST);
-    if (dissolve < 0.98) drawPoints(r, vp, r.bufStars, r.bufStarCol, r.bufStarSize, r.nStars);
+    if (dissolve < 0.98) {
+      const starVP = mat4Mul(mat4Persp(cam.fov, r.w / r.h, 1, 200), view);
+      drawPoints(r, starVP, r.bufStars, r.bufStarCol, r.bufStarSize, r.nStars);
+    }
     gl.enable(gl.DEPTH_TEST);
     if (dissolve >= 1) {                                // nothing left to draw
       if (post) postprocess(r);
@@ -9345,18 +9415,40 @@ void main(){
     }
 
     // village labels (front hemisphere, close zoom)
+    const LABEL_CAP = 40;
     if (ui.showLabels && r.cam.dist < 3.4) {
       ctx.font = '7px monospace';
       ctx.textAlign = 'center';
-      for (const v of sim.villages) {
-        const s = worldToScreen(r, v.x + 0.5, v.y);
+      // BIGGEST FIRST, AND THEY DO NOT OVERLAP.
+      //
+      // This loop walked `sim.villages` in array order with no cap, no
+      // ordering and no overlap test — while the omniscience loop directly
+      // above it caps at 90/600. With the 80-settlement ceiling that is 80
+      // labels painted over each other in founding order, so in a dense region
+      // the last town founded wins and the capital underneath it is unreadable.
+      // Sorting by population first means that when two labels collide it is
+      // the larger place that survives, which is the one you were looking for.
+      const shown = [];
+      const byPop = sim.villages.slice().sort((a, b) => b.pop - a.pop);
+      for (const v of byPop) {
+        if (shown.length >= LABEL_CAP) break;
+        // v.x + 0.5 centres the anchor in its tile horizontally; the bare v.y
+        // did not do the same vertically, so every label sat half a tile high.
+        const s = worldToScreen(r, v.x + 0.5, v.y + 0.5);
         if (!s) continue;
         const label = v.name + ' ' + v.pop;
         const wpx = label.length * 5 + 6;
+        const box = { x0: s.x - wpx / 2, y0: s.y - 14, x1: s.x + wpx / 2, y1: s.y - 3 };
+        let hidden = false;
+        for (const b of shown) {
+          if (box.x0 < b.x1 && box.x1 > b.x0 && box.y0 < b.y1 && box.y1 > b.y0) { hidden = true; break; }
+        }
+        if (hidden) continue;
+        shown.push(box);
         ctx.fillStyle = 'rgba(0,0,0,0.55)';
-        ctx.fillRect(s.x - wpx / 2, s.y - 14, wpx, 11);
+        ctx.fillRect(box.x0, box.y0, wpx, 11);
         ctx.fillStyle = v.col;
-        ctx.fillRect(s.x - wpx / 2, s.y - 14, 3, 11);
+        ctx.fillRect(box.x0, box.y0, 3, 11);
         ctx.fillStyle = '#fff';
         ctx.fillText(label, s.x, s.y - 5);
       }
@@ -12106,9 +12198,34 @@ void main(){
       if (placed >= cap) break;
       if (!W.inBounds(world, c.x, c.y)) continue;
       if (world.owner[W.idx(world, c.x, c.y)] >= 0) continue;   // already a town here
-      const v = Sim.foundVillage(sim, 'human', c.x, c.y);
+      // SIZED BY HOW LARGE THE CITY ACTUALLY IS — which the comment above this
+      // function has promised since it was written, and which the code did not
+      // do. `c.pop` (real population, in millions) was used ONLY as the sort
+      // key three lines up, and never reached the settlement: every city was
+      // founded with the hardcoded four settlers at level 1, so Tokyo at 37
+      // million and Nuuk at twenty thousand were indistinguishable. That is the
+      // whole of "every label reads 4" in the report.
+      //
+      // Sub-linear, because a tile is 222 km and the sim's unit budget is 1400
+      // for the entire planet — this is a legible ordering of real cities, not
+      // a population model. Level feeds `v.cap` (+3 each) so the big ones also
+      // keep the room to grow.
+      // Square root, not log. Log10 was the first attempt and it compresses far
+      // too hard: the world's 28 largest cities are all within about 4x of each
+      // other, which log flattened to a 1.4:1 spread in settlers — better than
+      // the 1:1 it replaced, but not a legible ordering. sqrt gives ~1.8:1
+      // across those 28 and ~5:1 against Nuuk, while keeping the seeded total
+      // near 420 of the planet's 1400-unit budget so there is room to grow.
+      //
+      // Level matters as much as the head count: it feeds `v.cap` at +3 each
+      // (js/sim.js), so a real metropolis also gets the carrying capacity to
+      // become one rather than merely starting slightly larger.
+      const mil = Math.max(0, c.pop || 0);
+      const settlers = PD.clamp(Math.round(2 + 3.2 * Math.sqrt(mil)), 4, 30);
+      const level = PD.clamp(1 + Math.floor(Math.log2(1 + mil)), 1, 5);
+      const v = Sim.foundVillage(sim, 'human', c.x, c.y,
+        { settlers, level, name: c.name });   // it is called what it is called
       if (!v) continue;
-      v.name = c.name;                       // it is called what it is called
       placed++;
     }
     if (PD.Society) {

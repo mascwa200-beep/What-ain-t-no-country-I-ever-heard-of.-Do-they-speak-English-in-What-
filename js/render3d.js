@@ -1869,10 +1869,25 @@ void main(){
     }
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
-    // stars — they go out as the last of creation is unmade
+    // Stars — they go out as the last of creation is unmade.
+    //
+    // THEY HAVE NEVER BEEN VISIBLE. The starfield sits at radius 40, and the
+    // frustum's far plane is `max(4, alt * 12 + 3)` — 6.0 at orbit and 22.2 at
+    // the boot distance, so every star has always been clipped away. Seeing
+    // one needs alt >= 3.08, i.e. dist >= 4.08, about 19,600 km, which is past
+    // anywhere the camera goes. Nine hundred stars, a seeded RNG, per-star
+    // colours and sizes, a draw call every frame — and a black sky.
+    //
+    // They are conceptually at infinity, so they get their own projection with
+    // a far plane that actually contains them rather than being dragged in and
+    // out with the ground. Depth test is already off for this pass, so a
+    // second matrix is the whole fix.
     const dissolve = (global.G && global.G.dissolve) || 0;
     gl.disable(gl.DEPTH_TEST);
-    if (dissolve < 0.98) drawPoints(r, vp, r.bufStars, r.bufStarCol, r.bufStarSize, r.nStars);
+    if (dissolve < 0.98) {
+      const starVP = mat4Mul(mat4Persp(cam.fov, r.w / r.h, 1, 200), view);
+      drawPoints(r, starVP, r.bufStars, r.bufStarCol, r.bufStarSize, r.nStars);
+    }
     gl.enable(gl.DEPTH_TEST);
     if (dissolve >= 1) {                                // nothing left to draw
       if (post) postprocess(r);
@@ -2595,18 +2610,40 @@ void main(){
     }
 
     // village labels (front hemisphere, close zoom)
+    const LABEL_CAP = 40;
     if (ui.showLabels && r.cam.dist < 3.4) {
       ctx.font = '7px monospace';
       ctx.textAlign = 'center';
-      for (const v of sim.villages) {
-        const s = worldToScreen(r, v.x + 0.5, v.y);
+      // BIGGEST FIRST, AND THEY DO NOT OVERLAP.
+      //
+      // This loop walked `sim.villages` in array order with no cap, no
+      // ordering and no overlap test — while the omniscience loop directly
+      // above it caps at 90/600. With the 80-settlement ceiling that is 80
+      // labels painted over each other in founding order, so in a dense region
+      // the last town founded wins and the capital underneath it is unreadable.
+      // Sorting by population first means that when two labels collide it is
+      // the larger place that survives, which is the one you were looking for.
+      const shown = [];
+      const byPop = sim.villages.slice().sort((a, b) => b.pop - a.pop);
+      for (const v of byPop) {
+        if (shown.length >= LABEL_CAP) break;
+        // v.x + 0.5 centres the anchor in its tile horizontally; the bare v.y
+        // did not do the same vertically, so every label sat half a tile high.
+        const s = worldToScreen(r, v.x + 0.5, v.y + 0.5);
         if (!s) continue;
         const label = v.name + ' ' + v.pop;
         const wpx = label.length * 5 + 6;
+        const box = { x0: s.x - wpx / 2, y0: s.y - 14, x1: s.x + wpx / 2, y1: s.y - 3 };
+        let hidden = false;
+        for (const b of shown) {
+          if (box.x0 < b.x1 && box.x1 > b.x0 && box.y0 < b.y1 && box.y1 > b.y0) { hidden = true; break; }
+        }
+        if (hidden) continue;
+        shown.push(box);
         ctx.fillStyle = 'rgba(0,0,0,0.55)';
-        ctx.fillRect(s.x - wpx / 2, s.y - 14, wpx, 11);
+        ctx.fillRect(box.x0, box.y0, wpx, 11);
         ctx.fillStyle = v.col;
-        ctx.fillRect(s.x - wpx / 2, s.y - 14, 3, 11);
+        ctx.fillRect(box.x0, box.y0, 3, 11);
         ctx.fillStyle = '#fff';
         ctx.fillText(label, s.x, s.y - 5);
       }

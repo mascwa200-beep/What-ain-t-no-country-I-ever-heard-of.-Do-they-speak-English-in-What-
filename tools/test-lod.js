@@ -92,6 +92,63 @@ console.log('\n--- the grid ---');
   check('the patch budget stays under the 87,040-triangle mesh it replaces',
     LOD.MAX_PATCHES * tris <= 87040 * 1.0,
     (LOD.MAX_PATCHES * tris).toLocaleString() + ' vs 87,040');
+
+  // EVERY TRIANGLE MUST FACE SPACE.
+  //
+  // This is the assertion whose absence cost the most. The interior winding
+  // was the opposite of `frontFace(CCW)` + `cullFace(BACK)`, so every surface
+  // triangle of every patch was back-facing and thrown away after the vertex
+  // stage. The planet rendered as a lattice of skirt bands on the clear
+  // colour — and NOTHING ELSE NOTICED. The quadtree was healthy, the albedo
+  // bake was right, the imagery was right, and PD.Prof counted every draw
+  // call and every triangle, because they really were issued. The suite
+  // measured that geometry was submitted, never that it survived to a pixel.
+  //
+  // The check is pure arithmetic and needs no GL: build a patch, and for each
+  // triangle take (v1-v0) x (v2-v0). On a convex body around the origin that
+  // cross product must point the same way as the outward radius. Winding is
+  // the one property of a mesh that is invisible in every counter and obvious
+  // in one dot product.
+  {
+    const wtree = LOD.createTree(world, world.seed);
+    const built = wtree.roots && wtree.roots[0];
+    if (!built) { check('a patch to test winding on', false, 'no root patch'); }
+    else {
+      LOD.bound(wtree, built);
+      LOD.buildPatch(wtree, built);
+      const base = built.base, c = built.centre;
+      let inward = 0, checked = 0;
+      const V = (k) => [base[k * 3] + c[0], base[k * 3 + 1] + c[1], base[k * 3 + 2] + c[2]];
+      // interior triangles only — the skirt hangs inward by design and its
+      // facing is a separate question
+      const nSurf = LOD.NQ * LOD.NQ * 6;
+      let degenerate = 0;
+      for (let t = 0; t < nSurf; t += 3) {
+        const a0 = V(G.idx[t]), a1 = V(G.idx[t + 1]), a2 = V(G.idx[t + 2]);
+        const e1 = [a1[0] - a0[0], a1[1] - a0[1], a1[2] - a0[2]];
+        const e2 = [a2[0] - a0[0], a2[1] - a0[1], a2[2] - a0[2]];
+        const nx = e1[1] * e2[2] - e1[2] * e2[1];
+        const ny = e1[2] * e2[0] - e1[0] * e2[2];
+        const nz = e1[0] * e2[1] - e1[1] * e2[0];
+        // A root patch spans lat -90..90, so its whole top and bottom ROWS
+        // collapse onto the poles and those triangles have zero area. They
+        // rasterise to nothing and have no facing to get wrong — counting
+        // them as "inward" would be the test inventing a defect.
+        if (Math.hypot(nx, ny, nz) < 1e-12) { degenerate++; continue; }
+        // outward is judged against the triangle's own CENTROID, not one of
+        // its corners: at level 0 a triangle is thousands of kilometres wide
+        // and a corner is nowhere near the middle of it.
+        const cxp = (a0[0] + a1[0] + a2[0]) / 3;
+        const cyp = (a0[1] + a1[1] + a2[1]) / 3;
+        const czp = (a0[2] + a1[2] + a2[2]) / 3;
+        checked++;
+        if (nx * cxp + ny * cyp + nz * czp <= 0) inward++;
+      }
+      check('every surface triangle faces outward, so none is culled as a backface',
+        inward === 0 && checked > 0,
+        inward + ' of ' + checked + ' wound inward (' + degenerate + ' degenerate at the poles)');
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
