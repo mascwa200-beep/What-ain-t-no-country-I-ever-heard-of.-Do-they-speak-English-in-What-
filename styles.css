@@ -165,14 +165,26 @@ body{
    stats over the canvas; overflowing sideways is scrollable and honest. */
 .hud-center{
   display:flex;align-items:center;gap:8px;flex:1 1 auto;
-  /* `center` on an OVERFLOWING flex row clips the leading items and they
-     cannot be scrolled to — the faith counter read "r 0". `safe center`
-     falls back to start the moment the content stops fitting. */
-  justify-content:center;
-  justify-content:safe center;
+  /* CENTRED BY AUTO MARGINS, NOT BY justify-content.
+     `center` on an OVERFLOWING flex row clips the leading items and they
+     cannot be scrolled to — that is how the faith counter came to read "r 0",
+     and then how the date came to read "2026 · 23:21" with "3 Aug " cut off
+     and `.stat`'s accent border-left with it.
+     `safe center` fixes that, but it is a progressive-enhancement override: an
+     engine that does not parse the `safe` keyword drops the whole declaration
+     and falls back to the plain `center` on the line above — so the guard is
+     absent exactly where it is most needed, which includes the older Android
+     WebViews this project ships an APK for.
+     Auto margins are not an enhancement. Free space is distributed to them
+     when there is any and they collapse to zero when there is none, so this
+     centres when it fits and starts at the left edge when it does not, on
+     every engine, with no fallback to get wrong. */
+  justify-content:flex-start;
   flex-wrap:nowrap;min-width:0;overflow-x:auto;overflow-y:hidden;
   scrollbar-width:none;-ms-overflow-style:none;
 }
+.hud-center > :first-child{margin-left:auto;}
+.hud-center > :last-child{margin-right:auto;}
 .hud-center::-webkit-scrollbar{display:none;}
 /* the title must never be clipped mid-word — it read "PIXEL DEI" */
 .hud-left{min-width:0;flex:0 0 auto;overflow:visible;}
@@ -587,6 +599,41 @@ body{
 }
 .snap-btns button:hover{background:var(--panel2);border-color:var(--gold);}
 
+/* Going to a year. Deliberately NOT reusing .snap-restore / .snap-branch:
+   those classes carry the snapshot panel's click handler, and a button that
+   is styled by the same name it is dispatched by is a reorder away from
+   calling the wrong thing with the wrong argument. */
+.jump-row{display:flex;gap:var(--s2);margin:var(--s2) 0;}
+.jump-row input{
+  flex:1 1 auto;min-width:0;
+  background:var(--panel2);border:1px solid var(--edge2);color:var(--ink);
+  font-family:var(--f-mono);font-size:var(--t-sm);padding:var(--s2);border-radius:2px;
+}
+.jump-list{display:flex;flex-direction:column;gap:var(--s1);}
+.jump-btn{
+  background:var(--panel);border:1px solid var(--edge2);color:var(--ink);
+  font-family:var(--f-ui);font-size:var(--t-sm);padding:var(--s2);
+  border-radius:2px;cursor:pointer;text-align:left;
+  transition:background .12s,border-color .12s;
+}
+.jump-btn small{color:var(--dim);display:block;font-size:var(--t-xs);}
+.jump-btn:hover{background:var(--panel2);border-color:var(--gold);}
+.jump-go{flex:0 0 auto;text-align:center;}
+
+/* The record, read rather than stumbled upon. 184 rows, so the list scrolls
+   inside the panel it lives in and the rows stay one line tall. */
+.rec-row{padding:var(--s1) var(--s2);}
+.rec-proph{
+  font-family:var(--f-serif);font-size:var(--t-sm);color:var(--gold);
+  padding:var(--s1) var(--s2);border-left:1px solid var(--gold-dim);margin:2px 0;
+}
+.rec-proph small{display:block;color:var(--dim);font-family:var(--f-mono);font-size:var(--t-xs);}
+.rec-proph-note{
+  font-size:var(--t-xs);color:var(--dim);line-height:1.6;
+  padding:var(--s2);border-left:1px solid var(--edge2);margin-bottom:var(--s2);
+}
+.rec-proph-note i{color:var(--gold);}
+
 /* testament */
 /* the Testament reads like a book, because it is one */
 .chapter{background:rgba(3,6,14,0.42);border:1px solid var(--edge);border-radius:var(--r-sm);padding:var(--s3) var(--s4);margin-bottom:var(--s3);}
@@ -730,8 +777,33 @@ body{
 .log-fall{color:var(--bad);}
 
 /* ---------- Toast ---------- */
+/* The toast is centred in the FREE STRIP between the toolbar and the tab rail,
+   not on the viewport. Centred on the viewport it grows symmetrically, so a
+   long message slides its left edge under the toolbar — which is what
+   "Ground: Daily true colour" did on a 500px phone while "Multiverse saved"
+   was short enough to hide it. Pinning both edges makes the message length
+   irrelevant instead of making short messages lucky. */
 #toast{
-  position:absolute;bottom:16px;left:50%;transform:translateX(-50%) translateY(30px);
+  position:absolute;bottom:16px;
+  left:calc(var(--tool-w) + 20px + var(--sa-l));
+  right:calc(var(--tab) + 20px + var(--sa-r));
+  /* fit-content, NOT max-content. max-content is defined as the intrinsic
+     preferred width with the available space IGNORED, so it never wraps
+     however tight left/right are — measured at 404px inside a 266px strip on
+     a 500px phone. fit-content is min(max-content, max(min-content,
+     available)), and for an absolutely positioned box "available" is exactly
+     the space left/right describe: short messages still hug, long ones wrap.
+     (max-width:100% did nothing — a percentage resolves against the CONTAINING
+     BLOCK, not against the strip.)
+
+     overflow-wrap must be `anywhere`, not `break-word`: only `anywhere`
+     reduces the MIN-CONTENT contribution, and fit-content can never go below
+     min-content. break-word would break the glyphs and leave the measurement
+     unchanged — a fix to the picture and not to the box. It matters because
+     flashToast carries unbounded text, including 'World seed: ' + whatever
+     the player typed. */
+  width:fit-content;margin:0 auto;text-align:center;overflow-wrap:anywhere;
+  transform:translateY(30px);
   background:rgba(6,9,18,0.9);border:1px solid var(--gold-dim);
   border-top:1px solid var(--gold);color:var(--gold);
   backdrop-filter:var(--glass);-webkit-backdrop-filter:var(--glass);
@@ -740,7 +812,7 @@ body{
   clip-path:polygon(8px 0,100% 0,100% calc(100% - 8px),calc(100% - 8px) 100%,0 100%,0 8px);
   transition:opacity .2s,transform .2s;box-shadow:var(--shadow),0 0 24px rgba(240,200,110,0.18);
 }
-#toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
+#toast.show{opacity:1;transform:translateY(0);}
 
 /* ---------- Modals ---------- */
 /* A centred flex child taller than its container clips at BOTH ends and
@@ -825,8 +897,13 @@ body{
   #chronicle{width:min(190px, 44vw);}
   .logo{font-size:var(--t-lg);}
   #planet-name{max-width:80px;font-size:9px;}
-  /* keep faith and the time readout; the rest is a swipe away in the scroller */
-  .hud-center .stat:not(.faith){display:none;}
+  /* Keep faith and the time readout; the rest is a swipe away in the scroller.
+     The selector used to be `.stat:not(.faith)`, which deleted #year-stat too —
+     so the comment promised the date and the rule removed it, and on every
+     phone the clock simply was not there. In a game whose whole premise is
+     travelling through time, the date is the last readout to drop, not the
+     first. */
+  .hud-center .stat:not(.faith):not(#year-stat){display:none;}
   .speed-btn{padding:5px 5px;}
 }
 @media (max-width:520px){

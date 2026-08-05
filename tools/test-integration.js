@@ -2,6 +2,7 @@
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
+const zlib = require('zlib');
 const base = process.argv[2];
 
 function makeCtx2D() {
@@ -81,8 +82,35 @@ ctx.document = {
 };
 vm.createContext(ctx);
 
-const files = ['util.js', 'codec.js', 'world.js', 'sim.js', 'render.js', 'render3d.js', 'society.js', 'afterlife.js', 'cosmos.js', 'powers.js', 'game.js'];
+// DERIVED FROM THE PAGE, not maintained by hand.
+//
+// This list was written out by hand and had drifted badly: it was missing
+// earth.js, earthdata.js, tiles.js, lod.js, buildings.js and history.js. So
+// the suite that claims to test "boot, loop, powers, save/load" had never once
+// booted the world the game actually ships — with no earth.js the Earth type
+// falls back to a generated planet, silently, exactly as the sw.js omission
+// did two releases ago. tools/test-render.js already asserts sw.js against
+// these same tags; this reads them.
+const indexSrc = fs.readFileSync(path.join(base, 'index.html'), 'utf8');
+const files = (indexSrc.match(/<script src="js\/([a-z0-9]+)\.js"><\/script>/g) || [])
+  .map((t) => t.replace(/.*js\/([a-z0-9]+)\.js.*/, '$1') + '.js');
+if (files.length < 10) throw new Error('could not read the script list from index.html');
+// game.js boots on evaluation, and boot() DEFERS on the Earth height field:
+// it is gzipped and decodes through DecompressionStream, which this sandbox
+// does not have, so the world would still be null when the next line reads it.
+// Seed the decoded grid first and boot takes the synchronous path — which also
+// means this suite finally boots the real Earth instead of a generated stand-in.
 for (const f of files) {
+  if (f === 'game.js') {
+    try {
+      const D = ctx.PD.EarthData;
+      const raw = new Uint8Array(zlib.gunzipSync(Buffer.from(D.z, 'base64')));
+      if (!ctx.PD.Earth.useGrid(raw, D.W, D.H)) throw new Error('grid rejected');
+      console.log('earth height field seeded:', D.W + 'x' + D.H);
+    } catch (e) {
+      console.log('earth height field unavailable (' + e.message + ') — booting generated');
+    }
+  }
   const code = fs.readFileSync(path.join(base, 'js', f), 'utf8');
   vm.runInContext(code, ctx, { filename: f });
 }
@@ -122,6 +150,12 @@ console.log('post-load frames pumped, units:', G.sim.units.length);
 
 
 // ============ TIME DIAL / REWIND / GENESIS ============
+function countWater(w) {
+  let n = 0;
+  for (let i = 0; i < w.n; i++) if (w.biome[i] === PD.World.B.WATER || w.biome[i] === PD.World.B.DEEP) n++;
+  return n;
+}
+
 console.log('\n--- time dial ---');
 const G2 = ctx.G;
 const scales = [];
@@ -182,6 +216,105 @@ console.log('rewind invariant failures:', invFails);
 // gl.lineWidth(>1) is a no-op in modern browsers, so lightning and shockwaves
 // used to draw as 1px hairlines. They are camera-facing quads now — pure
 // geometry, so it is checkable without a GPU.
+// ---------------------------------------------------------------------------
+// AND IT CAME TO PASS
+//
+// The record does not merely announce itself: an event that names a power
+// invokes it. The two assertions that matter are the ones that could each be
+// true while the feature is broken —
+//
+//   * the world must actually CHANGE (an announcement is not an event), and
+//   * the world must NOT be marked forked (the record acting is not the god
+//     acting, and if those are confused then travelling anywhere instantly
+//     ends the timeline you went to see).
+console.log('\n--- and it came to pass ---');
+let recFails = 0;
+function recCheck(name, cond, detail) {
+  console.log('  ' + (cond ? 'PASS' : 'FAIL') + ' — ' + name + (detail ? '  [' + detail + ']' : ''));
+  if (!cond) recFails++;
+}
+{
+  const check = recCheck;
+  const H = PD.History;
+  if (!H) { recCheck('js/history.js loaded', false); }
+  else {
+    // Every enactable event must name a power the game really has, and none of
+    // them may be one of the seven days: those belong to the creationStage
+    // sequence that un-creation gates, and firing one at a running world would
+    // fight machinery that already has its own order.
+    let unknown = 0, genesisDay = 0;
+    for (const e of H.SCRIPTURE.concat(H.RECORD)) {
+      if (!H.enactable(e)) continue;
+      if (!PD.Powers.BY_ID[e.power]) unknown++;
+      if (/^gen_/.test(e.power)) genesisDay++;
+    }
+    check('every enactable event names a power the game has', unknown === 0, unknown + ' unknown');
+    check('and the seven days are announced, never enacted', genesisDay === 0,
+      genesisDay + ' would fire');
+
+    // Travel to just before the Flood and let the clock cross it.
+    const before = G.world ? countWater(G.world) : 0;
+    const p = G.travelToYear ? G.travelToYear(-2360) : null;
+    check('travelling to a year produces a world', !!p, p ? p.name : 'none');
+    if (p) {
+      check('and it is not forked on arrival', p.forked === false, String(p.forked));
+      const flood = H.SCRIPTURE.find((e) => e.power === 'flood');
+      flood.done = false;                       // a fresh run of the record
+      // WITH AN EMPTY PURSE. The first version of this left the player's faith
+      // wherever it happened to be — 173, against the Flood's cost of 120 — so
+      // the Flood fired out of the player's own faith and the assertion could
+      // not tell that apart from the record lending itself the cost. Removing
+      // the lending entirely changed nothing and the suite said PASS.
+      G.faith = 0;
+      // step the clock across 2348 BC the way the dial does
+      G.sim.clock += PD.Sim.YEAR * 20;
+      G._histSeen = -2360;
+      G.fireHistory && G.fireHistory();
+      check('the Flood happens even with no faith to pay for it',
+        G.floodT > 0 || flood.done === true,
+        'floodT ' + (G.floodT || 0) + ', done ' + flood.done + ', faith ' + G.faith);
+      // THE ONE THAT MATTERS: the record is not the god.
+      check('and the record acting did NOT fork the timeline', p.forked === false,
+        String(p.forked));
+      check('and what was written cost you nothing', G.faith === 0, 'faith ' + G.faith);
+    }
+
+    // Doing it yourself, at the right time and place, FULFILS rather than forks.
+    {
+      const q = G.travelToYear ? G.travelToYear(-1491) : null;   // Sinai
+      if (q) {
+        const sinai = H.SCRIPTURE.find((e) => e.power === 'commandments');
+        sinai.done = false;
+        const x = Math.floor(((sinai.lon + 180) / 360) * G.world.W);
+        const y = Math.floor(((90 - sinai.lat) / 180) * G.world.H);
+        const pw = PD.Powers.BY_ID.commandments;
+        G.faith = 5000;
+        G._lastActAt = { x, y };
+        G.power = Object.assign({}, pw);
+        const spent = pw.apply(G, x, y);
+        G.onPowerUsed && G.onPowerUsed(pw, spent);
+        check('the right act at the right time and place fulfils the record',
+          q.forked === false, q.forked ? 'forked' : 'held the true timeline');
+
+        // ...and the wrong moment does not.
+        const r2 = G.travelToYear ? G.travelToYear(1800) : null;
+        if (r2) {
+          const px = 90, py = 60;
+          G.faith = 5000;
+          G._lastActAt = { x: px, y: py };
+          G.power = Object.assign({}, pw);
+          const s2 = pw.apply(G, px, py);
+          G.onPowerUsed && G.onPowerUsed(pw, s2);
+          check('but the same act in the wrong age forks it', r2.forked === true,
+            r2.forked ? 'forked' : 'still on the record');
+        }
+      }
+    }
+  }
+}
+
+console.log('record failures:', recFails);
+
 console.log('\n--- fx ribbons ---');
 let ribFails = 0;
 function rcheck(name, cond) {
@@ -471,7 +604,7 @@ scheck('XIV. Before the Beginning unlocks', !!G2.story.done.before);
 scheck('XV. Let There Be Light unlocks', !!G2.story.done.recreate);
 console.log('testament failures:', storyFails);
 
-const totalFails = invFails + ribFails + archFails + softFails + gateFails + storyFails;
+const totalFails = invFails + ribFails + archFails + softFails + gateFails + storyFails + recFails;
 console.log('\n=== assertion failures: ' + totalFails + ' ===');
 console.log('INTEGRATION TEST ' + (totalFails ? 'FAILED' : 'PASSED') +
             ' — boot, loop, powers, save/load, rewind, un-creation, genesis, story.');

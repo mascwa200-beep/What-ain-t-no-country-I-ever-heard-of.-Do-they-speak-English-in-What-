@@ -80,6 +80,43 @@ jobs:
       - name: perf
         run: node tools/test-perf.js .
 
+      # the clock. The headline assertion runs the same seed for the same span
+      # of CALENDAR time at three very different step sizes and demands the
+      # worlds agree — nothing else in the suite would notice if a single rate
+      # conversion were wrong, because each run stays self-consistent.
+      - name: clock
+        run: node tools/test-clock.js .
+
+      # the quadtree, exercised directly — coverage, hysteresis, horizon
+      # culling and bounding-sphere containment are all invisible in a moving
+      # picture and trivial to assert here. js/lod.js makes no GL calls
+      # precisely so this can run under Node.
+      - name: lod
+        run: node tools/test-lod.js .
+
+      # streaming imagery, and every way a network can fail. This is the
+      # first thing in the project that depends on one, so offline, 404ing,
+      # slow and out-of-order are the ordinary condition rather than edge
+      # cases. js/tiles.js takes its loader, store and clock as arguments so
+      # all of it runs here with no network at all.
+      - name: tiles
+        run: node tools/test-tiles.js .
+
+      # settlements as buildings, and the rule that NOTHING FLOATS. Six fixed
+      # lifts used to put every person, label, ring and bolt 77 km above the
+      # summit of Everest, and no test in this project would have noticed.
+      - name: buildings
+        run: node tools/test-buildings.js .
+
+      # the past. The headline claim is that -125 m of sea level and -7 C turn
+      # the present Earth into the Ice Age Earth using only real elevation and
+      # the classifier the generated worlds already use — so the assertions are
+      # geography: Doggerland, Beringia, Sundaland and the Persian Gulf come up
+      # while the abyssal plains stay ocean. Also guards the two event records
+      # against being quietly merged into one confident history.
+      - name: history
+        run: node tools/test-history.js .
+
       # the planet is Earth: real places at the right altitude, orientation
       # traps, real cities on real land. This one guards a BAKED ASSET, so it
       # is the only thing standing between a bad rebuild of js/earthdata.js
@@ -94,6 +131,12 @@ jobs:
       # every element fits, across 6 viewports incl. landscape phone
       - name: layout
         run: node tools/test-layout.js . "$CHROME_PATH"
+
+      # what the GPU is actually asked to draw, in a real WebGL context at
+      # three altitudes. drawInner returns early when headless, so this is the
+      # only place a draw call can be counted at all.
+      - name: render
+        run: node tools/test-render.js . "$CHROME_PATH"
 
       # the slow one (~2 min): boot, loop, powers, save/load, rewind,
       # un-creation, genesis, story

@@ -47,7 +47,7 @@
 
   function hist(sim, text, kind) {
     const soc = ensure(sim);
-    soc.history.unshift({ t: sim.tick, text, kind: kind || 'event' });
+    soc.history.unshift({ t: sim.clock, text, kind: kind || 'event' });
     if (soc.history.length > 200) soc.history.pop();
   }
 
@@ -59,14 +59,14 @@
     const R = PD.Sim.RACES[u.race];
     // heroes fall into legend
     if (u.paragon > 0) {
-      soc.legends.unshift({ name: u.name, deed: `${u.name} the Paragon fell after a life of ${(u.age / 120).toFixed(0)} years.`, t: sim.tick });
+      soc.legends.unshift({ name: u.name, deed: `${u.name} the Paragon fell after a life of ${(u.age / PD.Sim.YEAR).toFixed(0)} years.`, t: sim.clock });
       if (soc.legends.length > 40) soc.legends.pop();
       hist(sim, `The paragon ${u.name} has fallen.`, 'legend');
       const hi = soc.heroes.indexOf(u.id); if (hi >= 0) soc.heroes.splice(hi, 1);
     }
     // dragonslaying is legend too
     if (u.race === 'dragon' && killer && killer.name) {
-      soc.legends.unshift({ name: killer.name, deed: `${killer.name} slew the dragon!`, t: sim.tick });
+      soc.legends.unshift({ name: killer.name, deed: `${killer.name} slew the dragon!`, t: sim.clock });
       hist(sim, `${killer.name} slew a DRAGON. Songs will be sung.`, 'legend');
       killer.karma += 20;
     }
@@ -284,7 +284,7 @@
     const v = u.village >= 0 ? PD.Sim.villageById(sim, u.village) : null;
     soc.prayers.push({
       id: soc.nextPrayerId++, unitId: u.id, village: u.village,
-      kind, text: PRAYER_KINDS[kind].text(u, v), t: sim.tick,
+      kind, text: PRAYER_KINDS[kind].text(u, v), t: sim.clock,
       x: u.x, y: u.y
     });
     // and it is HEARD. Prayers have only ever been text in a side panel;
@@ -359,7 +359,8 @@
     u.paragon = Math.min(3, (u.paragon || 0) + level);
     u.maxHp = PD.Sim.RACES[u.race].hp * (1 + u.paragon * 2);
     u.hp = u.maxHp;
-    u.lifespan = Math.max(u.lifespan, u.age + 2400);
+    // twenty more years, not 2400 ticks of a clock that no longer exists
+    u.lifespan = Math.max(u.lifespan, u.age + PD.Sim.YEAR * 20);
     if (soc.heroes.indexOf(u.id) < 0) soc.heroes.push(u.id);
     hist(sim, `${u.name} is EMPOWERED (paragon ${u.paragon}). A hero walks among mortals.`, 'legend');
     PD.Sim.logEvent(sim, `${u.name} rises as a paragon!`, 'grow');
@@ -402,7 +403,7 @@
     if (!soc.internetOn) return;
     const R = PD.Sim.RACES[race] || PD.Sim.RACES.human;
     soc.feed.unshift({
-      t: sim.tick,
+      t: sim.clock,
       author: (author || PD.Sim.personName(race, sim.rng)) + ' ' + R.emoji,
       text, likes: (sim.rng() * 400) | 0
     });

@@ -29,12 +29,75 @@
     return new Float32Array([xx, yx, zx, 0, xy, yy, zy, 0, xz, yz, zz, 0,
       -(xx * eye[0] + xy * eye[1] + xz * eye[2]), -(yx * eye[0] + yy * eye[1] + yz * eye[2]), -(zx * eye[0] + zy * eye[1] + zz * eye[2]), 1]);
   }
+  // The same basis, with the translation dropped. Patch vertices arrive
+  // already relative to the eye, so the view must not move them again — and
+  // that is the whole reason the precision holds: float32 near radius 1.0
+  // quantises to 0.38 m, which is a visible shudder once a metre matters.
+  function mat4LookAtOrigin(eye, at, up) {
+    let zx = eye[0] - at[0], zy = eye[1] - at[1], zz = eye[2] - at[2];
+    let zl = Math.hypot(zx, zy, zz); zx /= zl; zy /= zl; zz /= zl;
+    let xx = up[1] * zz - up[2] * zy, xy = up[2] * zx - up[0] * zz, xz = up[0] * zy - up[1] * zx;
+    let xl = Math.hypot(xx, xy, xz) || 1; xx /= xl; xy /= xl; xz /= xl;
+    const yx = zy * xz - zz * xy, yy = zz * xx - zx * xz, yz = zx * xy - zy * xx;
+    return new Float32Array([xx, yx, zx, 0, xy, yy, zy, 0, xz, yz, zz, 0, 0, 0, 0, 1]);
+  }
   function mat4Mul(a, b) {
     const o = new Float32Array(16);
     for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) {
       o[j * 4 + i] = a[i] * b[j * 4] + a[4 + i] * b[j * 4 + 1] + a[8 + i] * b[j * 4 + 2] + a[12 + i] * b[j * 4 + 3];
     }
     return o;
+  }
+
+  // The unit vector toward the sun, in the same frame tileToSphere builds:
+  // +Y is north, and longitude runs from +Z through +X. Sim.subsolar gives
+  // the point on the globe the sun is directly over, which is the same thing
+  // expressed as a latitude and longitude.
+  function sunDir(sim) {
+    if (!PD.Sim || !PD.Sim.subsolar || !sim || sim.clock == null) {
+      return [0.6, 0.25, 0.76];        // no clock yet: a fixed, pleasant angle
+    }
+    const s = PD.Sim.subsolar(sim.epoch + sim.clock);
+    const cl = Math.cos(s.dec);
+    return [cl * Math.sin(s.lon), Math.sin(s.dec), cl * Math.cos(s.lon)];
+  }
+
+  // ---------- the surface, and everything that stands on it ----------
+  //
+  // Six different places used to lift things off the sphere by a constant —
+  // 0.010 to 0.029 Earth radii, which is 64 km to 185 km. Every one of them
+  // was chosen when the camera could not get closer than 1,593 km, where a
+  // hundred kilometres of float is invisible.
+  //
+  // The camera now stands at 80 m, and terrain reaches 12.4 km at ground
+  // exaggeration. So a unit sprite at 0.014 was 89 km up: SEVENTY-SEVEN
+  // KILOMETRES ABOVE THE SUMMIT OF EVEREST. Every person, label, ring and
+  // bolt the game drew on the surface was in the sky.
+  //
+  // There is one surface now and it is the one the quadtree builds, the
+  // camera clamps against and the picking ray refines against. `lift` is a
+  // real altitude in METRES above the ground, not a fraction of the planet.
+  function surfaceRadius(world, tx, ty, exag) {
+    if (!PD.LOD || !world || !world.elev) return 1;
+    const lon = (tx / world.W) * Math.PI * 2;
+    const lat = Math.PI / 2 - (ty / world.H) * Math.PI;
+    return PD.LOD.groundRadius(world, lon, lat, exag);
+  }
+  // The exaggeration a renderer is currently drawing with. FX and the minimap
+  // reach this without a renderer in hand, so it falls back to the camera's
+  // own altitude rather than assuming one.
+  // FX is bound to a world, not to a renderer, so it cannot ask the camera
+  // what exaggeration this frame is using. The frame publishes it.
+  let curExag = 1;
+  function exagOf(r) {
+    if (!PD.LOD) return 1;
+    if (r && r.cam) return PD.LOD.exagFor(r.cam.sDist != null ? r.cam.sDist : r.cam.dist);
+    return 1;
+  }
+  // Put a point ON the ground at (tx, ty), `liftM` metres above it.
+  function onSurface(world, tx, ty, out, liftM, exag) {
+    const rad = surfaceRadius(world, tx, ty, exag) + (liftM || 0) / R_EARTH_M;
+    return tileToSphere(world, tx, ty, out, rad - 1);
   }
 
   // ---------- world <-> sphere mapping ----------
@@ -61,25 +124,63 @@
   }
 
   // ---------- shaders ----------
+  // One quadtree patch, drawn eye-relative.
+  //
+  //   aBase — the vertex on the unit sphere, minus the patch centre
+  //   aUp   — the unit up vector times the TRUE height, in Earth radii
+  //   aNrm  — the tangent-space normal, precomputed on the CPU
+  //   aUV   — the patch-local grid coordinate, 0..1
+  //
+  // so the position is base + up*exaggeration + (patchCentre - eye), with the
+  // view matrix carrying no translation. Two things fall out of that: error
+  // scales with PATCH size rather than planet radius (millimetres at level 8,
+  // against 0.38 m for float32 near radius 1), and vertical exaggeration is a
+  // free uniform instead of a geometry rebuild.
+  //
+  // vUV is a GLOBAL equirect coordinate built from the patch's own lon/lat
+  // rect, which is what lets FS_PLANET, updateClim and updateDataTex carry on
+  // sampling exactly as they did.
   const VS_PLANET = `
-attribute vec3 aPos; attribute vec2 aUV; attribute float aH;
-uniform mat4 uMVP; uniform float uDisp; uniform float uSea;
-varying vec2 vUV; varying vec3 vN; varying float vLand;
+attribute vec3 aBase; attribute vec3 aUp; attribute vec3 aNrm; attribute vec2 aUV;
+uniform mat4 uMVP; uniform vec3 uCentreRel; uniform vec3 uCentre;
+uniform float uExag; uniform vec4 uUVRect;
+varying vec2 vUV; varying vec3 vN; varying vec3 vTN; varying float vLand;
+varying vec2 vLocal;
 void main(){
-  float h = max(aH - uSea, 0.0);
-  vec3 p = aPos * (1.0 + h * uDisp);
-  vUV = aUV; vN = aPos; vLand = h;
-  gl_Position = uMVP * vec4(p, 1.0);
+  vec3 local = aBase + aUp * uExag;
+  vN = normalize(uCentre + aBase);
+  vTN = aNrm;
+  vLand = length(aUp);
+  vUV = uUVRect.xy + aUV * uUVRect.zw;
+  // the PATCH-LOCAL grid coordinate, kept alongside the global one. Satellite
+  // imagery is addressed per patch — a sub-rectangle of one tile — and the
+  // global equirect UV cannot express that without a second rect anyway.
+  vLocal = aUV;
+  gl_Position = uMVP * vec4(local + uCentreRel, 1.0);
 }`;
   const FS_PLANET = `
 precision highp float;
-varying vec2 vUV; varying vec3 vN; varying float vLand;
+varying vec2 vUV; varying vec3 vN; varying vec3 vTN; varying float vLand;
+varying vec2 vLocal;
 uniform sampler2D uTex; uniform sampler2D uData; uniform sampler2D uNorm;
 uniform sampler2D uClim;   // r=precip g=cloud b=snow a=wetness
+uniform sampler2D uSat;    // streamed imagery for THIS patch, or a blank
+uniform vec4 uSatRect;     // where in that tile this patch sits
+uniform float uSatMix;     // 0 = procedural bake, unchanged
 uniform vec3 uSun; uniform vec3 uEye; uniform vec3 uAtmo;
 uniform float uBlood; uniform float uDoom; uniform float uTime;
 void main(){
   vec3 base = texture2D(uTex, vUV).rgb;
+  // Real ground. uSatRect is [0,0,1,1] when the exact tile is resident and a
+  // sub-rectangle when only an ancestor is — so the parent fallback is the
+  // ordinary path here rather than a special case, and the same multiply
+  // covers a patch deeper than the archive goes.
+  //
+  // The patch grid runs south-to-north in y and the tile image runs
+  // north-to-south, so the v flip is not cosmetic: without it the ground is
+  // mirrored about its own latitude and reads as a wrong-projection bug.
+  vec2 sUV = uSatRect.xy + vec2(vLocal.x, 1.0 - vLocal.y) * uSatRect.zw;
+  base = mix(base, texture2D(uSat, sUV).rgb, uSatMix);
   vec4 data = texture2D(uData, vUV); // r=city light g=water b=fire a=crackmask
   vec4 clim = texture2D(uClim, vUV);
   vec3 Ns = normalize(vN);
@@ -87,6 +188,12 @@ void main(){
   vec3 east = normalize(vec3(Ns.z, 0.0, -Ns.x) + vec3(0.0001));
   vec3 south = normalize(cross(east, Ns));
   vec3 Nt = texture2D(uNorm, vUV).xyz * 2.0 - 1.0;
+  // The baked map carries micro-detail at 1440x960; vTN carries the patch's
+  // own geometric slope, including the sub-tile relief the quadtree invents.
+  // Without the second one that relief displaces the surface but never
+  // catches the light, and reads as a rippled sheet rather than as ground.
+  // Whiteout blend: add the tangents, multiply the normals.
+  Nt = normalize(vec3(Nt.xy + vTN.xy, max(Nt.z * vTN.z, 0.02)));
   vec3 N = normalize(east * Nt.x + south * Nt.y + Ns * max(Nt.z, 0.2));
   // snow settles on the ground, so it goes in BEFORE the light is applied
   float snow = clim.b;
@@ -128,6 +235,47 @@ void main(){
   // the clouds and the explosions all get graded on the same curve.
   gl_FragColor = vec4(max(col, 0.0), 1.0);
 }`;
+  // ---------- buildings ----------
+  // One box mesh, drawn once per building. Eye-relative like the terrain
+  // patches, for the same reason: at 80 m altitude a float32 position near
+  // radius 1 quantises to 0.38 m, and a six-metre hut cannot be built out of
+  // parts that jitter by a third of a metre.
+  //
+  // The instance carries its own local frame — east/north/up at its point on
+  // the globe — because a building three kilometres away is standing on
+  // measurably different "up" than you are.
+  const VS_BLDG = `
+attribute vec3 aPos; attribute vec3 aNorm;
+attribute vec3 iOff;      // building origin, relative to the eye
+attribute vec3 iUp;       // local up at that point on the globe
+attribute vec3 iEast;     // local east, already rotated by the building's yaw
+attribute vec3 iSize;     // width, depth, height in world units
+attribute vec3 iCol;
+uniform mat4 uMVP;
+varying vec3 vN; varying vec3 vCol; varying float vUpDot;
+void main(){
+  vec3 north = cross(iUp, iEast);
+  // the unit box is centred in x/z and sits ON the ground in y
+  vec3 local = iEast * (aPos.x * iSize.x)
+             + north * (aPos.z * iSize.y)
+             + iUp   * ((aPos.y + 0.5) * iSize.z);
+  vN = normalize(iEast * aNorm.x + north * aNorm.z + iUp * aNorm.y);
+  vCol = iCol;
+  vUpDot = aNorm.y;
+  gl_Position = uMVP * vec4(local + iOff, 1.0);
+}`;
+  const FS_BLDG = `
+precision highp float;
+varying vec3 vN; varying vec3 vCol; varying float vUpDot;
+uniform vec3 uSun; uniform vec3 uAtmo;
+void main(){
+  float diff = max(dot(vN, uSun), 0.0);
+  // roofs catch the sky, walls catch the ground bounce
+  vec3 sky = mix(vec3(0.10, 0.11, 0.15), uAtmo * 0.55, max(vUpDot, 0.0));
+  vec3 col = vCol * (0.20 + 1.0 * diff) + vCol * sky;
+  gl_FragColor = vec4(max(col, 0.0), 1.0);
+}`;
+
   // ---------- postprocess: the whole frame, graded as one image ----------
   // Everything above used to write straight to the backbuffer, and only the
   // planet was tonemapped (inside its own shader), so clouds, atmosphere,
@@ -203,12 +351,13 @@ void main(){
   const VS_CLOUD = `
 attribute vec3 aPos; attribute vec2 aUV;
 uniform mat4 uMVP; uniform float uScroll;
+uniform float uCShell;
 varying vec2 vUV; varying vec2 vUV0; varying vec3 vN;
 void main(){
   vUV = vec2(aUV.x + uScroll, aUV.y);   // the deck drifts...
   vUV0 = aUV;                            // ...but the weather stays over its ground
   vN = aPos;
-  gl_Position = uMVP * vec4(aPos * 1.035, 1.0);
+  gl_Position = uMVP * vec4(aPos * uCShell, 1.0);
 }`;
   const FS_CLOUD = `
 precision highp float;
@@ -402,7 +551,7 @@ void main(){
     // tile coords + tile-space velocity -> 3D pos/vel on the sphere
     function emit(x, y, vx, vy, life, color, size, grav) {
       if (!world || parts.length >= MAX) return;
-      tileToSphere(world, x, y, tmp, 0.012);
+      onSurface(world, x, y, tmp, 20, curExag);
       const p = [tmp[0], tmp[1], tmp[2]];
       // tangent basis: east & south
       const lon = (x / world.W) * Math.PI * 2;
@@ -441,7 +590,7 @@ void main(){
       // an incoming orbital streak toward (x,y)
       streak(x, y) {
         if (!world) return;
-        const target = tileToSphere(world, x, y, [0, 0, 0], 0.01);
+        const target = onSurface(world, x, y, [0, 0, 0], 0, curExag);
         const dir = [Math.random() - 0.5, Math.random() * 0.6 + 0.4, Math.random() - 0.5];
         const dl = Math.hypot(dir[0], dir[1], dir[2]);
         for (let i = 0; i < 16; i++) {
@@ -585,6 +734,7 @@ void main(){
 
     FX.bind(world);
     bakeTerrain(r);
+    makeLodTree(r);
 
     if (!headless) initGL(r);
     // the context-loss listeners above reach the renderer through the canvas,
@@ -610,6 +760,9 @@ void main(){
   // The sphere is radius 1, so one world unit is one Earth radius. Everything
   // that wants a real distance goes through this.
   const R_EARTH_M = 6371000;
+  // How close the eye may get to the ground beneath it. Not to radius 1 —
+  // to the terrain, which is what stepCam clamps against.
+  const MIN_ALT_M = 80;
 
   const HD_COLORS = {
     2:  [214, 196, 148], 3:  [92, 138, 62],  4:  [44, 94, 48],
@@ -872,7 +1025,12 @@ void main(){
   }
 
   // ---------- GL init ----------
-  const SEG_LON = 256, SEG_LAT = 170;
+  // The cloud deck and the atmosphere shell still want a plain sphere, but
+  // neither is displaced — the cloud shader only scrolls a UV and the
+  // atmosphere is raymarched in the fragment shader. 256x170 was sized for a
+  // terrain mesh that no longer exists here; 128x84 is 21,504 triangles
+  // instead of 87,040 and is indistinguishable on a smooth shell.
+  const SEG_LON = 128, SEG_LAT = 84;
   function initGL(r) {
     const gl = r.gl;
     r.progPlanet = compile(gl, VS_PLANET, FS_PLANET);
@@ -889,7 +1047,107 @@ void main(){
 
     initPost(r);
 
-    // sphere geometry
+    // ---- buildings ----
+    // Instancing is NOT guaranteed. It is core on WebGL2 and an optional
+    // extension on WebGL1, so the capability is probed once and recorded —
+    // never assumed, and never allowed to fail silently the way a missing
+    // vertex texture unit would (that renders a smooth sphere and raises
+    // nothing). Where it is absent the draw path falls back to a smaller
+    // number of buildings drawn one at a time, which is worse but is not
+    // nothing.
+    r.progBldg = compile(gl, VS_BLDG, FS_BLDG);
+    r.inst = null;
+    if (r.gl2) {
+      r.inst = {
+        divisor: (loc, d) => gl.vertexAttribDivisor(loc, d),
+        draw: (mode, count, type, offset, n) => gl.drawElementsInstanced(mode, count, type, offset, n)
+      };
+    } else {
+      const ext = gl.getExtension('ANGLE_instanced_arrays');
+      if (ext) {
+        r.inst = {
+          divisor: (loc, d) => ext.vertexAttribDivisorANGLE(loc, d),
+          draw: (mode, count, type, offset, n) => ext.drawElementsInstancedANGLE(mode, count, type, offset, n)
+        };
+      }
+    }
+    {
+      // a unit box, centred in x/z, resting on y = -0.5 so the shader can
+      // lift it by half its height and have it stand on the ground
+      const P = [], N = [], I = [];
+      const faces = [
+        [[0, 0, 1], [[-.5, -.5, .5], [.5, -.5, .5], [.5, .5, .5], [-.5, .5, .5]]],
+        [[0, 0, -1], [[.5, -.5, -.5], [-.5, -.5, -.5], [-.5, .5, -.5], [.5, .5, -.5]]],
+        [[1, 0, 0], [[.5, -.5, .5], [.5, -.5, -.5], [.5, .5, -.5], [.5, .5, .5]]],
+        [[-1, 0, 0], [[-.5, -.5, -.5], [-.5, -.5, .5], [-.5, .5, .5], [-.5, .5, -.5]]],
+        [[0, 1, 0], [[-.5, .5, .5], [.5, .5, .5], [.5, .5, -.5], [-.5, .5, -.5]]],
+        [[0, -1, 0], [[-.5, -.5, -.5], [.5, -.5, -.5], [.5, -.5, .5], [-.5, -.5, .5]]]
+      ];
+      for (const [nrm, quad] of faces) {
+        const b = P.length / 3;
+        for (const v of quad) { P.push(v[0], v[1], v[2]); N.push(nrm[0], nrm[1], nrm[2]); }
+        I.push(b, b + 1, b + 2, b, b + 2, b + 3);
+      }
+      r.bldgPos = glBuf(gl, new Float32Array(P));
+      r.bldgNrm = glBuf(gl, new Float32Array(N));
+      r.bldgIdx = gl.createBuffer();
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, r.bldgIdx);
+      gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(I), gl.STATIC_DRAW);
+      r.bldgNIdx = I.length;
+      // instance streams, grown on demand
+      r.bldgCap = 0;
+      r.bBufOff = gl.createBuffer(); r.bBufUp = gl.createBuffer();
+      r.bBufEast = gl.createBuffer(); r.bBufSize = gl.createBuffer();
+      r.bBufCol = gl.createBuffer();
+    }
+
+    // ---- the quadtree's shared grid ----
+    // One (u,v) array and one index buffer for every patch that will ever
+    // exist. A patch owns nothing but its own base/up/normal buffers, which
+    // is what keeps 128 resident patches inside ~1.3 MB.
+    if (PD.LOD) {
+      const G = PD.LOD.GRID;
+      r.lodUV = glBuf(gl, G.uv);
+      r.lodIdx = gl.createBuffer();
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, r.lodIdx);
+      gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, G.idx, gl.STATIC_DRAW);
+      r.lodNIdx = G.nIdx;
+      r.lodBufs = new Map();      // patch object -> {base, up, nrm, version}
+    }
+
+    // ---- streamed imagery ----
+    // A patch with no tile yet still has to draw something, and what it draws
+    // is the procedural bake at uSatMix = 0. The sampler still needs a bound
+    // texture though: sampling an incomplete unit is undefined behaviour that
+    // renders black on some drivers and fine on others, which is the worst of
+    // both. One opaque white texel costs nothing and makes the no-imagery path
+    // identical everywhere.
+    r.texBlank = glTex(gl, false);
+    gl.bindTexture(gl.TEXTURE_2D, r.texBlank);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE,
+      new Uint8Array([255, 255, 255, 255]));
+    r.satTex = new Map();         // Image -> { tex, born, seen }
+    if (PD.Tiles && !r.tiles) {
+      // The persistent store opens asynchronously and may never open at all
+      // (private browsing, an old WebView, a full disk). The cache is built
+      // now regardless, against a shim that simply misses until the real store
+      // arrives — so streaming never waits on storage.
+      r.tileStore = {
+        inner: null,
+        get: (k) => (r.tileStore.inner ? r.tileStore.inner.get(k) : null),
+        put: (k, v) => { if (r.tileStore.inner) r.tileStore.inner.put(k, v); }
+      };
+      // Sized to the ON-SCREEN WORKING SET, not to a download budget — see
+      // SAT_MAX_TILES. A cache shorter than the number of distinct tiles in a
+      // frame does not merely hold less, it holds nothing: the scan evicts
+      // every entry before it is asked for again.
+      r.tiles = PD.Tiles.create({ store: r.tileStore, maxLive: SAT_MAX_TILES });
+      try {
+        PD.Tiles.openStore('pd-tiles', (s) => { r.tileStore.inner = s; });
+      } catch (e) { /* no IndexedDB: stream every time, which is fine */ }
+    }
+
+    // sphere geometry (cloud + atmosphere shells only)
     const nv = (SEG_LON + 1) * (SEG_LAT + 1);
     const pos = new Float32Array(nv * 3), uv = new Float32Array(nv * 2);
     r.heights = new Float32Array(nv);
@@ -1310,6 +1568,25 @@ void main(){
     cam.sDist += (cam.dist - cam.sDist) * f;
     cam.fov += (cam.fovT - cam.fov) * f * 0.6;
 
+    // ---- the ground is solid ----
+    // cam.min is an altitude above radius 1, and land displaces well above
+    // radius 1, so lowering cam.min to 80 m did not give the camera the
+    // ground — it gave it the inside of the mountain. With the old fixed
+    // 0.13 displacement, land reached radius 1.0806 and the eye stopped at
+    // 1.0000126: half a million metres of rock.
+    //
+    // The clamp reads the terrain through the SAME function the vertex
+    // shader is about to displace with, at the same exaggeration, so the two
+    // cannot drift apart. Both the target and the smoothed value are pushed
+    // out: clamping only the smoothed one leaves cam.dist below the ground,
+    // and every frame afterwards eases back down into it.
+    if (PD.LOD && r.world && r.world.elev) {
+      const exag = PD.LOD.exagFor(cam.sDist);
+      const g = PD.LOD.groundRadius(r.world, cam.sLon, cam.sLat, exag) + MIN_ALT_M / R_EARTH_M;
+      if (cam.sDist < g) cam.sDist = g;
+      if (cam.dist < g) cam.dist = g;
+    }
+
     // the ear rides the camera: sounds are placed and attenuated against
     // wherever the god is currently looking
     if (PD.Audio8 && PD.Audio8.listen) PD.Audio8.listen(cam.sLon, cam.sLat, cam.sDist);
@@ -1368,26 +1645,47 @@ void main(){
     // ray-sphere (unit radius)
     const b = 2 * (eye[0] * dir[0] + eye[1] * dir[1] + eye[2] * dir[2]);
     const a = dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2];
-    // Picking intersects a sphere slightly larger than the planet so a click
-    // on a mountain still lands. 1.045 is a radius of 1.0222 — 141 km above
-    // the surface, which was invisible while the camera could not get closer
-    // than 1593 km and is a gross error once it can. Shrink the allowance
-    // toward the real surface as the camera descends.
-    const pickAlt = Math.max(0, (cam.sDist != null ? cam.sDist : cam.dist) - 1);
-    const bulge = 1 + Math.min(0.022, pickAlt * 0.09);
-    const c = eye[0] * eye[0] + eye[1] * eye[1] + eye[2] * eye[2] - bulge * bulge;
-    const disc = b * b - 4 * a * c;
-    if (disc < 0) return null; // clicked space
-    const t = (-b - Math.sqrt(disc)) / (2 * a);
-    if (t < 0) return null;
-    const hit = [eye[0] + dir[0] * t, eye[1] + dir[1] * t, eye[2] + dir[2] * t];
+    // Picking used to intersect one sphere of a guessed radius — 141 km above
+    // the surface originally, then an altitude-scaled fudge. Both are guesses
+    // about where the ground is, and the terrain now answers that question
+    // directly.
+    //
+    // Start at the highest the planet reaches so no summit is missed, then
+    // refine: re-read the terrain under the current hit and re-intersect at
+    // that radius. Three passes is plenty — the correction shrinks by roughly
+    // the surface slope each time. It uses groundRadius, the same function
+    // the camera clamp and the vertex displacement use, so a click lands
+    // where the geometry is rather than where a constant said it would be.
+    const ee = eye[0] * eye[0] + eye[1] * eye[1] + eye[2] * eye[2];
+    const hasLod = !!(PD.LOD && r.world && r.world.elev);
+    const exag = hasLod ? PD.LOD.exagFor(cam.sDist != null ? cam.sDist : cam.dist) : 1;
+    const ceil = hasLod ? 1 + PD.LOD.liftOf(1) * exag : 1.022;
+    const shoot = (rad) => {
+      const disc = b * b - 4 * a * (ee - rad * rad);
+      if (disc < 0) return null;
+      const t = (-b - Math.sqrt(disc)) / (2 * a);
+      if (t < 0) return null;
+      return [eye[0] + dir[0] * t, eye[1] + dir[1] * t, eye[2] + dir[2] * t];
+    };
+    let hit = shoot(ceil);
+    if (!hit) return null;                     // clicked space
+    if (hasLod) {
+      for (let i = 0; i < 3; i++) {
+        const tl = sphereToTile(r.world, hit);
+        const lon = (tl.x / r.world.W) * Math.PI * 2;
+        const lat = Math.PI / 2 - (tl.y / r.world.H) * Math.PI;
+        const next = shoot(PD.LOD.groundRadius(r.world, lon, lat, exag));
+        if (!next) break;                      // grazing the limb; keep the last good hit
+        hit = next;
+      }
+    }
     return sphereToTile(r.world, hit);
   }
   const screenToWorldRaw = screenToWorld;
 
   function worldToScreen(r, wx, wy) {
     if (r.headless || !r._vp) return null;
-    const p = tileToSphere(r.world, wx, wy, [0, 0, 0], 0.02);
+    const p = onSurface(r.world, wx, wy, [0, 0, 0], 40, exagOf(r));
     // cull back hemisphere
     const eye = camEye(r.cam);
     if (p[0] * eye[0] + p[1] * eye[1] + p[2] * eye[2] < 1.0) return null;
@@ -1467,7 +1765,14 @@ void main(){
       r.subRects = null;
       r.texDirty = false;
     }
-    if (r.heightsDirty) updateHeights(r);
+    // The terrain changed. The single displaced sphere used to re-sample its
+    // per-vertex heights here; now the quadtree rebuilds the patches that
+    // need it, lazily, as they are walked — so an edit costs the patches you
+    // can see rather than the whole globe at the moment you make it.
+    if (r.heightsDirty) {
+      if (r.lod) PD.LOD.invalidate(r.lod);
+      r.heightsDirty = false;
+    }
 
     // These were both full-grid JS loops running EVERY frame for data that
     // changes on the order of once every few ticks. City lights and fire only
@@ -1491,10 +1796,33 @@ void main(){
     const view = mat4LookAt(eye, [cam.shakeX, cam.shakeY, 0], [0, 1, 0]);
     const vp = mat4Mul(proj, view);
     r._vp = vp;
+    // The same frustum with the eye at the origin. Patch vertices arrive
+    // pre-offset by (centre - eye), so this is what they are transformed by;
+    // everything else in the frame still uses the world-space vp.
+    const vpEye = mat4Mul(proj, mat4LookAtOrigin(eye, [cam.shakeX, cam.shakeY, 0], [0, 1, 0]));
 
-    // sun sweeps with the day cycle; planes get fixed dramatic light
-    const cyc = (sim.tick % 480) / 480 * Math.PI * 2;
-    let sun = [Math.sin(cyc), 0.25, Math.cos(cyc)];
+    // ---- the quadtree decides what the planet is made of this frame ----
+    let patches = null, exag = 1;
+    if (r.lod) {
+      PD.Prof.begin('lod.update');
+      exag = PD.LOD.exagFor(cam.sDist != null ? cam.sDist : cam.dist);
+      patches = PD.LOD.update(r.lod, {
+        eye, fov: cam.fov, screenH: r.h, vp: vpEye, exag
+      });
+      PD.Prof.end();
+      PD.Prof.n('lod.patches', patches.length);
+      PD.Prof.n('lod.culled', r.lod.stats.culled);
+      PD.Prof.n('lod.exag', exag);
+    }
+    curExag = exag;          // FX and the minimap read this
+
+    // The sun is where the sun is. This used to be `(sim.tick % 480) / 480`
+    // — one revolution every 480 steps, which was four of the years the HUD
+    // was counting — with the declination pinned at a constant 0.25 so no
+    // pole ever had a winter. Now it comes off the calendar, so at Real Time
+    // the terminator falls across the real Earth exactly where the real one
+    // does, and the poles get their six months of darkness.
+    let sun = sunDir(sim);
     if (world.mode === 'hell') sun = [0.2, -0.6, 0.5];
     if (world.mode === 'heaven') sun = [0.3, 0.9, 0.3];
     // before the first word there is no sun at all
@@ -1541,10 +1869,25 @@ void main(){
     }
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
-    // stars — they go out as the last of creation is unmade
+    // Stars — they go out as the last of creation is unmade.
+    //
+    // THEY HAVE NEVER BEEN VISIBLE. The starfield sits at radius 40, and the
+    // frustum's far plane is `max(4, alt * 12 + 3)` — 6.0 at orbit and 22.2 at
+    // the boot distance, so every star has always been clipped away. Seeing
+    // one needs alt >= 3.08, i.e. dist >= 4.08, about 19,600 km, which is past
+    // anywhere the camera goes. Nine hundred stars, a seeded RNG, per-star
+    // colours and sizes, a draw call every frame — and a black sky.
+    //
+    // They are conceptually at infinity, so they get their own projection with
+    // a far plane that actually contains them rather than being dragged in and
+    // out with the ground. Depth test is already off for this pass, so a
+    // second matrix is the whole fix.
     const dissolve = (global.G && global.G.dissolve) || 0;
     gl.disable(gl.DEPTH_TEST);
-    if (dissolve < 0.98) drawPoints(r, vp, r.bufStars, r.bufStarCol, r.bufStarSize, r.nStars);
+    if (dissolve < 0.98) {
+      const starVP = mat4Mul(mat4Persp(cam.fov, r.w / r.h, 1, 200), view);
+      drawPoints(r, starVP, r.bufStars, r.bufStarCol, r.bufStarSize, r.nStars);
+    }
     gl.enable(gl.DEPTH_TEST);
     if (dissolve >= 1) {                                // nothing left to draw
       if (post) postprocess(r);
@@ -1559,24 +1902,25 @@ void main(){
     gl.frontFace(gl.CCW);
     const pp = r.progPlanet;
     gl.useProgram(pp.p);
-    bindAttr(gl, pp.a.aPos, r.bufPos, 3);
-    bindAttr(gl, pp.a.aUV, r.bufUV, 2);
-    bindAttr(gl, pp.a.aH, r.bufH, 1);
-    gl.uniformMatrix4fv(pp.u.uMVP, false, vp);
-    gl.uniform1f(pp.u.uDisp, 0.13 * (1 - dissolve));
-    gl.uniform1f(pp.u.uSea, 0.38);
+    gl.uniformMatrix4fv(pp.u.uMVP, false, vpEye);
     gl.uniform3fv(pp.u.uSun, sun);
     gl.uniform3fv(pp.u.uEye, eye);
     gl.uniform3fv(pp.u.uAtmo, atmo);
     gl.uniform1f(pp.u.uBlood, sim.bloodMoonT > 0 ? 1 : 0);
     gl.uniform1f(pp.u.uDoom, doom);
     gl.uniform1f(pp.u.uTime, performance.now() * 0.001);
+    // dissolve flattens the world back to a sphere as it is un-created
+    gl.uniform1f(pp.u.uExag, exag * (1 - dissolve));
     gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, r.texTerra); gl.uniform1i(pp.u.uTex, 0);
     gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, r.texData); gl.uniform1i(pp.u.uData, 1);
     gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D, r.texNorm); gl.uniform1i(pp.u.uNorm, 2);
     gl.activeTexture(gl.TEXTURE3); gl.bindTexture(gl.TEXTURE_2D, r.texClim); gl.uniform1i(pp.u.uClim, 3);
-    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, r.bufIdx);
-    gl.drawElements(gl.TRIANGLES, r.nIdx, r.idxType, 0);
+    if (patches) drawPatches(r, pp, patches, eye, sim);
+
+    // Settlements, as buildings. Opaque and depth-tested, so it goes with the
+    // terrain rather than with the transparent passes below. Returns straight
+    // away above ~55 km, which is almost always.
+    drawBuildings(r, sim, eye, exag, vpEye, sun, atmo);
 
     // units as living embers on the surface
     drawUnits(r, sim, vp);
@@ -1596,10 +1940,22 @@ void main(){
       gl.uniform3fv(pc.u.uSun, sun);
       gl.uniform3fv(pc.u.uEye, eye);
       gl.uniform1f(pc.u.uTime, performance.now() * 0.001);
+      // The deck sat at 1.035 — 223 km up, which is a readable stylised
+      // altitude from orbit and absurd once the camera can stand on the
+      // ground. Bring it down toward the real 8 km as you descend, so from
+      // low altitude the clouds are above you rather than a shell around you.
+      {
+        const camR2 = (cam.sDist != null ? cam.sDist : cam.dist);
+        const altKm2 = (camR2 - 1) * R_EARTH_M / 1000;
+        const k = PD.clamp((altKm2 - 60) / 900, 0, 1);   // 60 km .. 960 km
+        gl.uniform1f(pc.u.uCShell, 1.00126 + (1.035 - 1.00126) * k);
+      }
       gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, r.texCloud); gl.uniform1i(pc.u.uTex, 0);
       gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, r.texClim); gl.uniform1i(pc.u.uClim, 1);
       gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, r.bufIdx);
       gl.drawElements(gl.TRIANGLES, r.nIdx, r.idxType, 0);
+      PD.Prof.add('gl.tris', r.nIdx / 3); PD.Prof.add('gl.draws', 1);
+      PD.Prof.n('gl.cloudTris', r.nIdx / 3);
     }
 
     // particles / rings / bolts. Culling MUST be off here: ribbon quads are
@@ -1613,7 +1969,14 @@ void main(){
     drawFXLines(r, vp);
     gl.enable(gl.CULL_FACE);
 
-    // Atmosphere. FRONT faces only: the near side of the shell is always in
+    // Atmosphere. Which face to draw depends on whether the camera is INSIDE
+    // the shell — which it never was until cam.min came down to 80 m, and
+    // which silently produced no atmosphere at all when it first could: the
+    // front faces are behind the eye and get culled, so the sky vanished.
+    // The raymarch already starts at ro = uEye and clamps t0 = max(atm.x, 0),
+    // so from inside, the FAR side of the shell is the correct proxy and
+    // covers the screen. Same shader, opposite cull.
+    // FRONT faces only when outside: the near side of the shell is always in
     // front of the planet, so it passes the depth test everywhere and the
     // raymarch can integrate either to the ground or out through the far side.
     // (Back faces fail depth over the disc, so the aerial-perspective term
@@ -1621,6 +1984,9 @@ void main(){
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
     const pa = r.progAtmo;
     const shell = 1.10;
+    const camR = (cam.sDist != null ? cam.sDist : cam.dist);
+    const inside = camR < shell;
+    gl.cullFace(inside ? gl.FRONT : gl.BACK);
     gl.useProgram(pa.p);
     bindAttr(gl, pa.a.aPos, r.bufPos, 3);
     gl.uniformMatrix4fv(pa.u.uMVP, false, vp);
@@ -1631,7 +1997,10 @@ void main(){
     gl.uniform1f(pa.u.uDensity, unlit ? 0.15 : 1.0);
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, r.bufIdx);
     gl.drawElements(gl.TRIANGLES, r.nIdx, r.idxType, 0);
+    PD.Prof.add('gl.tris', r.nIdx / 3); PD.Prof.add('gl.draws', 1);
+    PD.Prof.n('gl.atmoTris', r.nIdx / 3);
 
+    gl.cullFace(gl.BACK);              // restore for everything after this
     gl.depthMask(true);
     gl.disable(gl.BLEND);
     gl.disable(gl.CULL_FACE);
@@ -1640,6 +2009,405 @@ void main(){
 
     // ---- 2D overlay: labels, cursor, weather, minimap ----
     drawOverlay2D(r, sim, ui);
+  }
+
+  // ---------- the quadtree, on the GPU ----------
+  // Each live patch gets three small buffers, uploaded once when it is built
+  // and reused every frame after. The shared grid UV and index buffer are
+  // bound once for the whole loop.
+  //
+  // The reclaim pass matters more than it looks: patches merge constantly
+  // during a descent, and a merged patch's buffers are referenced by nothing
+  // afterwards. WebGL buffers are not garbage collected — a renderer that
+  // only ever creates them leaks the entire descent's worth of VRAM, on the
+  // devices least able to spare it.
+  // ---------- streamed imagery, per patch ----------
+  // THE CAP IS SET BY THE WORKING SET, NOT BY TASTE. At orbit the quadtree
+  // holds ~127 patches at levels 0..6 and every one of them is a DIFFERENT
+  // tile, so a full-detail frame needs MAX_PATCHES (128) distinct tiles and
+  // the cap has to clear that. 160 tiles of 512x512 RGBA is ~168 MB unpacked,
+  // and that is the honest dominant cost of this whole feature.
+  //
+  // WHAT A SMALLER CAP NOW MEANS, measured rather than feared. It used to mean
+  // nothing at all: at 64, orbit sampled imagery on 0 of 106 patches while the
+  // loader answered every request — a cyclic walk through an LRU shorter than
+  // the walk, which is the textbook zero-hit-rate case. js/tiles.js now keeps a
+  // reserved pool for the shallow levels AND fetches a level-2 floor under
+  // every patch, so the fallback walk always finds ground. Measured over real
+  // quadtree patch sets at four altitudes — blank patches, and the mean ground
+  // resolution actually served:
+  //
+  //   cap      orbit        100 km       2 km        ground
+  //   160   0x  1.3 km/px  0x 405 m/px  0x 312 m/px  0x 311 m/px
+  //    96   0x  6.5 km/px  0x 2.8 km/px  0x 312 m/px  0x 311 m/px
+  //    64   0x  9.8 km/px  0x 2.8 km/px  0x 312 m/px  0x 311 m/px
+  //    48   0x  9.8 km/px  0x 2.8 km/px  0x 312 m/px  0x 311 m/px
+  //
+  // Two things fall out of that, and they are why the cap can now scale to the
+  // device instead of being fixed at whatever the largest frame needs:
+  //
+  //   - NOT ONE PATCH IS EVER BLANK, at any cap. The cliff is gone.
+  //   - CLOSE UP, A SMALL CACHE COSTS NOTHING. At 2 km and on the ground a
+  //     48-tile cache serves 311 m/px — the same as 160 — because a close
+  //     frame only needs ~19 distinct tiles however deep it is. The whole cost
+  //     of a small cap lands on the ORBITAL view, and even there 9.8 km/px is
+  //     still three times sharper than the 27 km/px procedural bake this
+  //     feature replaced.
+  //
+  // A 2 GB phone cannot spare 168 MB of VRAM for imagery. Before the floor
+  // existed the only two options were "spend it" or "show nothing"; now the
+  // third one is real, and it is barely a compromise at the altitudes where
+  // anyone is looking at detail.
+  const SAT_TILES_FULL = 160;
+  function satCapFor(nav) {
+    const gb = nav && typeof nav.deviceMemory === 'number' ? nav.deviceMemory : 0;
+    if (!gb) return SAT_TILES_FULL;          // unknown: assume it can cope
+    if (gb <= 2) return 48;                  // ~50 MB — coarse, complete, cheap
+    if (gb <= 4) return 96;                  // ~101 MB
+    return SAT_TILES_FULL;
+  }
+  const SAT_MAX_TILES = satCapFor(typeof navigator !== 'undefined' ? navigator : null);
+  const SAT_FADE_MS = 320;
+
+  // An Image becomes a GL texture exactly once. WebGL textures are not
+  // garbage collected, so this map is also the thing that has to be swept.
+  function satTexture(r, img) {
+    const gl = r.gl;
+    let e = r.satTex.get(img);
+    if (!e) {
+      if (r.satBad && r.satBad > 20) return null;   // this device cannot upload
+      const tex = glTex(gl, true);
+      gl.bindTexture(gl.TEXTURE_2D, tex);
+      // The tile image runs north-to-south and the shader flips v itself, so
+      // flipping again here would cancel out and put the ground upside down.
+      gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+      try {
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img);
+      } catch (err) {
+        // A cross-origin image without usable CORS taints the canvas and
+        // throws HERE rather than at fetch. Drop it and keep the bake.
+        gl.deleteTexture(tex);
+        r.satBad = (r.satBad || 0) + 1;
+        return null;
+      }
+      e = { tex, born: nowMs() };
+      r.satTex.set(img, e);
+      trimSatTextures(r);
+    }
+    e.seen = r._lodFrame || 0;
+    return e;
+  }
+
+  // The cap is a CAP, enforced the moment it is exceeded. Enforcing it only in
+  // the periodic sweep let the map reach 135 between sweeps — a VRAM budget
+  // that is true once every 64 frames is not a budget.
+  //
+  // Nothing seen in the current frame is ever a candidate, and that is what
+  // makes a reduced cap safe rather than merely small. The GL cache and the
+  // image cache share SAT_MAX_TILES, so the number of DISTINCT images a frame
+  // can ask for is bounded by the same number — when the image cache is small
+  // the patches that miss share one coarse ancestor, and the frame's distinct
+  // count falls with it (measured at a 64-tile cap: 8 distinct images at orbit,
+  // 19 on the ground, against 127 patches). A frame therefore always fits, and
+  // evicting inside the frame that needs it — the same zero-hit-rate thrash
+  // measured at 64 before the floor existed — cannot arise.
+  function trimSatTextures(r) {
+    const tab = r.satTex;
+    if (!tab || tab.size <= SAT_MAX_TILES) return;
+    const frame = r._lodFrame || 0;
+    const cand = [];
+    tab.forEach((e, img) => { if ((e.seen == null ? -1 : e.seen) !== frame) cand.push([e.seen || 0, img]); });
+    cand.sort((a, b) => a[0] - b[0]);
+    for (let i = 0; i < cand.length && tab.size > SAT_MAX_TILES; i++) {
+      const img = cand[i][1];
+      r.gl.deleteTexture(tab.get(img).tex);
+      tab.delete(img);
+    }
+  }
+  function nowMs() {
+    return (typeof performance !== 'undefined' && performance.now)
+      ? performance.now() : Date.now();
+  }
+
+  // What imagery this patch should draw, and how much of it. Returns null when
+  // there is none, and the caller then draws the procedural bake — which is a
+  // complete picture, not an error state.
+  function satFor(r, p, date, pri) {
+    if (!r.tiles) return null;
+    // The renderer's longitude runs 0..2pi from the antimeridian (tile x = 0 is
+    // -180), and the tile grid is indexed from -pi. Getting this wrong offsets
+    // the whole planet by half a world and looks like a projection bug.
+    const lon = p.lon0 + p.lonSpan * 0.5 - Math.PI;
+    const lat = p.lat0 + p.latSpan * 0.5;
+    // The patch CENTRE, not a corner: patch and tile grids are the same grid at
+    // the same level, so a corner sits exactly on a boundary and one ulp
+    // decides which tile it names. The centre is strictly interior.
+    const hit = r.tiles.get(p.level, lon, lat, date, { pri: pri || 0 });
+    if (!hit) return null;
+    const e = satTexture(r, hit.img);
+    if (!e) return null;
+    // Arrival is a fade. Without it, flying produces a shower of rectangles
+    // snapping into place, which reads as broken rather than as loading.
+    const mix = PD.clamp((nowMs() - e.born) / SAT_FADE_MS, 0, 1);
+    return { tex: e.tex, rect: hit.uv, mix };
+  }
+
+  function sweepSatTextures(r) {
+    const gl = r.gl, tab = r.satTex;
+    if (!tab) return;
+    const frame = r._lodFrame || 0;
+    tab.forEach((e, img) => {
+      if (frame - (e.seen || 0) > 120) { gl.deleteTexture(e.tex); tab.delete(img); }
+    });
+    trimSatTextures(r);
+  }
+
+  function drawPatches(r, pp, patches, eye, sim) {
+    const gl = r.gl, tab = r.lodBufs;
+    PD.Prof.begin('lod.draw');
+    bindAttr(gl, pp.a.aUV, r.lodUV, 2);
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, r.lodIdx);
+
+    // Imagery is of the Earth, so it is only ever drawn on the Earth. On a
+    // generated world it would be a photograph of somewhere else.
+    const satOn = !!(r.tiles && r.world && r.world.isEarth && r.satOn !== false);
+    const date = satOn
+      ? r.tiles.dateFn(sim && sim.clock != null ? sim.epoch + sim.clock : null)
+      : null;
+    const wanted = satOn ? new Set() : null;
+    gl.activeTexture(gl.TEXTURE4);
+    gl.bindTexture(gl.TEXTURE_2D, r.texBlank);
+    gl.uniform1i(pp.u.uSat, 4);
+
+    let tris = 0, draws = 0, uploads = 0, satDrawn = 0;
+    let satMixSum = 0, satMinSpan = 1;
+    for (let i = 0; i < patches.length; i++) {
+      const p = patches[i];
+      let b = tab.get(p);
+      if (!b) {
+        b = { base: gl.createBuffer(), up: gl.createBuffer(), nrm: gl.createBuffer(), version: -1 };
+        tab.set(p, b);
+      }
+      if (b.version !== p.version) {
+        gl.bindBuffer(gl.ARRAY_BUFFER, b.base); gl.bufferData(gl.ARRAY_BUFFER, p.base, gl.STATIC_DRAW);
+        gl.bindBuffer(gl.ARRAY_BUFFER, b.up); gl.bufferData(gl.ARRAY_BUFFER, p.up, gl.STATIC_DRAW);
+        gl.bindBuffer(gl.ARRAY_BUFFER, b.nrm); gl.bufferData(gl.ARRAY_BUFFER, p.nrm, gl.STATIC_DRAW);
+        b.version = p.version;
+        uploads++;
+      }
+      b.seen = r._lodFrame;
+      bindAttr(gl, pp.a.aBase, b.base, 3);
+      bindAttr(gl, pp.a.aUp, b.up, 3);
+      bindAttr(gl, pp.a.aNrm, b.nrm, 3);
+      const uv = PD.LOD.patchUV(p);
+      gl.uniform4f(pp.u.uUVRect, uv.u0, uv.v0, uv.du, uv.dv);
+      // real ground, if there is any for this patch yet
+      let sat = null;
+      if (satOn && date) {
+        // priority is the patch's own projected size — the thing you are
+        // looking at outranks the thing at the edge of the screen
+        sat = satFor(r, p, date, p.px || 0);
+        const t = r.tiles.tileFor(p.level,
+          p.lon0 + p.lonSpan * 0.5 - Math.PI, p.lat0 + p.latSpan * 0.5);
+        wanted.add(t.z + '/' + t.x + '/' + t.y);
+      }
+      if (sat) {
+        gl.activeTexture(gl.TEXTURE4);
+        gl.bindTexture(gl.TEXTURE_2D, sat.tex);
+        gl.uniform4f(pp.u.uSatRect, sat.rect[0], sat.rect[1], sat.rect[2], sat.rect[3]);
+        gl.uniform1f(pp.u.uSatMix, sat.mix);
+        satDrawn++;
+        satMixSum += sat.mix;
+        if (sat.rect[2] < satMinSpan) satMinSpan = sat.rect[2];
+      } else {
+        gl.activeTexture(gl.TEXTURE4);
+        gl.bindTexture(gl.TEXTURE_2D, r.texBlank);
+        gl.uniform1f(pp.u.uSatMix, 0);
+      }
+      // the centre, and the centre relative to the eye. The subtraction is
+      // done here in JS doubles; doing it in the shader would form the
+      // difference of two near-equal float32s and throw away the precision
+      // this whole arrangement exists to keep.
+      gl.uniform3f(pp.u.uCentre, p.centre[0], p.centre[1], p.centre[2]);
+      gl.uniform3f(pp.u.uCentreRel,
+        p.centre[0] - eye[0], p.centre[1] - eye[1], p.centre[2] - eye[2]);
+      gl.drawElements(gl.TRIANGLES, r.lodNIdx, gl.UNSIGNED_SHORT, 0);
+      tris += r.lodNIdx / 3; draws++;
+    }
+    // Leave the active unit where the rest of the renderer expects it. The
+    // active texture unit is global state, and glTex() binds on whatever it
+    // happens to be — so a texture created later would silently land on unit 4
+    // and replace this frame's imagery.
+    gl.activeTexture(gl.TEXTURE0);
+
+    // The camera moved: a queued tile for a patch that is no longer on screen
+    // is work that crowds out the patch that is. In-flight requests are left
+    // alone — those bytes are already paid for.
+    if (satOn && wanted) {
+      r.tiles.dropQueued((job) => wanted.has(job.z + '/' + job.x + '/' + job.y));
+    }
+
+    // reclaim: anything not drawn for 120 frames has been merged away
+    if ((r._lodFrame & 63) === 0) {
+      tab.forEach((b, p) => {
+        if (r._lodFrame - (b.seen || 0) > 120) {
+          gl.deleteBuffer(b.base); gl.deleteBuffer(b.up); gl.deleteBuffer(b.nrm);
+          tab.delete(p);
+        }
+      });
+      sweepSatTextures(r);
+    }
+    r._lodFrame = (r._lodFrame || 0) + 1;
+    PD.Prof.end();
+    PD.Prof.add('gl.tris', tris); PD.Prof.add('gl.draws', draws);
+    PD.Prof.n('gl.planetTris', tris);
+    PD.Prof.n('lod.uploads', uploads);
+    PD.Prof.n('lod.resident', tab.size);
+    PD.Prof.n('sat.patches', satDrawn);
+    PD.Prof.n('sat.textures', r.satTex ? r.satTex.size : 0);
+    // the crossfade, and the sub-rectangle. Both are invisible in a counter
+    // that only says "imagery drew", and both are how it drew WRONG last time.
+    PD.Prof.n('sat.mixSum', satMixSum);
+    PD.Prof.n('sat.minSpan', satDrawn ? satMinSpan : 1);
+    if (r.tiles) {
+      PD.Prof.n('sat.live', r.tiles.size());
+      PD.Prof.n('sat.queued', r.tiles.queued());
+      PD.Prof.n('sat.inflight', r.tiles.inFlight());
+    }
+  }
+
+  // ---------- settlements, as buildings ----------
+  // At true scale there is usually nothing to draw: a 500 m village is under
+  // a pixel from 50 km up, so this returns immediately at almost every
+  // altitude the game is normally played at. That is the design, not an
+  // optimisation — and it is why flyTo had to become live in the same change.
+  const BLDG_COLS = [
+    [0.62, 0.50, 0.38], [0.70, 0.60, 0.48], [0.55, 0.44, 0.34],
+    [0.82, 0.76, 0.62], [0.58, 0.56, 0.54], [0.44, 0.42, 0.26]
+  ];
+  function drawBuildings(r, sim, eye, exag, vpEye, sun, atmo) {
+    const gl = r.gl;
+    if (!PD.Buildings || !r.progBldg || !sim || !sim.villages) return 0;
+    const cam = r.cam, world = r.world;
+    const altM = Math.max(0, ((cam.sDist != null ? cam.sDist : cam.dist) - 1) * R_EARTH_M);
+    if (altM > PD.Buildings.VISIBLE_ALT_M) { PD.Prof.n('bldg.instances', 0); return 0; }
+
+    PD.Prof.begin('bldg');
+    // Publish where the towns are so the quadtree stops inventing hillsides
+    // under them. Only when the set actually changes — this rebuilds patches.
+    {
+      let sig = '';
+      for (const v of sim.villages) if (v.pop > 0) sig += v.id + ':' + v.level + ',';
+      if (sig !== r._townSig) {
+        r._townSig = sig;
+        const towns = [];
+        for (const v of sim.villages) {
+          if (v.pop <= 0) continue;
+          const rt = PD.Buildings.builtRadiusTiles(v, world) * 1.35;
+          towns.push({ x: v.x, y: v.y, r2: rt * rt });
+        }
+        if (r.lod && r.lod.detail && r.lod.detail.setTowns) {
+          r.lod.detail.setTowns(towns);
+          PD.LOD.invalidate(r.lod);
+        }
+      }
+    }
+    const ct = centerTile(r);
+    // an unaccelerated fallback draws far fewer, because each one is a call
+    const budget = r.inst ? PD.Buildings.MAX_INSTANCES : 220;
+    const towns = PD.Buildings.visible(sim, world, ct.x, ct.y, altM, budget);
+
+    let n = 0;
+    const need = budget;
+    if (!r._bOff || r._bOff.length < need * 3) {
+      r._bOff = new Float32Array(need * 3); r._bUp = new Float32Array(need * 3);
+      r._bEast = new Float32Array(need * 3); r._bSize = new Float32Array(need * 3);
+      r._bCol = new Float32Array(need * 3);
+    }
+    const P = [0, 0, 0];
+    for (const v of towns) {
+      const lay = PD.Buildings.layout(v, world, { max: need - n });
+      for (const b of lay.items) {
+        if (n >= need) break;
+        // stand it on the ground, using the same surface everything else uses
+        onSurface(world, b.x, b.y, P, 0, exag);
+        r._bOff[n * 3] = P[0] - eye[0];
+        r._bOff[n * 3 + 1] = P[1] - eye[1];
+        r._bOff[n * 3 + 2] = P[2] - eye[2];
+        // local frame at this point on the globe
+        const L = Math.hypot(P[0], P[1], P[2]) || 1;
+        const ux = P[0] / L, uy = P[1] / L, uz = P[2] / L;
+        r._bUp[n * 3] = ux; r._bUp[n * 3 + 1] = uy; r._bUp[n * 3 + 2] = uz;
+        // east, then spun by the building's own yaw
+        let ex = uz, ey = 0, ez = -ux;
+        const el = Math.hypot(ex, ey, ez) || 1; ex /= el; ez /= el;
+        // north = up x east
+        const nx = uy * ez - uz * ey, ny = uz * ex - ux * ez, nz = ux * ey - uy * ex;
+        const c = Math.cos(b.rot), s = Math.sin(b.rot);
+        r._bEast[n * 3] = ex * c + nx * s;
+        r._bEast[n * 3 + 1] = ey * c + ny * s;
+        r._bEast[n * 3 + 2] = ez * c + nz * s;
+        // metres -> world units (the sphere is one Earth radius)
+        r._bSize[n * 3] = b.w / R_EARTH_M;
+        r._bSize[n * 3 + 1] = b.d / R_EARTH_M;
+        r._bSize[n * 3 + 2] = b.h / R_EARTH_M;
+        const col = BLDG_COLS[b.kind] || BLDG_COLS[0];
+        r._bCol[n * 3] = col[0]; r._bCol[n * 3 + 1] = col[1]; r._bCol[n * 3 + 2] = col[2];
+        n++;
+      }
+      if (n >= need) break;
+    }
+    PD.Prof.n('bldg.instances', n);
+    PD.Prof.n('bldg.towns', towns.length);
+    if (n === 0) { PD.Prof.end(); return 0; }
+
+    const pb = r.progBldg;
+    gl.useProgram(pb.p);
+    gl.uniformMatrix4fv(pb.u.uMVP, false, vpEye);
+    gl.uniform3fv(pb.u.uSun, sun);
+    gl.uniform3fv(pb.u.uAtmo, atmo);
+    bindAttr(gl, pb.a.aPos, r.bldgPos, 3);
+    bindAttr(gl, pb.a.aNorm, r.bldgNrm, 3);
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, r.bldgIdx);
+
+    const streams = [
+      [pb.a.iOff, r.bBufOff, r._bOff], [pb.a.iUp, r.bBufUp, r._bUp],
+      [pb.a.iEast, r.bBufEast, r._bEast], [pb.a.iSize, r.bBufSize, r._bSize],
+      [pb.a.iCol, r.bBufCol, r._bCol]
+    ];
+    let tris = 0;
+    if (r.inst) {
+      for (const [loc, buf, arr] of streams) {
+        if (loc == null || loc < 0) continue;
+        gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+        gl.bufferData(gl.ARRAY_BUFFER, arr.subarray(0, n * 3), gl.DYNAMIC_DRAW);
+        gl.enableVertexAttribArray(loc);
+        gl.vertexAttribPointer(loc, 3, gl.FLOAT, false, 0, 0);
+        r.inst.divisor(loc, 1);
+      }
+      r.inst.draw(gl.TRIANGLES, r.bldgNIdx, gl.UNSIGNED_SHORT, 0, n);
+      tris = (r.bldgNIdx / 3) * n;
+      // The divisors are GLOBAL attribute state. Leaving them at 1 makes the
+      // NEXT program that reuses those attribute slots read one value for the
+      // whole draw — the terrain would collapse to a single vertex. Reset.
+      for (const [loc] of streams) if (loc != null && loc >= 0) r.inst.divisor(loc, 0);
+    } else {
+      // No instancing anywhere on this device. Draw a reduced set the slow
+      // way rather than drawing nothing at all.
+      for (let i = 0; i < n; i++) {
+        for (const [loc, , arr] of streams) {
+          if (loc == null || loc < 0) continue;
+          gl.disableVertexAttribArray(loc);
+          gl.vertexAttrib3f(loc, arr[i * 3], arr[i * 3 + 1], arr[i * 3 + 2]);
+        }
+        gl.drawElements(gl.TRIANGLES, r.bldgNIdx, gl.UNSIGNED_SHORT, 0);
+      }
+      tris = (r.bldgNIdx / 3) * n;
+    }
+    PD.Prof.add('gl.tris', tris);
+    PD.Prof.add('gl.draws', r.inst ? 1 : n);
+    PD.Prof.end();
+    return n;
   }
 
   function bindAttr(gl, loc, buf, size) {
@@ -1673,12 +2441,15 @@ void main(){
     // pixels, silently clamped by the driver so every unit becomes the same
     // giant square. Size against ALTITUDE and clamp it ourselves.
     const zoomSize = PD.clamp(0.9 / Math.max(1e-6, r.cam.dist - 1), 8, 900);
+    // hoisted: every unit stands on the same terrain, at the same vertical
+    // exaggeration the patches under them are being drawn with
+    const uExag = exagOf(r);
     for (let i = 0; i < units.length && n < cap; i++) {
       const u = units[i];
       if (u.dead) continue;
       const R = PD.Sim.RACES[u.race];
       if (!R) continue;
-      tileToSphere(r.world, u.x, u.y, _upos, 0.014 + (R.flies ? 0.015 : 0));
+      onSurface(r.world, u.x, u.y, _upos, R.flies ? 120 : 1, uExag);
       r._uP[n * 3] = _upos[0]; r._uP[n * 3 + 1] = _upos[1]; r._uP[n * 3 + 2] = _upos[2];
       // A paragon wears their people's garb. col2 was read by nothing in the
       // shipping renderer, so the Genesis Lab's Garb picker had no effect at
@@ -1761,7 +2532,7 @@ void main(){
     for (const ring of FX.rings) {
       const alpha = ring.life / ring.max2;
       const segs = 40;
-      const c = tileToSphere(r.world, ring.x, ring.y, _rtmp, 0.015);
+      const c = onSurface(r.world, ring.x, ring.y, _rtmp, 15, exagOf(r));
       const cl = Math.hypot(c[0], c[1], c[2]);
       const nx = c[0] / cl, ny = c[1] / cl, nz = c[2] / cl;
       // tangent basis
@@ -1784,7 +2555,7 @@ void main(){
     for (const b of FX.bolts) {
       const alpha = b.life / b.max;
       const t = b.pts[0];
-      const surf = tileToSphere(r.world, t[0], t[1], [0, 0, 0], 0.01);
+      const surf = onSurface(r.world, t[0], t[1], [0, 0, 0], 0, exagOf(r));
       const top = [surf[0] * 1.8, surf[1] * 1.8, surf[2] * 1.8];
       let prev = top;
       const segs = 7;
@@ -1839,18 +2610,40 @@ void main(){
     }
 
     // village labels (front hemisphere, close zoom)
+    const LABEL_CAP = 40;
     if (ui.showLabels && r.cam.dist < 3.4) {
       ctx.font = '7px monospace';
       ctx.textAlign = 'center';
-      for (const v of sim.villages) {
-        const s = worldToScreen(r, v.x + 0.5, v.y);
+      // BIGGEST FIRST, AND THEY DO NOT OVERLAP.
+      //
+      // This loop walked `sim.villages` in array order with no cap, no
+      // ordering and no overlap test — while the omniscience loop directly
+      // above it caps at 90/600. With the 80-settlement ceiling that is 80
+      // labels painted over each other in founding order, so in a dense region
+      // the last town founded wins and the capital underneath it is unreadable.
+      // Sorting by population first means that when two labels collide it is
+      // the larger place that survives, which is the one you were looking for.
+      const shown = [];
+      const byPop = sim.villages.slice().sort((a, b) => b.pop - a.pop);
+      for (const v of byPop) {
+        if (shown.length >= LABEL_CAP) break;
+        // v.x + 0.5 centres the anchor in its tile horizontally; the bare v.y
+        // did not do the same vertically, so every label sat half a tile high.
+        const s = worldToScreen(r, v.x + 0.5, v.y + 0.5);
         if (!s) continue;
         const label = v.name + ' ' + v.pop;
         const wpx = label.length * 5 + 6;
+        const box = { x0: s.x - wpx / 2, y0: s.y - 14, x1: s.x + wpx / 2, y1: s.y - 3 };
+        let hidden = false;
+        for (const b of shown) {
+          if (box.x0 < b.x1 && box.x1 > b.x0 && box.y0 < b.y1 && box.y1 > b.y0) { hidden = true; break; }
+        }
+        if (hidden) continue;
+        shown.push(box);
         ctx.fillStyle = 'rgba(0,0,0,0.55)';
-        ctx.fillRect(s.x - wpx / 2, s.y - 14, wpx, 11);
+        ctx.fillRect(box.x0, box.y0, wpx, 11);
         ctx.fillStyle = v.col;
-        ctx.fillRect(s.x - wpx / 2, s.y - 14, 3, 11);
+        ctx.fillRect(box.x0, box.y0, 3, 11);
         ctx.fillStyle = '#fff';
         ctx.fillText(label, s.x, s.y - 5);
       }
@@ -1907,8 +2700,8 @@ void main(){
     // the sun itself, with a soft flare when it swings into view
     const noSun = r.world.mode === 'deep' || r.world.mode === 'nothing';
     if (r._vp && !noSun) {
-      const cyc = (sim.tick % 480) / 480 * Math.PI * 2;
-      const sp = [Math.sin(cyc) * 30, 7, Math.cos(cyc) * 30];
+      const sd = sunDir(sim);
+      const sp = [sd[0] * 30, sd[1] * 30, sd[2] * 30];
       const m = r._vp;
       const cw2 = m[3] * sp[0] + m[7] * sp[1] + m[11] * sp[2] + m[15];
       if (cw2 > 0) {
@@ -1986,16 +2779,67 @@ void main(){
       if (!r.dataBuf || r.dataBuf.length !== world.n * 4) r.dataBuf = new Uint8Array(world.n * 4);
     }
     bakeTerrain(r);
+    // A new world is a new planet shape, so the tree starts over. Dropping
+    // the GL buffer table with it is what stops the old world's patches from
+    // sitting in VRAM forever — the keys are patch objects that no longer
+    // exist anywhere else.
+    makeLodTree(r);
     world.dirtyMini = true;
     r.cam.lon = 0.6; r.cam.lat = 0.45;
   }
 
+  function makeLodTree(r) {
+    if (!PD.LOD) return;
+    if (r.lodBufs && r.gl) {
+      r.lodBufs.forEach((b) => {
+        r.gl.deleteBuffer(b.base); r.gl.deleteBuffer(b.up); r.gl.deleteBuffer(b.nrm);
+      });
+      r.lodBufs.clear();
+    }
+    // The imagery textures go with them. _lodFrame restarts at zero here, so
+    // every surviving texture's `seen` would be in the future and the sweep
+    // would never fire again — a leak that only appears when you change world,
+    // which is exactly the case nobody watches the memory graph through.
+    if (r.satTex && r.gl) {
+      r.satTex.forEach((e) => r.gl.deleteTexture(e.tex));
+      r.satTex.clear();
+    }
+    if (r.tiles) r.tiles.dropQueued(null);
+    r.lod = PD.LOD.createTree(r.world, r.world.seed);
+    r._lodFrame = 0;
+  }
+
   function renderTerrain(r) { bakeTerrain(r); }
+
+  // ---------- the imagery switch ----------
+  // Off is a supported mode, not a failure: at uSatMix 0 the procedural bake is
+  // a complete picture. And the daily mosaic is reachable rather than dead
+  // code — it is the only way to see the real weather of a real date, which is
+  // the one thing the cloud-free default cannot show.
+  function setImagery(r, on, layer) {
+    if (on != null) r.satOn = !!on;
+    if (layer && r.tiles) r.tiles.setLayer(layer);
+    return imageryState(r);
+  }
+  function imageryState(r) {
+    const L = r.tiles ? r.tiles.layerInfo() : null;
+    return {
+      on: r.satOn !== false,
+      available: !!(r.tiles && r.world && r.world.isEarth),
+      layer: L ? L.key : null,
+      label: L ? L.label : null,
+      credit: L ? L.credit : (PD.Tiles ? PD.Tiles.CREDIT : ''),
+      tiles: r.tiles ? r.tiles.size() : 0,
+      textures: r.satTex ? r.satTex.size : 0,
+      maxTextures: SAT_MAX_TILES
+    };
+  }
 
   PD.FX = FX;
   PD.Render = {
     createRenderer, draw, renderTerrain, setWorld, flyTo, ribbonQuad,
     worldToScreen, screenToWorld, screenToWorldRaw, centerTile,
+    setImagery, imageryState,
     TILE, FX, hexToRgb: R2.hexToRgb
   };
 })(window);

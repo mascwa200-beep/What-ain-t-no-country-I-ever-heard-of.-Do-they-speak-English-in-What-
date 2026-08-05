@@ -162,17 +162,33 @@ console.log('\n--- the camera reaches the ground ---');
   check('the idle spin scales with altitude and stops near the ground',
     /if \(altKm > 50\) cam\.lon \+= 0\.0006/.test(src));
 
-  // picking intersected a sphere 141 km above the surface
-  check('picking no longer uses a fixed 141 km bulge',
-    !/- 1\.045;/.test(src) && /bulge \* bulge/.test(src));
-  {
-    const bulge = (altM) => 1 + Math.min(0.022, (altM / R) * 0.09);
-    const errM = (altM) => (bulge(altM) - 1) * R;
-    check('the pick error shrinks to metres near the ground',
-      errM(80) < 20, errM(80).toFixed(1) + ' m at 80 m altitude (was 141000 m)');
-    check('and keeps a mountain allowance from orbit',
-      errM(2e6) > 100000, Math.round(errM(2e6)) + ' m');
-  }
+  // Picking intersected a sphere 141 km above the surface, then briefly an
+  // altitude-scaled fudge. Both were guesses about where the ground is.
+  // It now starts at the planet's highest point so no summit is missed and
+  // refines against groundRadius — the same function the camera clamp and the
+  // vertex displacement use, so a click cannot land somewhere the geometry
+  // is not.
+  check('picking no longer guesses a bulge radius',
+    !/- 1\.045;/.test(src) && !/const bulge = 1 \+ Math\.min/.test(src));
+  check('picking refines against the real terrain',
+    /PD\.LOD\.groundRadius\(r\.world, lon, lat, exag\)/.test(src) &&
+    /let hit = shoot\(ceil\);/.test(src));
+  check('and it starts above the highest ground so no summit is missed',
+    /const ceil = hasLod \? 1 \+ PD\.LOD\.liftOf\(1\) \* exag/.test(src));
+
+  // The camera was given the ability to descend to 80 m and no floor to
+  // stand on: cam.min is an altitude above RADIUS 1, and land displaces well
+  // above radius 1, so over any mountain the eye ended up inside the rock.
+  // Measured before the fix: eye at 80 m, terrain reaching 513,000 m.
+  check('the camera is clamped against the terrain, not against radius 1',
+    /if \(cam\.sDist < g\) cam\.sDist = g;/.test(src) &&
+    /if \(cam\.dist < g\) cam\.dist = g;/.test(src));
+  check('and the clamp reads the terrain through the same function the shader displaces with',
+    /PD\.LOD\.groundRadius\(r\.world, cam\.sLon, cam\.sLat, exag\)/.test(src));
+  // Clamping only the smoothed value leaves the target below ground, and
+  // stepCam eases back into it on every subsequent frame.
+  check('both the target and the smoothed distance are clamped',
+    (src.match(/if \(cam\.s?[Dd]ist < g\)/g) || []).length === 2);
 
   check('depth is 24-bit where the context allows', /DEPTH_COMPONENT24 : gl\.DEPTH_COMPONENT16/.test(src));
   check('a lost GL context is handled', /webglcontextlost/.test(src) && /webglcontextrestored/.test(src));
@@ -180,6 +196,34 @@ console.log('\n--- the camera reaches the ground ---');
   const gsrc = fs.readFileSync(path.join(base, 'js', 'game.js'), 'utf8');
   check('pan speed no longer has a floor that dominates the usable range',
     !/Math\.max\(0\.35, \(cam\.dist - 1\) \/ 1\.6\)/.test(gsrc));
+
+  // The atmosphere proxy is a sphere at 1.10 drawn FRONT-face only. The
+  // camera was never inside it while min was 1.25; at 80 m it always is, and
+  // front faces are then behind the eye — the sky simply disappeared. The
+  // raymarch already handles starting inside (ro = uEye, t0 = max(atm.x, 0)),
+  // so the fix is the opposite cull, not a different shader.
+  check('the atmosphere flips its cull when the camera is inside the shell',
+    /const inside = camR < shell;/.test(src) &&
+    /gl\.cullFace\(inside \? gl\.FRONT : gl\.BACK\)/.test(src));
+  check('and the cull face is restored afterwards',
+    /gl\.cullFace\(gl\.BACK\);\s+\/\/ restore/.test(src));
+
+  // The cloud deck was welded to 1.035 — 223 km up.
+  check('the cloud shell is a uniform, not a hardcoded 1.035',
+    /aPos \* uCShell/.test(src) && !/aPos \* 1\.035/.test(src));
+  {
+    const shellAt = (altKm) => {
+      const k = Math.min(1, Math.max(0, (altKm - 60) / 900));
+      return 1.00126 + (1.035 - 1.00126) * k;
+    };
+    const R = 6371000;
+    check('clouds sit at ~8 km when you are on the ground',
+      (shellAt(0.08) - 1) * R / 1000 < 12, ((shellAt(0.08) - 1) * R / 1000).toFixed(1) + ' km');
+    check('and keep the readable orbital altitude from far away',
+      (shellAt(1600) - 1) * R / 1000 > 200, ((shellAt(1600) - 1) * R / 1000).toFixed(0) + ' km');
+    check('the deck is always above the camera on the ground',
+      shellAt(0.08) > 1 + 80 / R);
+  }
 }
 
 console.log('\n=== perf failures: ' + fails + ' ===');

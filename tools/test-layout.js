@@ -353,6 +353,15 @@ const PROBE = `
     if (to && to.classList.contains('show')) { cleared.push('toast'); to.classList.remove('show'); }
     var s = $('#tool-search');
     if (s && s.value) { cleared.push('search'); s.value = ''; s.dispatchEvent(new Event('input')); }
+    // the top-HUD chips. A state that turns one on must not silently make the
+    // NEXT state a different measurement than the one it claims to be.
+    if (window.G && (G.sabbath || G.omniscient || (G.ui && G.ui.imagery !== 'base'))) {
+      cleared.push('chips');
+      G.sabbath = false; G.omniscient = false; G.omniAll = false;
+      if (G.ui) G.ui.imagery = 'base';
+      if (window.PD && PD.Render && PD.Render.setImagery && G.r) PD.Render.setImagery(G.r, true, 'base');
+      var rt = $('#toggle-chips'); if (rt) { rt.innerHTML = ''; rt.style.display = 'none'; }
+    }
     return cleared;
   }
 
@@ -535,12 +544,64 @@ const PROBE = `
 
       await state('menu-modal', async function () { $('#btn-menu').click(); return 'menu'; });
 
+      // The toast is centred, so its LENGTH decides whether it clears the
+      // toolbar. This used to fire "Multiverse saved" and pass — 16 characters,
+      // short enough that the left edge never reached the toolbar. The longest
+      // message the game actually sends is what has to fit.
       await state('toast', async function () {
         $('#btn-save').click();
         await settle(60);
         var t = $('#toast');
         if (!t.textContent.length) throw new Error('toast has no text');
-        return 'toast: "' + t.textContent.slice(0, 40) + '"';
+        t.textContent = 'Ground: Daily true colour — the world as it was photographed';
+        await settle(20);
+        return 'toast: "' + t.textContent.slice(0, 40) + '…"';
+      });
+
+      // The worst toast the game can actually produce. flashToast carries
+      // 'World seed: ' + whatever the player typed, so its width is bounded by
+      // nothing at all — and an unbroken token cannot be wrapped by ordinary
+      // means, so it sets the MIN-content width and no amount of fit-content
+      // sizing can shrink below it. This is the state that keeps
+      // overflow-wrap:anywhere honest.
+      await state('toast-unbroken', async function () {
+        $('#btn-save').click();
+        await settle(60);
+        var t = $('#toast');
+        t.textContent = 'World seed: ' +
+          'Xanthoparmeliaconspersaxanthoparmeliaconspersa0123456789';
+        await settle(20);
+        return 'a 55-character unbroken seed';
+      });
+
+      // The record is 184 rows inside a scroller. It is the longest list the
+      // game has, and it is new — so it gets measured at every viewport rather
+      // than assumed to behave like the panels that were already there.
+      await state('record-open', async function () {
+        $('#tab-history').click();
+        await settle(30);
+        var b = $('#record-open');
+        if (!b) throw new Error('the record has no way in');
+        b.click();
+        await settle(40);
+        var rows = document.querySelectorAll('.rec-row');
+        if (rows.length < 100) throw new Error('only ' + rows.length + ' rows');
+        return rows.length + ' dated rows + ' +
+          document.querySelectorAll('.rec-proph').length + ' foretold';
+      });
+
+      // The imagery chip is the acknowledgement NASA asks for, so it has to be
+      // legible rather than merely present — and it lands in the top HUD next
+      // to the sabbath and omniscience chips, which is the row most likely to
+      // run out of width on a landscape phone. Force all three at once.
+      await state('imagery-chip', async function () {
+        var b = $('#btn-imagery');
+        if (!b) throw new Error('no imagery toggle');
+        G.sabbath = true; G.omniscient = true; G.omniAll = true;
+        b.click();                       // base -> daily, the longest label
+        var el = $('#toggle-chips');
+        if (el.textContent.indexOf('NASA') < 0) throw new Error('no acknowledgement: ' + el.textContent);
+        return 'chips: ' + el.textContent;
       });
 
       // deliberately trips the ellipsis exemption: if that exemption ever
@@ -571,6 +632,7 @@ fs.writeFileSync(probeFile, fs.readFileSync(path.join(base, 'index.html'), 'utf8
   .replace('</body>', PROBE));
 
 let failures = 0;
+let measured = 0, skipped = 0;
 // The chrome the browser reserves is a property of the BUILD, not of the
 // window — so measure it once and reuse it. Without this the convergence
 // below doubles every launch, which took the CI layout step from ~4 minutes
@@ -645,9 +707,11 @@ try {
       }
     } catch (e) {
       console.log('  SKIP ' + s.name + ' — browser unavailable (' + e.code + ')');
+      skipped++;
       continue;
     }
 
+    measured++;
     const vp = readVp(dom);
     const rep = readReport(dom);
     if (!vp) { console.log('\nFAIL ' + s.name + ' — the page never loaded'); failures++; continue; }
@@ -720,6 +784,24 @@ try {
   try { fs.unlinkSync(probeFile); } catch (e) {}
 }
 
-console.log('\n=== layout failures: ' + failures + ' ===');
-console.log('LAYOUT TEST ' + (failures ? 'FAILED' : 'PASSED'));
-if (failures) process.exitCode = 1;
+// A SKIP IS NOT A PASS. When the browser could not be started this printed
+// "layout failures: 0 / LAYOUT TEST PASSED" and exited 0 — a green result that
+// measured nothing at all, which is worse than a red one because it is
+// believed. Seen for real: a slow container timed out on every viewport and
+// the suite reported success.
+console.log('\n=== layout: ' + measured + ' of ' + (measured + skipped) +
+  ' viewports measured, ' + failures + ' failures ===');
+if (!measured) {
+  console.log('LAYOUT TEST INCONCLUSIVE — no viewport was measured. This is not a pass.');
+  process.exitCode = 1;
+} else if (skipped && process.env.CI) {
+  // Locally a missing browser is ordinary. On the runner one is located in an
+  // earlier step that fails loudly if absent, so a skip there means something
+  // is wrong and must not be swallowed.
+  console.log('LAYOUT TEST FAILED — ' + skipped + ' viewport(s) skipped under CI.');
+  process.exitCode = 1;
+} else {
+  console.log('LAYOUT TEST ' + (failures ? 'FAILED' : 'PASSED') +
+    (skipped ? '  (' + skipped + ' skipped — no browser)' : ''));
+  if (failures) process.exitCode = 1;
+}

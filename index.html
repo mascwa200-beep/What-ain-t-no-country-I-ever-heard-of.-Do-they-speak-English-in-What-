@@ -41,6 +41,10 @@
     </div>
     <div class="hud-right">
       <div class="speeds" id="time-dial"><!-- built by buildTimeDial() --></div>
+      <button class="icon-btn" id="btn-scripture"
+              title="What is written comes to pass, or is only told (J)">✝</button>
+      <button class="icon-btn" id="btn-imagery"
+              title="Ground: real NASA imagery, the daily mosaic, or the world as imagined (I)">🛰</button>
       <button class="icon-btn" id="btn-labels" title="Toggle town labels (L)">🏷</button>
       <button class="icon-btn" id="btn-sound" title="Sound on/off">🔊</button>
       <button class="icon-btn" id="btn-save" title="Save now">💾</button>
@@ -257,8 +261,18 @@
 <script src="js/util.js"></script>
 <script src="js/codec.js"></script>
 <script src="js/world.js"></script>
+<!-- the real shape of the Earth (generated; see tools/build-earth.js) and the
+     module that turns it into a world. After world.js because earth.js uses
+     PD.World, before cosmos.js because the earth planet type needs it. -->
+<script src="js/earthdata.js"></script>
+<script src="js/earth.js"></script>
+<script src="js/historydata.js"></script>
+<script src="js/history.js"></script>
 <script src="js/sim.js"></script>
 <script src="js/render.js"></script>
+<script src="js/tiles.js"></script>
+<script src="js/lod.js"></script>
+<script src="js/buildings.js"></script>
 <script src="js/render3d.js"></script>
 <script src="js/society.js"></script>
 <script src="js/afterlife.js"></script>
